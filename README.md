@@ -1,96 +1,63 @@
-# catalyst-crank
+# ARM
 
-A Pinocchio `no_std` Solana program that reads [Solana Subscriptions Program](https://github.com/solana-foundation/subscriptions) account state and emits lifecycle events via Anchor-compatible self-CPI.
+Protocol-neutral authorization representation for Velon. This repository was renamed
+from catalyst-crank; the former Solana program remains in Git history, not in ARM.
 
-Program ID: `4QHqY9xtVyGmHVM9h5DD1i4zXQR7KabgahyQsY8eCV1o`
+ARM describes meaning. It has no RPC, native account layouts, program IDs, instruction
+builders, database, or protocol client dependency. Catalyst interprets native evidence;
+Cataloger decides whether that deployment/version is supported.
 
-Devnet. Unaudited.
+## Schema 0.1
 
-## Instructions
+An Authorization associates a subject, principal, resource and capability with boolean
+constraints, usage, lifecycle, delegability, authority kind, enforcement, observability,
+evidence and native provenance. One record describes one capability. Identity and
+resource namespaces are opaque to ARM and must be scoped consistently by adapters.
+Adapters supply deterministic source-scoped IDs: observation time, amount and mutable
+state must not change an authorization ID. ARM does not hash guessed identity fields.
 
-| Disc | Instruction | Condition | Emits |
-|---|---|---|---|
-| 0 | `advance_period` | `now > current_period_start_ts + period_length` | `PeriodAdvancedEvent` |
-| 1 | `mark_expired` | `now > expires_at_ts` on a cancelled subscription | `SubscriptionExpiredEvent` |
-| 228 | | self-CPI callback | no-op |
+PermissionIntent is a requested permission, AuthorizationGrant records the grantor,
+EffectiveAuthorization records evaluation, and AuthorizationChange retains before/after
+meaning. There is no state-to-intent conversion.
 
-Both are permissionless and read-only. Neither writes to the Foundation's accounts.
+JSON uses snake_case enums and explicit kind tags. Boolean structure and vector order
+are preserved. Unknown fields and variants fail deserialization; unsupported schema
+versions fail `Authorization::validate`. Deserialize, then validate before accepting
+state. All public evaluation methods validate. Native versions remain opaque;
+Cataloger and adapters must fail closed before producing an Authorization.
 
-Accounts, in order: the `SubscriptionDelegation` being read, the event authority PDA, the program itself.
+Amounts are u64 integer base units. JSON consumers must parse these integers losslessly;
+a JavaScript Number cannot represent the full range. Time uses signed Unix seconds;
+lifecycle intervals are half-open. An adapter must translate native inclusive expiry
+explicitly, and return unsupported if exact translation is impossible.
 
-## Design decisions
+`availability_at` and `effective_at` evaluate lifecycle and observed usage. Conditional
+means lifecycle permits further checking, never that a transaction is authorized.
+Constraints still require native evaluation. Unknown observation/parent state stays
+unknown; recurring allowances never reset merely because the clock advanced.
+Evidence references and observation positions are opaque identifiers resolved by the
+runtime; Exact requires a reference but ARM cannot verify its contents or freshness.
 
-**Read by offset, not by mirrored struct.**
+`is_proven_subset_of` proves a conservative subset of boolean implications. False means
+unproven. Empty All is true, empty Any is false. Negation is retained but only structural
+equality is proved. `is_proven_attenuation_of` requires equal principal, resource, usage,
+lifecycle, authority kind, delegability, enforcement and native context, then checks
+constraint implication. It is not a delegation-chain validator or an intent compiler.
 
-`SubscriptionDelegation` is read as raw bytes at named offsets rather than by declaring a matching `repr(C, packed)` struct.
+## Verification
 
-```
-Header       107 bytes   discriminator, version, bump, delegator, delegatee, payer, init_id
-PlanTerms     24 bytes   amount, period_hours, created_at
-own fields    24 bytes   amount_pulled_in_period, current_period_start_ts, expires_at_ts
-                 155     matches SUBSCRIPTION_DELEGATION_LEN_V1
-```
-
-Only three fields are read:
-
-```rust
-PERIOD_HOURS_OFFSET            = 115
-CURRENT_PERIOD_START_TS_OFFSET = 139
-EXPIRES_AT_TS_OFFSET           = 147
-```
-
-A mirrored struct breaks silently if a field is inserted mid-layout. Every offset after it shifts, nothing fails to compile, and reads return plausible garbage. Three named offsets only break if those specific fields move. The Foundation exports offset constants for the `Header` portion themselves.
-
-**Owner check before reading.**
-
-The account is verified as owned by `De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44` before any offset is read. Without it the program reads any 155-byte account and emits events about whatever it finds.
-
-**Fixed-size event payloads.**
-
-Events are a 32-byte address plus an 8-byte timestamp, known at compile time. `[u8; N]` instead of `alloc::vec::Vec` means no allocator and no heap.
-
-**Same event tag as the Foundation.**
-
-`EVENT_IX_TAG` is `0x1d9acb512ea545e4`, `Sha256("anchor:event")[..8]`, identical to theirs. Indexers filter by program ID first; the tag only marks an inner instruction as an event rather than a real call. A different tag would break existing decoders for no benefit.
-
-**The 228 no-op.**
-
-The tag's first little-endian byte is `0xe4`, which is 228. Emitting an event CPIs into the program itself, so the call arrives back at the entrypoint with discriminator 228. Without a no-op branch, every emission fails `InvalidInstructionData` and reverts the transaction.
-
-```rust
-match *discriminator {
-    0 => advance_period::process(accounts),
-    1 => mark_expired::process(accounts),
-    EMIT_EVENT_IX_DISC => Ok(()),
-    _ => Err(ProgramError::InvalidInstructionData),
-}
+```sh
+cargo fmt --check
+cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo test --locked --workspace
+git diff --check
 ```
 
-**Borrow scoped before CPI.**
+Ten canonical JSON fixtures cover direct, recurring, session, administrative, expired,
+revoked, attenuated, derived, one-shot and composed boolean authority. Tests also cover
+arithmetic boundaries, unknown evidence/schema, malformed lineage, serialization and
+implication soundness. The fixture protocol is synthetic ARM language; native protocol
+translation and control round trips belong to the next milestones.
 
-Account data borrows drop before `emit_event` runs. Holding a borrow across a CPI is rejected at runtime.
-
-**`nostd_panic_handler`, not the default.**
-
-`entrypoint!` expands `default_panic_handler!`, which assumes `std`. A `no_std` program needs `nostd_panic_handler!()` declared separately or the BPF build fails with a missing `#[panic_handler]`.
-
-**`advance_period` rejects cancelled, `mark_expired` requires it.**
-
-`expires_at_ts` is zero while active and set on cancellation. A cancelled subscription shouldn't have its period advanced; an active one cannot expire.
-
-## Build
-
-```bash
-cargo build-sbf   # target/deploy/catalyst_crank.so, ~6.2K
-cargo test
-```
-
-The SBF toolchain ships its own Cargo that cannot parse v4 lockfiles.
-
-`#![cfg_attr(not(test), no_std)]` keeps `std` available in tests for `Vec` while the program stays `no_std`.
-
-## Scope
-
-Observes and emits. Does not CPI into `transfer_subscription`, does not move funds, has no reward mechanism.
-
-Tests run against constructed byte buffers. Offsets are verified against the Foundation's compile-time length assertion, not against dumped accounts.
+Schema refinements require a real supported protocol fixture demonstrating a general
+semantic gap. Source study and limits are recorded in docs/research/SOURCE_LEDGER.md.

@@ -1,0 +1,587 @@
+[
+  {
+    "name": "direct",
+    "at": 100,
+    "expected": "conditional",
+    "authorization": {
+      "schema_version": "0.1",
+      "id": "fixture:direct",
+      "subject": {
+        "kind": "identity",
+        "value": "owner"
+      },
+      "principal": {
+        "kind": "identity",
+        "value": "actor"
+      },
+      "resource": {
+        "namespace": "asset-account",
+        "id": "account"
+      },
+      "capability": "spend",
+      "constraints": {
+        "kind": "true"
+      },
+      "usage": {
+        "kind": "unlimited"
+      },
+      "lifecycle": {
+        "kind": "active",
+        "valid_from": null,
+        "valid_until": null
+      },
+      "delegability": "none",
+      "authority_kind": {
+        "kind": "direct"
+      },
+      "enforcement": "native",
+      "observability": "exact",
+      "evidence": {
+        "references": [
+          "fixture:state"
+        ],
+        "observed_at": "fixture:observation:1"
+      },
+      "native_context": {
+        "protocol": "fixture",
+        "deployment": "local",
+        "program_version": "1",
+        "adapter_version": "1"
+      }
+    }
+  },
+  {
+    "name": "recurring",
+    "at": 100,
+    "expected": "conditional",
+    "authorization": {
+      "schema_version": "0.1",
+      "id": "fixture:recurring",
+      "subject": {
+        "kind": "identity",
+        "value": "owner"
+      },
+      "principal": {
+        "kind": "identity",
+        "value": "actor"
+      },
+      "resource": {
+        "namespace": "asset-account",
+        "id": "account"
+      },
+      "capability": "spend",
+      "constraints": {
+        "kind": "constraint",
+        "value": {
+          "kind": "amount_at_most",
+          "asset": {
+            "namespace": "asset",
+            "id": "coin"
+          },
+          "amount": 25
+        }
+      },
+      "usage": {
+        "kind": "recurring",
+        "period_seconds": 60,
+        "anchor_unix_seconds": 0,
+        "observed_period_start": 60,
+        "remaining": 25
+      },
+      "lifecycle": {
+        "kind": "active",
+        "valid_from": null,
+        "valid_until": null
+      },
+      "delegability": "none",
+      "authority_kind": {
+        "kind": "direct"
+      },
+      "enforcement": "native",
+      "observability": "exact",
+      "evidence": {
+        "references": [
+          "fixture:state"
+        ],
+        "observed_at": "fixture:observation:1"
+      },
+      "native_context": {
+        "protocol": "fixture",
+        "deployment": "local",
+        "program_version": "1",
+        "adapter_version": "1"
+      }
+    }
+  },
+  {
+    "name": "session",
+    "at": 100,
+    "expected": "conditional",
+    "authorization": {
+      "schema_version": "0.1",
+      "id": "fixture:session",
+      "subject": {
+        "kind": "identity",
+        "value": "owner"
+      },
+      "principal": {
+        "kind": "identity",
+        "value": "actor"
+      },
+      "resource": {
+        "namespace": "asset-account",
+        "id": "account"
+      },
+      "capability": "execute",
+      "constraints": {
+        "kind": "all",
+        "value": [
+          {
+            "kind": "constraint",
+            "value": {
+              "kind": "allowed_program",
+              "program": {
+                "namespace": "program",
+                "id": "exchange"
+              }
+            }
+          },
+          {
+            "kind": "constraint",
+            "value": {
+              "kind": "before",
+              "unix_seconds": 200
+            }
+          }
+        ]
+      },
+      "usage": {
+        "kind": "unlimited"
+      },
+      "lifecycle": {
+        "kind": "active",
+        "valid_from": 50,
+        "valid_until": 200
+      },
+      "delegability": "none",
+      "authority_kind": {
+        "kind": "direct"
+      },
+      "enforcement": "native",
+      "observability": "exact",
+      "evidence": {
+        "references": [
+          "fixture:state"
+        ],
+        "observed_at": "fixture:observation:1"
+      },
+      "native_context": {
+        "protocol": "fixture",
+        "deployment": "local",
+        "program_version": "1",
+        "adapter_version": "1"
+      }
+    }
+  },
+  {
+    "name": "administrative",
+    "at": 100,
+    "expected": "conditional",
+    "authorization": {
+      "schema_version": "0.1",
+      "id": "fixture:administrative",
+      "subject": {
+        "kind": "identity",
+        "value": "owner"
+      },
+      "principal": {
+        "kind": "identity",
+        "value": "actor"
+      },
+      "resource": {
+        "namespace": "asset-account",
+        "id": "account"
+      },
+      "capability": "modify_authority",
+      "constraints": {
+        "kind": "true"
+      },
+      "usage": {
+        "kind": "unlimited"
+      },
+      "lifecycle": {
+        "kind": "active",
+        "valid_from": null,
+        "valid_until": null
+      },
+      "delegability": "none",
+      "authority_kind": {
+        "kind": "administrative"
+      },
+      "enforcement": "native",
+      "observability": "exact",
+      "evidence": {
+        "references": [
+          "fixture:state"
+        ],
+        "observed_at": "fixture:observation:1"
+      },
+      "native_context": {
+        "protocol": "fixture",
+        "deployment": "local",
+        "program_version": "1",
+        "adapter_version": "1"
+      }
+    }
+  },
+  {
+    "name": "expired",
+    "at": 100,
+    "expected": "inactive",
+    "authorization": {
+      "schema_version": "0.1",
+      "id": "fixture:expired",
+      "subject": {
+        "kind": "identity",
+        "value": "owner"
+      },
+      "principal": {
+        "kind": "identity",
+        "value": "actor"
+      },
+      "resource": {
+        "namespace": "asset-account",
+        "id": "account"
+      },
+      "capability": "spend",
+      "constraints": {
+        "kind": "true"
+      },
+      "usage": {
+        "kind": "unlimited"
+      },
+      "lifecycle": {
+        "kind": "active",
+        "valid_from": 0,
+        "valid_until": 100
+      },
+      "delegability": "none",
+      "authority_kind": {
+        "kind": "direct"
+      },
+      "enforcement": "native",
+      "observability": "exact",
+      "evidence": {
+        "references": [
+          "fixture:state"
+        ],
+        "observed_at": "fixture:observation:1"
+      },
+      "native_context": {
+        "protocol": "fixture",
+        "deployment": "local",
+        "program_version": "1",
+        "adapter_version": "1"
+      }
+    }
+  },
+  {
+    "name": "revoked",
+    "at": 100,
+    "expected": "inactive",
+    "authorization": {
+      "schema_version": "0.1",
+      "id": "fixture:revoked",
+      "subject": {
+        "kind": "identity",
+        "value": "owner"
+      },
+      "principal": {
+        "kind": "identity",
+        "value": "actor"
+      },
+      "resource": {
+        "namespace": "asset-account",
+        "id": "account"
+      },
+      "capability": "spend",
+      "constraints": {
+        "kind": "true"
+      },
+      "usage": {
+        "kind": "unlimited"
+      },
+      "lifecycle": {
+        "kind": "revoked"
+      },
+      "delegability": "none",
+      "authority_kind": {
+        "kind": "direct"
+      },
+      "enforcement": "native",
+      "observability": "exact",
+      "evidence": {
+        "references": [
+          "fixture:state"
+        ],
+        "observed_at": "fixture:observation:1"
+      },
+      "native_context": {
+        "protocol": "fixture",
+        "deployment": "local",
+        "program_version": "1",
+        "adapter_version": "1"
+      }
+    }
+  },
+  {
+    "name": "attenuated",
+    "at": 100,
+    "expected": "conditional",
+    "authorization": {
+      "schema_version": "0.1",
+      "id": "fixture:attenuated",
+      "subject": {
+        "kind": "identity",
+        "value": "owner"
+      },
+      "principal": {
+        "kind": "identity",
+        "value": "actor"
+      },
+      "resource": {
+        "namespace": "asset-account",
+        "id": "account"
+      },
+      "capability": "spend",
+      "constraints": {
+        "kind": "constraint",
+        "value": {
+          "kind": "amount_at_most",
+          "asset": {
+            "namespace": "asset",
+            "id": "coin"
+          },
+          "amount": 10
+        }
+      },
+      "usage": {
+        "kind": "unlimited"
+      },
+      "lifecycle": {
+        "kind": "active",
+        "valid_from": null,
+        "valid_until": null
+      },
+      "delegability": "attenuated",
+      "authority_kind": {
+        "kind": "direct"
+      },
+      "enforcement": "native",
+      "observability": "exact",
+      "evidence": {
+        "references": [
+          "fixture:state"
+        ],
+        "observed_at": "fixture:observation:1"
+      },
+      "native_context": {
+        "protocol": "fixture",
+        "deployment": "local",
+        "program_version": "1",
+        "adapter_version": "1"
+      }
+    }
+  },
+  {
+    "name": "derived",
+    "at": 100,
+    "expected": "unknown",
+    "authorization": {
+      "schema_version": "0.1",
+      "id": "fixture:derived",
+      "subject": {
+        "kind": "identity",
+        "value": "owner"
+      },
+      "principal": {
+        "kind": "identity",
+        "value": "actor"
+      },
+      "resource": {
+        "namespace": "asset-account",
+        "id": "account"
+      },
+      "capability": "spend",
+      "constraints": {
+        "kind": "true"
+      },
+      "usage": {
+        "kind": "unlimited"
+      },
+      "lifecycle": {
+        "kind": "active",
+        "valid_from": null,
+        "valid_until": null
+      },
+      "delegability": "none",
+      "authority_kind": {
+        "kind": "derived",
+        "parents": [
+          "fixture:direct"
+        ]
+      },
+      "enforcement": "native",
+      "observability": "exact",
+      "evidence": {
+        "references": [
+          "fixture:state"
+        ],
+        "observed_at": "fixture:observation:1"
+      },
+      "native_context": {
+        "protocol": "fixture",
+        "deployment": "local",
+        "program_version": "1",
+        "adapter_version": "1"
+      }
+    }
+  },
+  {
+    "name": "one-shot",
+    "at": 100,
+    "expected": "inactive",
+    "authorization": {
+      "schema_version": "0.1",
+      "id": "fixture:one-shot",
+      "subject": {
+        "kind": "identity",
+        "value": "owner"
+      },
+      "principal": {
+        "kind": "identity",
+        "value": "actor"
+      },
+      "resource": {
+        "namespace": "asset-account",
+        "id": "account"
+      },
+      "capability": "spend",
+      "constraints": {
+        "kind": "true"
+      },
+      "usage": {
+        "kind": "one_shot",
+        "consumed": true
+      },
+      "lifecycle": {
+        "kind": "active",
+        "valid_from": null,
+        "valid_until": null
+      },
+      "delegability": "none",
+      "authority_kind": {
+        "kind": "direct"
+      },
+      "enforcement": "native",
+      "observability": "exact",
+      "evidence": {
+        "references": [
+          "fixture:state"
+        ],
+        "observed_at": "fixture:observation:1"
+      },
+      "native_context": {
+        "protocol": "fixture",
+        "deployment": "local",
+        "program_version": "1",
+        "adapter_version": "1"
+      }
+    }
+  },
+  {
+    "name": "boolean",
+    "at": 100,
+    "expected": "conditional",
+    "authorization": {
+      "schema_version": "0.1",
+      "id": "fixture:boolean",
+      "subject": {
+        "kind": "identity",
+        "value": "owner"
+      },
+      "principal": {
+        "kind": "identity",
+        "value": "actor"
+      },
+      "resource": {
+        "namespace": "asset-account",
+        "id": "account"
+      },
+      "capability": "spend",
+      "constraints": {
+        "kind": "any",
+        "value": [
+          {
+            "kind": "all",
+            "value": [
+              {
+                "kind": "constraint",
+                "value": {
+                  "kind": "before",
+                  "unix_seconds": 200
+                }
+              },
+              {
+                "kind": "not",
+                "value": {
+                  "kind": "constraint",
+                  "value": {
+                    "kind": "recipient",
+                    "principal": {
+                      "kind": "identity",
+                      "value": "excluded"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "kind": "constraint",
+            "value": {
+              "kind": "not_before",
+              "unix_seconds": 300
+            }
+          }
+        ]
+      },
+      "usage": {
+        "kind": "unlimited"
+      },
+      "lifecycle": {
+        "kind": "active",
+        "valid_from": null,
+        "valid_until": null
+      },
+      "delegability": "none",
+      "authority_kind": {
+        "kind": "direct"
+      },
+      "enforcement": "native",
+      "observability": "exact",
+      "evidence": {
+        "references": [
+          "fixture:state"
+        ],
+        "observed_at": "fixture:observation:1"
+      },
+      "native_context": {
+        "protocol": "fixture",
+        "deployment": "local",
+        "program_version": "1",
+        "adapter_version": "1"
+      }
+    }
+  }
+]
