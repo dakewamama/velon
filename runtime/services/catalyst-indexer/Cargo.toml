@@ -1,0 +1,48 @@
+[package]
+name = "catalyst-indexer"
+version = "0.2.0"
+edition = "2024"
+default-run = "catalyst-indexer"
+
+[[bin]]
+name = "catalyst-indexer"
+path = "src/main.rs"
+
+[dependencies]
+cataloger = { path = "../../crates/cataloger" }
+catalyst-sdk = { git = "https://github.com/dakewamama/catalyst-sdk", rev = "54ed06aa3a7c8a31268dface42d0bf27ca4adaee" }
+arm = { git = "https://github.com/dakewamama/arm", rev = "3b91100314473b616b5fd6f77214c6b6282a1dfb" }
+solana-account = { version = "=4.3.1", features = ["serde"] }
+solana-pubkey = { version = "=4.2.0", features = ["serde"] }
+solana-program-pack = "=3.1.0"
+spl-token-interface = "=3.0.0"
+bincode = "1.3"
+base64 = "=0.22.1"
+solana-clock = { version = "=4.0.0", features = ["serde"] }
+solana-compute-budget-interface = "=3.0.0"
+solana-sdk-ids = "=3.1.0"
+solana-loader-v3-interface = { version = "=7.0.0", features = ["serde"] }
+solana-rpc-client = { version = "=4.2.2", default-features = false, features = ["agave-unstable-api"] }
+solana-rpc-client-api = "=4.2.2"
+solana-account-decoder-client-types = { version = "=4.2.2", features = ["agave-unstable-api"] }
+solana-commitment-config = "=3.1.1"
+solana-transaction = { version = "=4.1.6", features = ["serde", "wincode", "verify"] }
+solana-transaction-status-client-types = { version = "=4.2.2", features = ["agave-unstable-api"] }
+sha2 = "0.10"
+agave-syscalls = { version = "=3.1.10", features = ["agave-unstable-api"] }
+solana-program-runtime = { version = "=3.1.10", features = ["agave-unstable-api"] }
+solana-svm-feature-set = { version = "=3.1.10", features = ["agave-unstable-api"] }
+axum = { version = "0.7", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bs58 = "0.5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
+tower = { version = "0.4", features = ["util"] }
+dotenvy = "0.15"
+
+[dev-dependencies]
+solana-keypair = "=3.1.2"
+solana-signer = "=3.0.1"

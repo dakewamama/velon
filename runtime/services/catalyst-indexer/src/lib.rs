@@ -1,0 +1,800 @@
+use arm::{
+    AuthorityKind, Authorization, EffectiveAuthorization, EvidenceBundle, NativeContext, Principal,
+    Subject,
+};
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    http::StatusCode,
+    routing::get,
+};
+use cataloger::{Catalog, ProgramVersion};
+use catalyst_sdk::{self as sdk, Adapter, Context, spl, subscriptions};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use solana_account::Account;
+use solana_program_pack::Pack;
+use solana_pubkey::Pubkey;
+use solana_rpc_client_api::response::{Response, RpcSimulateTransactionResult};
+use spl_token_interface::state::Account as TokenAccount;
+use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
+use std::{
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
+    str::FromStr,
+    time::Duration,
+};
+
+pub mod rpc;
+
+pub const SDK_REVISION: &str = "54ed06aa3a7c8a31268dface42d0bf27ca4adaee";
+pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Origin {
+    Fixture,
+    Finalized,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Observation {
+    pub cluster: String,
+    pub bank: String,
+    pub slot: u64,
+    pub unix_timestamp: i64,
+    pub origin: Origin,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Target {
+    SplDelegate {
+        source: Pubkey,
+    },
+    Subscription {
+        delegation: Pubkey,
+        authority: Pubkey,
+        source: Pubkey,
+        mint: Pubkey,
+        plan: Option<Pubkey>,
+    },
+}
+
+impl Target {
+    fn key(&self) -> String {
+        match self {
+            Self::SplDelegate { source } => format!("spl:{source}"),
+            Self::Subscription { delegation, .. } => format!("subscription:{delegation}"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Snapshot {
+    pub observation: Observation,
+    pub accounts: Vec<(Pubkey, Account)>,
+    pub targets: Vec<Target>,
+}
+
+impl Snapshot {
+    pub fn scope_id(&self) -> Result<String, Error> {
+        let mut targets: Vec<_> = self.targets.iter().map(Target::key).collect();
+        targets.sort();
+        Ok(format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&(
+                "catalyst-indexer:scope:0.1",
+                &self.observation.cluster,
+                &self.observation.origin,
+                targets,
+            ))?)
+        ))
+    }
+
+    fn normalize(&mut self) -> Result<(), Error> {
+        if self.observation.cluster.is_empty()
+            || self.observation.bank.is_empty()
+            || self.accounts.is_empty()
+            || self.targets.is_empty()
+        {
+            return Err(Error::InvalidSnapshot);
+        }
+        self.accounts.sort_by_key(|(key, _)| *key);
+        self.targets.sort_by_key(Target::key);
+        if self.accounts.windows(2).any(|pair| pair[0].0 == pair[1].0)
+            || self
+                .targets
+                .windows(2)
+                .any(|pair| pair[0].key() == pair[1].key())
+        {
+            return Err(Error::InvalidSnapshot);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Projection<A = Authorization> {
+    Compiled { authorizations: Vec<A> },
+    Unsupported { reason: String },
+    Incomplete { reason: String },
+    Invalid { reason: String },
+}
+
+impl From<sdk::Error> for Projection {
+    fn from(error: sdk::Error) -> Self {
+        let reason = error.to_string();
+        match error {
+            sdk::Error::UnsupportedVersion | sdk::Error::UnsupportedOperation => {
+                Self::Unsupported { reason }
+            }
+            sdk::Error::InsufficientEvidence => Self::Incomplete { reason },
+            sdk::Error::InvalidState(_)
+            | sdk::Error::InvalidProjection
+            | sdk::Error::DiffMismatch => Self::Invalid { reason },
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Record {
+    pub id: String,
+    pub coverage_complete: bool,
+    pub snapshot: Snapshot,
+    pub versions: Vec<ProgramVersion>,
+    pub projection: Projection,
+    pub runtime_version: String,
+    pub sdk_revision: String,
+}
+
+fn context(
+    program_id: Pubkey,
+    snapshot: &Snapshot,
+    catalog: &Catalog,
+    id: &str,
+    versions: &mut Vec<ProgramVersion>,
+) -> Result<Context, sdk::Error> {
+    let observed = &snapshot.observation;
+    let record = catalog
+        .resolve(&observed.cluster, &program_id, observed.slot, None)
+        .map_err(|_| sdk::Error::UnsupportedVersion)?;
+    if !versions.contains(record) {
+        versions.push(record.clone());
+    }
+    // Fixture identities cannot substitute for an observed live deployment.
+    if observed.origin == Origin::Finalized && record.deployment.starts_with("fixture:") {
+        return Err(sdk::Error::UnsupportedVersion);
+    }
+    if observed.origin == Origin::Finalized {
+        rpc::verify_program(snapshot, record)?;
+    }
+    Ok(Context {
+        program_id,
+        native: NativeContext {
+            protocol: record.adapter.protocol.clone(),
+            deployment: record.deployment.clone(),
+            program_version: record.version.clone(),
+            adapter_version: record.adapter.version.clone(),
+        },
+        evidence: EvidenceBundle {
+            references: vec![
+                format!("journal:sha256:{id}"),
+                record.provenance.evidence_reference.clone(),
+                format!("catalyst-sdk:git:{SDK_REVISION}"),
+            ],
+            observed_at: format!("{}:{}:{}", observed.cluster, observed.bank, observed.slot),
+        },
+    })
+}
+
+fn spl_state(snapshot: &Snapshot, source: Pubkey) -> Result<spl::State, sdk::Error> {
+    let account = |key| {
+        snapshot
+            .accounts
+            .iter()
+            .find(|(address, _)| *address == key)
+            .map(|(_, account)| account.clone())
+            .ok_or(sdk::Error::InsufficientEvidence)
+    };
+    let mut state = spl::State {
+        address: source,
+        account: account(source)?,
+        owner: Account::default(),
+        delegate: Account::default(),
+    };
+    if state.account.owner == spl::DelegateAdapter.protocol().program_id
+        && !state.account.executable
+    {
+        let native = TokenAccount::unpack(&state.account.data)
+            .map_err(|error| sdk::Error::InvalidState(error.to_string()))?;
+        state.owner = account(native.owner)?;
+        state.delegate = Option::<Pubkey>::from(native.delegate)
+            .map(account)
+            .transpose()?
+            .unwrap_or_default();
+    }
+    Ok(state)
+}
+
+fn compile(snapshot: &Snapshot, catalog: &Catalog, id: &str) -> (Vec<ProgramVersion>, Projection) {
+    let accounts: BTreeMap<_, _> = snapshot
+        .accounts
+        .iter()
+        .map(|(key, value)| (*key, value))
+        .collect();
+    let account = |key: Pubkey| {
+        accounts
+            .get(&key)
+            .map(|value| (*value).clone())
+            .ok_or(sdk::Error::InsufficientEvidence)
+    };
+    let mut versions = Vec::new();
+    let result = (|| {
+        let mut authorizations = BTreeMap::new();
+        for target in &snapshot.targets {
+            let compiled = match target {
+                Target::SplDelegate { source } => {
+                    let adapter = spl::DelegateAdapter;
+                    let context = context(
+                        adapter.protocol().program_id,
+                        snapshot,
+                        catalog,
+                        id,
+                        &mut versions,
+                    )?;
+                    if !adapter.supports(&context.native) {
+                        return Err(sdk::Error::UnsupportedVersion);
+                    }
+                    let state = spl_state(snapshot, *source)?;
+                    sdk::compile_state(&adapter, &state, &context)?
+                }
+                Target::Subscription {
+                    delegation,
+                    authority,
+                    source,
+                    mint,
+                    plan,
+                } => {
+                    let adapter = subscriptions::DelegationAdapter;
+                    let grant_context = context(
+                        adapter.protocol().program_id,
+                        snapshot,
+                        catalog,
+                        id,
+                        &mut versions,
+                    );
+                    let token_adapter = spl::DelegateAdapter;
+                    let token_context = context(
+                        token_adapter.protocol().program_id,
+                        snapshot,
+                        catalog,
+                        id,
+                        &mut versions,
+                    );
+                    if [&grant_context, &token_context]
+                        .iter()
+                        .any(|result| matches!(result, Err(sdk::Error::UnsupportedVersion)))
+                    {
+                        return Err(sdk::Error::UnsupportedVersion);
+                    }
+                    let grant_context = grant_context?;
+                    let token_context = token_context?;
+                    if !adapter.supports(&grant_context.native) {
+                        return Err(sdk::Error::UnsupportedVersion);
+                    }
+                    if !token_adapter.supports(&token_context.native) {
+                        return Err(sdk::Error::UnsupportedVersion);
+                    }
+                    let mut state = subscriptions::DelegationState {
+                        delegation: (*delegation, account(*delegation)?),
+                        authority: (*authority, account(*authority)?),
+                        source: spl::AuthorityState {
+                            address: *source,
+                            account: account(*source)?,
+                            authorities: Vec::new(),
+                        },
+                        mint: (*mint, account(*mint)?),
+                        plan: plan
+                            .map(|key| account(key).map(|value| (key, value)))
+                            .transpose()?,
+                        token_program_version: token_context.native.program_version,
+                        unix_timestamp: Some(snapshot.observation.unix_timestamp),
+                    };
+                    for required in adapter.source_requirements(&state).accounts {
+                        state
+                            .source
+                            .authorities
+                            .push((required, account(required)?));
+                    }
+                    sdk::compile_state(&adapter, &state, &grant_context)?
+                }
+            };
+            for authorization in compiled {
+                match authorizations.entry(authorization.id.clone()) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(authorization);
+                    }
+                    Entry::Occupied(entry) => {
+                        if entry.get() != &authorization {
+                            return Err(sdk::Error::InvalidProjection);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(authorizations.into_values().collect())
+    })();
+    versions.sort_by_key(|record| record.program_id);
+    let projection = match result {
+        Ok(authorizations) => Projection::Compiled { authorizations },
+        Err(error) => Projection::from(error),
+    };
+    (versions, projection)
+}
+
+#[derive(Debug)]
+pub enum Error {
+    Database(sqlx::Error),
+    Json(serde_json::Error),
+    InvalidSnapshot,
+    Conflict,
+    AmbiguousScope,
+    ReplayMismatch,
+    NotFound,
+    InvalidObservation(&'static str),
+    Adapter(sdk::Error),
+    SimulationFailed(Box<Response<RpcSimulateTransactionResult>>),
+    Rpc(Box<solana_rpc_client_api::client_error::Error>),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Database(error) => error.fmt(f),
+            Self::Json(error) => error.fmt(f),
+            Self::Rpc(error) => error.fmt(f),
+            Self::Adapter(error) => error.fmt(f),
+            Self::SimulationFailed(response) => {
+                write!(f, "native simulation failed: {:?}", response.value.err)
+            }
+            Self::InvalidObservation(reason) => write!(f, "Invalid observation: {reason}"),
+            _ => write!(f, "{self:?}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<sqlx::Error> for Error {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Database(error)
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Json(error)
+    }
+}
+
+impl From<sdk::Error> for Error {
+    fn from(error: sdk::Error) -> Self {
+        Self::Adapter(error)
+    }
+}
+
+impl From<solana_rpc_client_api::client_error::Error> for Error {
+    fn from(error: solana_rpc_client_api::client_error::Error) -> Self {
+        use solana_rpc_client_api::client_error::{Error as ClientError, ErrorKind};
+        let kind = match *error.kind {
+            ErrorKind::Reqwest(error) => ErrorKind::Reqwest(error.without_url()),
+            kind => kind,
+        };
+        Self::Rpc(Box::new(ClientError {
+            request: error.request,
+            kind: Box::new(kind),
+        }))
+    }
+}
+
+#[derive(Clone)]
+pub struct Journal {
+    database: SqlitePool,
+}
+
+impl Journal {
+    pub async fn open(url: &str) -> Result<Self, Error> {
+        let options = SqliteConnectOptions::from_str(url)?
+            .create_if_missing(true)
+            .busy_timeout(Duration::from_secs(5))
+            .pragma("journal_mode", "WAL")
+            .pragma("synchronous", "FULL");
+        let database = SqlitePool::connect_with(options).await?;
+        sqlx::migrate!("./migrations")
+            .run(&database)
+            .await
+            .map_err(sqlx::Error::from)?;
+        let journal = Self { database };
+        let pending: Vec<String> =
+            sqlx::query_scalar("SELECT id FROM authority_snapshots WHERE scope_id IS NULL")
+                .fetch_all(&journal.database)
+                .await?;
+        for id in pending {
+            let record = journal.get(&id).await?.ok_or(Error::ReplayMismatch)?;
+            let scope_id = record.snapshot.scope_id()?;
+            sqlx::query(
+                "UPDATE authority_snapshots SET scope_id = ?, observed_slot = ? WHERE id = ?",
+            )
+            .bind(&scope_id)
+            .bind(record.snapshot.observation.slot.to_be_bytes().to_vec())
+            .bind(&id)
+            .execute(&journal.database)
+            .await?;
+        }
+        Ok(journal)
+    }
+
+    pub async fn ingest(&self, mut snapshot: Snapshot, catalog: &Catalog) -> Result<Record, Error> {
+        snapshot.normalize()?;
+        let id = format!("{:x}", Sha256::digest(serde_json::to_vec(&snapshot)?));
+        let (versions, projection) = compile(&snapshot, catalog, &id);
+        let record = Record {
+            id,
+            coverage_complete: false,
+            snapshot,
+            versions,
+            projection,
+            runtime_version: RUNTIME_VERSION.into(),
+            sdk_revision: SDK_REVISION.into(),
+        };
+        let raw = serde_json::to_string(&record)?;
+        let scope_id = record.snapshot.scope_id()?;
+        let inserted = sqlx::query(
+            "INSERT INTO authority_snapshots (id, record, record_sha256, scope_id, observed_slot)
+             VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+        )
+        .bind(&record.id)
+        .bind(&raw)
+        .bind(format!("{:x}", Sha256::digest(raw.as_bytes())))
+        .bind(&scope_id)
+        .bind(record.snapshot.observation.slot.to_be_bytes().to_vec())
+        .execute(&self.database)
+        .await?
+        .rows_affected();
+        if inserted == 0 && self.get(&record.id).await?.as_ref() != Some(&record) {
+            return Err(Error::Conflict);
+        }
+        Ok(record)
+    }
+
+    pub async fn get(&self, id: &str) -> Result<Option<Record>, Error> {
+        let raw: Option<(String, String)> =
+            sqlx::query_as("SELECT record, record_sha256 FROM authority_snapshots WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&self.database)
+                .await?;
+        let Some((raw, checksum)) = raw else {
+            return Ok(None);
+        };
+        if format!("{:x}", Sha256::digest(raw.as_bytes())) != checksum {
+            return Err(Error::ReplayMismatch);
+        }
+        let record: Record = serde_json::from_str(&raw)?;
+        if record.id != id
+            || record.coverage_complete
+            || format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_vec(&record.snapshot)?)
+            ) != id
+        {
+            return Err(Error::ReplayMismatch);
+        }
+        Ok(Some(record))
+    }
+
+    pub async fn latest(&self, scope_id: &str) -> Result<Option<Record>, Error> {
+        let heads: Vec<(String, Vec<u8>)> = sqlx::query_as(
+            "SELECT id, observed_slot FROM authority_snapshots WHERE scope_id = ?
+             ORDER BY observed_slot DESC, id LIMIT 2",
+        )
+        .bind(scope_id)
+        .fetch_all(&self.database)
+        .await?;
+        let Some((_, slot)) = heads.first() else {
+            return Ok(None);
+        };
+        // Distinct observations at the same slot cannot be ordered by arrival.
+        let ambiguous = heads.get(1).is_some_and(|(_, previous)| previous == slot);
+        for (id, slot) in heads {
+            let record = self.get(&id).await?.ok_or(Error::ReplayMismatch)?;
+            if record.snapshot.scope_id()? != scope_id
+                || record.snapshot.observation.slot.to_be_bytes().as_slice() != slot.as_slice()
+                || record.runtime_version != RUNTIME_VERSION
+            {
+                return Err(Error::ReplayMismatch);
+            }
+            if !ambiguous {
+                return Ok(Some(record));
+            }
+        }
+        Err(Error::AmbiguousScope)
+    }
+
+    pub async fn replay(&self, id: &str) -> Result<Record, Error> {
+        let record = self.get(id).await?.ok_or(Error::NotFound)?;
+        let catalog = Catalog::new(record.versions.clone()).map_err(|_| Error::ReplayMismatch)?;
+        let (versions, projection) = compile(&record.snapshot, &catalog, id);
+        if record.sdk_revision != SDK_REVISION
+            || record.runtime_version != RUNTIME_VERSION
+            || record.versions != versions
+            || record.projection != projection
+        {
+            return Err(Error::ReplayMismatch);
+        }
+        Ok(record)
+    }
+}
+
+#[derive(Serialize)]
+pub struct Coverage {
+    pub complete: bool,
+    pub accounts: Vec<Pubkey>,
+    pub targets: Vec<Target>,
+}
+
+#[derive(Serialize)]
+pub struct AuthorizationView<A = Authorization> {
+    pub state_version: String,
+    pub observation: Observation,
+    pub coverage: Coverage,
+    pub versions: Vec<ProgramVersion>,
+    pub projection: Projection<A>,
+    pub runtime_version: String,
+    pub sdk_revision: String,
+    pub arm_schema_version: &'static str,
+}
+
+#[derive(Serialize)]
+struct GraphView {
+    #[serde(flatten)]
+    state: AuthorizationView<EffectiveAuthorization>,
+    unresolved_parents: Option<Vec<String>>,
+}
+
+fn principal_contains(principal: &Principal, address: &str) -> bool {
+    match principal {
+        Principal::Identity(identity) => identity == address,
+        Principal::AnyOf(principals) | Principal::AllOf(principals) => principals
+            .iter()
+            .any(|principal| principal_contains(principal, address)),
+    }
+}
+
+fn mentions(authorization: &Authorization, address: &str) -> bool {
+    principal_contains(&authorization.principal, address)
+        || authorization.resource.id == address
+        || match &authorization.subject {
+            Subject::Identity(identity) => identity == address,
+            Subject::Resource(resource) => resource.id == address,
+        }
+}
+
+async fn snapshot(
+    State(journal): State<Journal>,
+    Path(id): Path<String>,
+) -> Result<Json<Record>, StatusCode> {
+    journal
+        .get(&id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn authorizations(
+    State(journal): State<Journal>,
+    Path((id, address)): Path<(String, String)>,
+) -> Result<Json<AuthorizationView>, StatusCode> {
+    let address = address
+        .parse::<Pubkey>()
+        .map_err(|_| StatusCode::BAD_REQUEST)?
+        .to_string();
+    let record = journal
+        .get(&id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(authorization_view(record, Some(&address))))
+}
+
+fn authorization_view(record: Record, address: Option<&str>) -> AuthorizationView {
+    let projection = match record.projection {
+        Projection::Compiled { authorizations } => Projection::Compiled {
+            authorizations: authorizations
+                .into_iter()
+                .filter(|authorization| {
+                    address.is_none_or(|address| mentions(authorization, address))
+                })
+                .collect(),
+        },
+        projection => projection,
+    };
+    AuthorizationView {
+        state_version: record.id,
+        observation: record.snapshot.observation,
+        coverage: Coverage {
+            complete: false,
+            accounts: record
+                .snapshot
+                .accounts
+                .into_iter()
+                .map(|(key, _)| key)
+                .collect(),
+            targets: record.snapshot.targets,
+        },
+        versions: record.versions,
+        projection,
+        runtime_version: record.runtime_version,
+        sdk_revision: record.sdk_revision,
+        arm_schema_version: arm::SCHEMA_VERSION,
+    }
+}
+
+fn scope_error(error: Error) -> StatusCode {
+    match error {
+        Error::AmbiguousScope => StatusCode::CONFLICT,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
+async fn current_snapshot(
+    State(journal): State<Journal>,
+    Path(scope_id): Path<String>,
+) -> Result<Json<Record>, StatusCode> {
+    journal
+        .latest(&scope_id)
+        .await
+        .map_err(scope_error)?
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn current_authorizations(
+    State(journal): State<Journal>,
+    Path((scope_id, address)): Path<(String, String)>,
+) -> Result<Json<AuthorizationView>, StatusCode> {
+    let address = address
+        .parse::<Pubkey>()
+        .map_err(|_| StatusCode::BAD_REQUEST)?
+        .to_string();
+    let record = journal
+        .latest(&scope_id)
+        .await
+        .map_err(scope_error)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(authorization_view(record, Some(&address))))
+}
+
+async fn current_effective(
+    State(journal): State<Journal>,
+    Path((scope_id, address)): Path<(String, String)>,
+) -> Result<Json<AuthorizationView<EffectiveAuthorization>>, StatusCode> {
+    let Json(view) = current_authorizations(State(journal), Path((scope_id, address))).await?;
+    Ok(Json(effective_view(view)?))
+}
+
+fn effective_view(
+    view: AuthorizationView,
+) -> Result<AuthorizationView<EffectiveAuthorization>, StatusCode> {
+    let projection = match view.projection {
+        Projection::Compiled { authorizations } => Projection::Compiled {
+            authorizations: authorizations
+                .iter()
+                .map(|authorization| authorization.effective_at(view.observation.unix_timestamp))
+                .collect::<Result<_, _>>()
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+        },
+        Projection::Unsupported { reason } => Projection::Unsupported { reason },
+        Projection::Incomplete { reason } => Projection::Incomplete { reason },
+        Projection::Invalid { reason } => Projection::Invalid { reason },
+    };
+    Ok(AuthorizationView {
+        state_version: view.state_version,
+        observation: view.observation,
+        coverage: view.coverage,
+        versions: view.versions,
+        projection,
+        runtime_version: view.runtime_version,
+        sdk_revision: view.sdk_revision,
+        arm_schema_version: view.arm_schema_version,
+    })
+}
+
+async fn current_coverage(
+    State(journal): State<Journal>,
+    Path(scope_id): Path<String>,
+) -> Result<Json<AuthorizationView>, StatusCode> {
+    let Json(record) = current_snapshot(State(journal), Path(scope_id)).await?;
+    Ok(Json(authorization_view(record, None)))
+}
+
+async fn current_graph(
+    State(journal): State<Journal>,
+    Path((scope_id, address)): Path<(String, String)>,
+) -> Result<Json<GraphView>, StatusCode> {
+    let address = address
+        .parse::<Pubkey>()
+        .map_err(|_| StatusCode::BAD_REQUEST)?
+        .to_string();
+    let Json(view) = current_coverage(State(journal), Path(scope_id)).await?;
+    let mut state = effective_view(view)?;
+    let mut unresolved_parents = None;
+    if let Projection::Compiled { authorizations } = &mut state.projection {
+        let known: BTreeSet<_> = authorizations
+            .iter()
+            .map(|entry| entry.authorization.id.as_str())
+            .collect();
+        if known.len() != authorizations.len() {
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+        let mut selected: BTreeSet<_> = authorizations
+            .iter()
+            .filter(|entry| mentions(&entry.authorization, &address))
+            .map(|entry| entry.authorization.id.clone())
+            .collect();
+        loop {
+            let count = selected.len();
+            for entry in authorizations.iter() {
+                let authorization = &entry.authorization;
+                if let AuthorityKind::Derived { parents } = &authorization.authority_kind
+                    && (selected.contains(&authorization.id)
+                        || parents.iter().any(|parent| selected.contains(parent)))
+                {
+                    selected.insert(authorization.id.clone());
+                    selected.extend(parents.iter().cloned());
+                }
+            }
+            if count == selected.len() {
+                break;
+            }
+        }
+        unresolved_parents = Some(
+            selected
+                .iter()
+                .filter(|id| !known.contains(id.as_str()))
+                .cloned()
+                .collect(),
+        );
+        authorizations.retain(|entry| selected.contains(&entry.authorization.id));
+    }
+    Ok(Json(GraphView {
+        state,
+        unresolved_parents,
+    }))
+}
+
+pub fn router(journal: Journal) -> Router {
+    Router::new()
+        .route("/verifications/revoke/:id", get(rpc::retained_revoke))
+        .route("/snapshots/:id", get(snapshot))
+        .route(
+            "/snapshots/:id/authorizations/:address",
+            get(authorizations),
+        )
+        .route("/scopes/:scope_id", get(current_snapshot))
+        .route(
+            "/scopes/:scope_id/authorizations/:address",
+            get(current_authorizations),
+        )
+        .route(
+            "/scopes/:scope_id/effective/:address",
+            get(current_effective),
+        )
+        .route("/scopes/:scope_id/coverage", get(current_coverage))
+        .route("/scopes/:scope_id/graph/:address", get(current_graph))
+        .with_state(journal)
+}
