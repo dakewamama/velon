@@ -1,0 +1,4 @@
+.cataloger/
+node_modules/
+target/
+.data/
