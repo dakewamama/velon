@@ -1,0 +1,26 @@
+{
+  "name": "catalyst-sdk",
+  "version": "0.1.0",
+  "module": "index.ts",
+  "type": "module",
+  "description": "event decoder program",
+  "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "fixture:squads": "bun scripts/squads-fixture.ts"
+  },
+  "devDependencies": {
+    "@solana/rpc-types": "8.4.0",
+    "@types/bun": "latest",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@solana/addresses": "8.4.0",
+    "@solana/codecs-core": "8.4.0",
+    "@solana/keys": "8.4.0",
+    "@solana/rpc": "8.4.0",
+    "@solana/transaction-messages": "8.4.0",
+    "@solana/transactions": "8.4.0",
+    "bs58": "^6.0.0"
+  }
+}

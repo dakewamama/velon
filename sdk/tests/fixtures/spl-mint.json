@@ -1,0 +1,152 @@
+[
+  {
+    "schema_version": "0.1",
+    "id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA:CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8:mint",
+    "subject": {
+      "kind": "resource",
+      "value": {
+        "namespace": "solana:mint",
+        "id": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8"
+      }
+    },
+    "principal": {
+      "kind": "identity",
+      "value": "LbUiWL3xVV8hTFYBVdbTNrpDo41NKS6o3LHHuDzjfcY"
+    },
+    "resource": {
+      "namespace": "solana:mint",
+      "id": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8"
+    },
+    "capability": "mint",
+    "constraints": {
+      "kind": "true"
+    },
+    "usage": {
+      "kind": "unlimited"
+    },
+    "lifecycle": {
+      "kind": "active",
+      "valid_from": null,
+      "valid_until": null
+    },
+    "delegability": "unknown",
+    "authority_kind": {
+      "kind": "direct"
+    },
+    "enforcement": "native",
+    "observability": "exact",
+    "evidence": {
+      "references": [
+        "fixture:spl-mint.bin",
+        "fixture:spl-mint:authority-accounts"
+      ],
+      "observed_at": "fixture:slot:1"
+    },
+    "native_context": {
+      "protocol": "spl-token",
+      "deployment": "fixture:mollusk:token:0.15.1",
+      "program_version": "sha256:8190d3f7ceb6cb7a7a8d8924bff89f9f611e15ce1f806f2b6237f3311a98f697",
+      "adapter_version": "0.1"
+    }
+  },
+  {
+    "schema_version": "0.1",
+    "id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA:CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8:freeze",
+    "subject": {
+      "kind": "resource",
+      "value": {
+        "namespace": "solana:mint",
+        "id": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8"
+      }
+    },
+    "principal": {
+      "kind": "identity",
+      "value": "QWmroo4YnnMqYW3cnxWkFdaTxGD3P7vMSzwMHGbUzwF"
+    },
+    "resource": {
+      "namespace": "solana:mint-token-accounts",
+      "id": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8"
+    },
+    "capability": "freeze",
+    "constraints": {
+      "kind": "true"
+    },
+    "usage": {
+      "kind": "unlimited"
+    },
+    "lifecycle": {
+      "kind": "active",
+      "valid_from": null,
+      "valid_until": null
+    },
+    "delegability": "unknown",
+    "authority_kind": {
+      "kind": "direct"
+    },
+    "enforcement": "native",
+    "observability": "exact",
+    "evidence": {
+      "references": [
+        "fixture:spl-mint.bin",
+        "fixture:spl-mint:authority-accounts"
+      ],
+      "observed_at": "fixture:slot:1"
+    },
+    "native_context": {
+      "protocol": "spl-token",
+      "deployment": "fixture:mollusk:token:0.15.1",
+      "program_version": "sha256:8190d3f7ceb6cb7a7a8d8924bff89f9f611e15ce1f806f2b6237f3311a98f697",
+      "adapter_version": "0.1"
+    }
+  },
+  {
+    "schema_version": "0.1",
+    "id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA:CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8:thaw",
+    "subject": {
+      "kind": "resource",
+      "value": {
+        "namespace": "solana:mint",
+        "id": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8"
+      }
+    },
+    "principal": {
+      "kind": "identity",
+      "value": "QWmroo4YnnMqYW3cnxWkFdaTxGD3P7vMSzwMHGbUzwF"
+    },
+    "resource": {
+      "namespace": "solana:mint-token-accounts",
+      "id": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8"
+    },
+    "capability": "thaw",
+    "constraints": {
+      "kind": "true"
+    },
+    "usage": {
+      "kind": "unlimited"
+    },
+    "lifecycle": {
+      "kind": "active",
+      "valid_from": null,
+      "valid_until": null
+    },
+    "delegability": "unknown",
+    "authority_kind": {
+      "kind": "direct"
+    },
+    "enforcement": "native",
+    "observability": "exact",
+    "evidence": {
+      "references": [
+        "fixture:spl-mint.bin",
+        "fixture:spl-mint:authority-accounts"
+      ],
+      "observed_at": "fixture:slot:1"
+    },
+    "native_context": {
+      "protocol": "spl-token",
+      "deployment": "fixture:mollusk:token:0.15.1",
+      "program_version": "sha256:8190d3f7ceb6cb7a7a8d8924bff89f9f611e15ce1f806f2b6237f3311a98f697",
+      "adapter_version": "0.1"
+    }
+  }
+]

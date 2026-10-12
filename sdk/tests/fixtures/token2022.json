@@ -1,0 +1,110 @@
+[
+  {
+    "schema_version": "0.1",
+    "id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb:4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi:delegate:spend",
+    "subject": {
+      "kind": "identity",
+      "value": "GgBaCs3NCBuZN12kCJgAW63ydqohFkHEdfdEXBPzLHq"
+    },
+    "principal": {
+      "kind": "identity",
+      "value": "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR"
+    },
+    "resource": {
+      "namespace": "solana:token-account",
+      "id": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi"
+    },
+    "capability": "spend",
+    "constraints": {
+      "kind": "constraint",
+      "value": {
+        "kind": "amount_at_most",
+        "asset": {
+          "namespace": "solana:mint",
+          "id": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8"
+        },
+        "amount": 25
+      }
+    },
+    "usage": {
+      "kind": "cumulative",
+      "remaining": 25
+    },
+    "lifecycle": {
+      "kind": "active",
+      "valid_from": null,
+      "valid_until": null
+    },
+    "delegability": "unknown",
+    "authority_kind": {
+      "kind": "direct"
+    },
+    "enforcement": "native",
+    "observability": "exact",
+    "evidence": {
+      "references": [
+        "fixture:token2022-account.bin",
+        "fixture:token2022-mint.bin",
+        "fixture:token2022:authority-accounts"
+      ],
+      "observed_at": "fixture:slot:1"
+    },
+    "native_context": {
+      "protocol": "token-2022",
+      "deployment": "fixture:mollusk:token-2022:0.15.1",
+      "program_version": "sha256:b2a7ce1ea6dfbcbc5ccb0e7f48f7c61dced1a86582d1c7d2e059ac54ed612da4",
+      "adapter_version": "0.1"
+    }
+  },
+  {
+    "schema_version": "0.1",
+    "id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb:CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8:permanent-delegate:spend",
+    "subject": {
+      "kind": "resource",
+      "value": {
+        "namespace": "solana:mint",
+        "id": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8"
+      }
+    },
+    "principal": {
+      "kind": "identity",
+      "value": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx"
+    },
+    "resource": {
+      "namespace": "solana:mint-token-accounts",
+      "id": "CktRuQ2mttgRGkXJtyksdKHjUdc2C4TgDzyB98oEzy8"
+    },
+    "capability": "spend",
+    "constraints": {
+      "kind": "true"
+    },
+    "usage": {
+      "kind": "unlimited"
+    },
+    "lifecycle": {
+      "kind": "active",
+      "valid_from": null,
+      "valid_until": null
+    },
+    "delegability": "unknown",
+    "authority_kind": {
+      "kind": "direct"
+    },
+    "enforcement": "native",
+    "observability": "exact",
+    "evidence": {
+      "references": [
+        "fixture:token2022-account.bin",
+        "fixture:token2022-mint.bin",
+        "fixture:token2022:authority-accounts"
+      ],
+      "observed_at": "fixture:slot:1"
+    },
+    "native_context": {
+      "protocol": "token-2022",
+      "deployment": "fixture:mollusk:token-2022:0.15.1",
+      "program_version": "sha256:b2a7ce1ea6dfbcbc5ccb0e7f48f7c61dced1a86582d1c7d2e059ac54ed612da4",
+      "adapter_version": "0.1"
+    }
+  }
+]

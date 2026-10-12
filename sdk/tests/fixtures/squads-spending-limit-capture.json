@@ -1,0 +1,31 @@
+{
+  "rpc": "https://api.mainnet-beta.solana.com",
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "keys": [
+    "7Kw87tVLwZJZf9h8WfJWeZdKJZp363L4cqmwb3DMwj7a",
+    "J3AJkebyN7KmoLoms7X9vRbf73BYQzzdRV6svLyx4djH",
+    "7gPPaRZbBad5k8XjM7kfWyAKU2HJSKo2uGd5hz6dLi2o",
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "GoZRABXQPAegYE54BSXWcFe3CccoE2uNhuGrgv3776QM",
+    "8u7vvw4kfNkcuGtrrFJ1WuriT3bbKDquPRMrJivyua3E",
+    "662GsUd9qYK8D4gQdyVngzh8TdZPm9jahKxcFeS1VK5s",
+    "HHroB8P1q3kijtyML9WPvfTXG8JicfmUoGZjVzam64PX",
+    "fairAUEuR1SCcHL254Vb3F3XpUWLruJ2a11f6QfANEN",
+    "3ogXyF6ovq5SqsneuGY6gHLG27NK6gw13SqfXMwRBYai",
+    "SysvarC1ock11111111111111111111111111111111"
+  ],
+  "spending_limit": "7Kw87tVLwZJZf9h8WfJWeZdKJZp363L4cqmwb3DMwj7a",
+  "multisig": "J3AJkebyN7KmoLoms7X9vRbf73BYQzzdRV6svLyx4djH",
+  "vault": "7gPPaRZbBad5k8XjM7kfWyAKU2HJSKo2uGd5hz6dLi2o",
+  "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  "vault_token_account": "GoZRABXQPAegYE54BSXWcFe3CccoE2uNhuGrgv3776QM",
+  "destination": "8u7vvw4kfNkcuGtrrFJ1WuriT3bbKDquPRMrJivyua3E",
+  "destination_token_account": "662GsUd9qYK8D4gQdyVngzh8TdZPm9jahKxcFeS1VK5s",
+  "config_authority": "HHroB8P1q3kijtyML9WPvfTXG8JicfmUoGZjVzam64PX",
+  "members": [
+    "fairAUEuR1SCcHL254Vb3F3XpUWLruJ2a11f6QfANEN",
+    "3ogXyF6ovq5SqsneuGY6gHLG27NK6gw13SqfXMwRBYai",
+    "HHroB8P1q3kijtyML9WPvfTXG8JicfmUoGZjVzam64PX"
+  ],
+  "response_sha256": "66973fd70bceb5c0bda836283aaecdd3ef923d4bc41b3533d3e2ff9a6ed1bb25"
+}

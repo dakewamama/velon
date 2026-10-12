@@ -1,0 +1,53 @@
+[
+  {
+    "schema_version": "0.1",
+    "id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA:4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi:close",
+    "subject": {
+      "kind": "resource",
+      "value": {
+        "namespace": "solana:token-account",
+        "id": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi"
+      }
+    },
+    "principal": {
+      "kind": "identity",
+      "value": "US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx"
+    },
+    "resource": {
+      "namespace": "solana:token-account",
+      "id": "4vJ9JU1bJJE96FWSJKvHsmmFADCg4gpZQff4P3bkLKi"
+    },
+    "capability": "close",
+    "constraints": {
+      "kind": "true"
+    },
+    "usage": {
+      "kind": "one_shot",
+      "consumed": false
+    },
+    "lifecycle": {
+      "kind": "active",
+      "valid_from": null,
+      "valid_until": null
+    },
+    "delegability": "unknown",
+    "authority_kind": {
+      "kind": "direct"
+    },
+    "enforcement": "native",
+    "observability": "exact",
+    "evidence": {
+      "references": [
+        "fixture:spl-close.bin",
+        "fixture:spl-close:authority-accounts"
+      ],
+      "observed_at": "fixture:slot:1"
+    },
+    "native_context": {
+      "protocol": "spl-token",
+      "deployment": "fixture:mollusk:token:0.15.1",
+      "program_version": "sha256:8190d3f7ceb6cb7a7a8d8924bff89f9f611e15ce1f806f2b6237f3311a98f697",
+      "adapter_version": "0.1"
+    }
+  }
+]
