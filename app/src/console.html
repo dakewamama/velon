@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Velon console: observe, review and revoke permissions with native evidence."
+    />
+    <title>Velon Console</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%230c3b2e'/%3E%3Cpath d='M8.5 11.5 14.5 22 24 8.5' fill='none' stroke='%233fe0a5' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body class="console">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Velon home">
+        <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="9" />
+          <path d="M8.5 11.5 14.5 22 24 8.5" />
+        </svg>
+        Velon <span class="tag">Console</span>
+      </a>
+      <div class="header-links">
+        <button id="browse" class="link-button" type="button" aria-expanded="false">Browse accounts</button>
+        <span class="badge">Recorded native evidence</span>
+      </div>
+      <section class="wallet-panel" aria-label="Wallet connection">
+        <p id="wallet-status" class="address" role="status"></p>
+        <button id="connect-wallet" type="button">Connect wallet</button>
+        <button id="disconnect-wallet" class="link-button" type="button" hidden>Disconnect</button>
+      </section>
+    </header>
+    <main class="app" id="app">
+      <aside class="rail-panel">
+        <section class="live" id="live" aria-label="Accounts on the test chain" hidden>
+          <header>
+            <span class="pulse" aria-hidden="true"></span>
+            <strong>Test chain</strong>
+            <span class="badge">You can revoke these</span>
+          </header>
+          <p class="muted">
+            Token accounts with a delegate on a local Solana validator, listed as they change.
+          </p>
+          <div id="feed" class="feed"></div>
+          <button id="new-permission" class="ghost" type="button" hidden>Add a demo permission</button>
+        </section>
+        <section class="live" id="mainnet" aria-label="Recent delegations on public Solana" hidden>
+          <header>
+            <span class="pulse" aria-hidden="true"></span>
+            <strong>Public Solana</strong>
+            <span class="badge">Read only</span>
+          </header>
+          <div class="segmented" role="group" aria-label="Network">
+            <button type="button" data-net="devnet" class="selected">Devnet</button>
+            <button type="button" data-net="mainnet">Mainnet</button>
+          </div>
+          <p class="muted">The newest wallets that let another key spend their tokens, five at most.</p>
+          <div id="mainnet-feed" class="feed"></div>
+        </section>
+        <details class="search-panel">
+          <summary>Recorded examples</summary>
+          <p class="muted">Captured from real program runs, including subscriptions.</p>
+          <div class="source-row">
+            <label for="scenario">Example set</label>
+            <select id="scenario" disabled>
+              <option>Loading observations...</option>
+            </select>
+          </div>
+          <div class="examples" id="examples" aria-label="Example addresses"></div>
+          <p class="scope-note"></p>
+        </details>
+        <details class="search-panel" id="paste">
+          <summary>Paste an address</summary>
+          <form id="scan-form">
+            <label for="address">Wallet, token account or authority</label>
+            <div class="search-row">
+              <input
+                id="address"
+                name="address"
+                placeholder="Solana address"
+                autocomplete="off"
+                spellcheck="false"
+                required
+              /><button id="scan" type="submit" disabled>Scan</button>
+            </div>
+          </form>
+        </details>
+      </aside>
+      <div class="workspace">
+        <section class="stage" id="stage" aria-label="Your wallet and what can act on it">
+          <svg id="orbit" viewBox="0 0 1000 380" role="img" aria-label="Permissions around the wallet"></svg>
+          <div class="try" id="try" hidden>
+            <div class="try-start">
+              <button id="use-test-wallet" class="button" type="button">Use a test wallet</button>
+              <button id="connect-own" class="text-link" type="button">Connect my own</button>
+            </div>
+            <div class="try-next">
+              <button id="grant" class="button" type="button">Get a test permission</button>
+            </div>
+            <p class="muted" id="try-status">Test chain. Test tokens. Your signature.</p>
+          </div>
+        </section>
+        <div id="notice" role="status" aria-live="polite"></div>
+        <section id="action-result" aria-live="polite" hidden></section>
+        <nav class="tabs" aria-label="Views">
+          <button id="scan-tab" class="selected" type="button">Permissions</button>
+          <button id="diff-tab" type="button">What changed</button>
+          <button id="receipts-tab" type="button">Receipts</button>
+        </nav>
+        <section id="results" aria-label="Permissions"></section>
+        <section id="diff" hidden aria-label="Observed permission changes"></section>
+        <section id="receipts" hidden aria-label="Verified revokes"></section>
+      </div>
+    </main>
+    <dialog id="revoke-review" aria-label="Review revoke"></dialog>
+    <dialog id="wallet-chooser" class="chooser" aria-label="Connect a wallet"></dialog>
+    <script type="module" src="./app.ts"></script>
+  </body>
+</html>

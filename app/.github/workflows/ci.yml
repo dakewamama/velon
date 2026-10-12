@@ -1,0 +1,36 @@
+name: Demo
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: dakewamama/cataloger
+          ref: 3ececf3f1a88542f07af2fc770683a43c6caaa69
+          path: .data/cataloger
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci --ignore-scripts
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: node_modules/.bin/playwright install --with-deps chromium --only-shell
+      - run: npm run test:e2e
+        env:
+          CATALOGER_DIR: ${{ github.workspace }}/.data/cataloger
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-evidence
+          path: test-results/

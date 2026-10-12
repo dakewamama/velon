@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Velon shows every permission that can act on a Solana wallet, read from chain state, and lets you revoke it with proof."
+    />
+    <title>Velon | Know what can act on your wallet</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%230c3b2e'/%3E%3Cpath d='M8.5 11.5 14.5 22 24 8.5' fill='none' stroke='%233fe0a5' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body class="site">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Velon home">
+        <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="9" />
+          <path d="M8.5 11.5 14.5 22 24 8.5" />
+        </svg>
+        Velon
+      </a>
+      <nav class="site-nav" aria-label="Sections">
+        <a href="#features">Features</a>
+        <a href="#proof">Proof</a>
+        <a href="#coverage">Coverage</a>
+      </nav>
+      <a class="button" href="/app">Open console</a>
+    </header>
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="kicker">Permission infrastructure for Solana</p>
+          <h1>Know what can act on your wallet.</h1>
+          <p class="lead">Every delegate, subscription and spending limit in one view. Revoke with proof.</p>
+          <div class="hero-actions">
+            <a class="button" href="/app">Open console</a>
+            <a class="text-link" href="#proof">How a revoke is proven</a>
+          </div>
+        </div>
+        <div class="stage">
+          <svg class="orbit" viewBox="0 0 520 420" aria-hidden="true">
+            <path class="link spl cut" d="M92 92C190 92 200 210 262 210" />
+            <path class="link sub" d="M92 330C190 330 200 210 262 210" />
+            <path class="link lim" d="M432 96C360 96 340 210 262 210" />
+            <circle class="dot spl cut-dot" r="5">
+              <animateMotion dur="2.2s" repeatCount="indefinite" path="M92 92C190 92 200 210 262 210" />
+            </circle>
+            <circle class="dot sub" r="5">
+              <animateMotion dur="2.8s" repeatCount="indefinite" path="M92 330C190 330 200 210 262 210" />
+            </circle>
+            <circle class="dot lim" r="5">
+              <animateMotion dur="2.5s" repeatCount="indefinite" path="M432 96C360 96 340 210 262 210" />
+            </circle>
+            <circle class="node spl cut-node" cx="64" cy="92" r="28" />
+            <text x="24" y="146">Delegate</text>
+            <circle class="node sub" cx="64" cy="330" r="28" />
+            <text x="14" y="384">Subscription</text>
+            <circle class="node lim" cx="460" cy="96" r="28" />
+            <text x="400" y="150">Spending limit</text>
+            <rect class="wallet" x="212" y="160" width="100" height="100" rx="28" />
+            <path class="tick" d="M240 204 257 232 286 190" />
+            <g class="proofed">
+              <rect x="178" y="282" width="168" height="36" rx="18" />
+              <text x="198" y="305">Revoked · verified</text>
+            </g>
+          </svg>
+        </div>
+      </section>
+
+      <section class="live-panel" id="live-panel" aria-label="Live permissions">
+        <header>
+          <span class="pulse" aria-hidden="true"></span>
+          <strong id="live-title">Connecting…</strong>
+          <span class="count" id="live-count"></span>
+        </header>
+        <div id="live-rows" class="live-rows"></div>
+        <p id="live-note"></p>
+      </section>
+
+      <section class="showcase" id="showcase" aria-label="Velon reading the chain">
+        <div class="showcase-copy">
+          <p class="kicker">Velon, working</p>
+          <h2>The chain, read right now.</h2>
+          <p class="lead">
+            A real permission from <span id="showcase-where">the chain</span>, in the same words Velon uses
+            for every protocol.
+          </p>
+          <a class="button" href="/app">Try it in the console</a>
+        </div>
+        <div class="showcase-stage">
+          <span class="callout who">Who can act</span>
+          <span class="callout much">How much, and what is left</span>
+          <span class="callout proof">The state it was read from</span>
+          <article class="showcase-card" id="showcase-card"><p class="muted">Reading the chain…</p></article>
+        </div>
+      </section>
+
+      <section class="proof" id="proof" aria-label="How a revoke is proven">
+        <h2>How a revoke is proven.</h2>
+        <div class="player" id="player" data-step="0">
+          <ol class="rail">
+            <li>
+              <button class="more" type="button" aria-expanded="false" data-step="0">
+                <span>Observe</span>Finalized state, verified code.
+              </button>
+              <div class="extra">
+                <p>
+                  One finalized read of the token account, its owner, its delegate, the clock and the token
+                  program. The program bytes must match a verified build.
+                </p>
+              </div>
+            </li>
+            <li>
+              <button class="more" type="button" aria-expanded="false" data-step="1">
+                <span>Review</span>Simulated in that same state.
+              </button>
+              <div class="extra">
+                <p>
+                  The revoke is simulated in the same finalized bank. The result must equal the expected
+                  account change exactly, or nothing is offered for signing.
+                </p>
+              </div>
+            </li>
+            <li>
+              <button class="more" type="button" aria-expanded="false" data-step="2">
+                <span>Sign</span>Exact bytes. Any change stops it.
+              </button>
+              <div class="extra">
+                <p>
+                  Your wallet signs the reviewed bytes only. The message and signature are checked again
+                  before anything is sent.
+                </p>
+              </div>
+            </li>
+            <li>
+              <button class="more" type="button" aria-expanded="false" data-step="3">
+                <span>Verify</span>Read again. Permission gone.
+              </button>
+              <div class="extra">
+                <p>
+                  The finalized transaction is fetched, the account is observed again, and the permission must
+                  be absent before the page says revoked.
+                </p>
+              </div>
+            </li>
+          </ol>
+          <div class="screen" aria-hidden="true">
+            <div class="line"><span>Token account</span><b id="p-account">a token account</b></div>
+            <div class="line removable"><span>Delegate</span><b id="p-delegate">a delegate</b></div>
+            <div class="line removable"><span>Allowance</span><b id="p-amount">its limit</b></div>
+            <div class="bytes"><i>Reviewed bytes</i><em>=</em><i>Signed bytes</i></div>
+            <p class="caption" id="p-caption">Read from finalized state.</p>
+            <p class="illustration">Illustration of the four checks. Nothing is sent from this page.</p>
+            <svg class="seal" viewBox="0 0 48 48">
+              <circle cx="24" cy="24" r="21" />
+              <path d="M14 24.5 21.5 32 35 17" />
+            </svg>
+          </div>
+        </div>
+      </section>
+
+      <section class="features" id="features" aria-label="Features">
+        <h2>Authority, not balances.</h2>
+        <div class="bento">
+          <article class="wide">
+            <button class="more" type="button" aria-expanded="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h12" /></svg>
+              <h3>One view</h3>
+              <p>Who can move what, and how much is left.</p>
+            </button>
+            <div class="extra">
+              <p>
+                Token delegates and subscriptions are read by separate adapters and compiled into one record:
+                who, capability, resource, limit, remaining, lifecycle. The console renders that record, not a
+                screen per protocol.
+              </p>
+            </div>
+          </article>
+          <article>
+            <button class="more" type="button" aria-expanded="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="7" cy="12" r="3" />
+                <circle cx="17" cy="12" r="3" />
+                <path d="M10 12h4" />
+              </svg>
+              <h3>The real actor</h3>
+              <p>Past the technical delegate.</p>
+            </button>
+            <div class="extra">
+              <p>
+                A subscription's on-chain delegate is a program address. Velon derives the merchant and
+                pullers who can move funds through it and keeps the program address as lineage.
+              </p>
+            </div>
+          </article>
+          <article>
+            <button class="more" type="button" aria-expanded="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V9M10 18V5M16 18v-6M22 18H2" /></svg>
+              <h3>Shared budgets</h3>
+              <p>One allowance, counted once.</p>
+            </button>
+            <div class="extra">
+              <p>
+                When several keys draw on the same allowance, Velon reports one permission with all of them as
+                principals, so the limit is never doubled.
+              </p>
+            </div>
+          </article>
+          <article>
+            <button class="more" type="button" aria-expanded="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3 4 6v6c0 4.5 3.2 7.6 8 9 4.8-1.4 8-4.5 8-9V6z" />
+              </svg>
+              <h3>Evidence on every claim</h3>
+              <p>Slot, bytes, build, adapter.</p>
+            </button>
+            <div class="extra">
+              <p>
+                Each record names the finalized slot, the account bytes it came from, the program build hash
+                and the adapter version. Open any permission in the console to see them.
+              </p>
+            </div>
+          </article>
+          <article>
+            <button class="more" type="button" aria-expanded="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 8v4.5M12 16h.01" />
+              </svg>
+              <h3>Unknown stays unknown</h3>
+              <p>Missing is never shown as safe.</p>
+            </button>
+            <div class="extra">
+              <p>
+                An unverified program version or a missing account yields unsupported or incomplete, and no
+                permission is shown. An empty result never claims a wallet is clean.
+              </p>
+            </div>
+          </article>
+          <article class="wide">
+            <button class="more" type="button" aria-expanded="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
+              <h3>Revoke you can check</h3>
+              <p>A receipt you can replay.</p>
+            </button>
+            <div class="extra">
+              <p>
+                After signing, Velon waits for finality, reads the account again and only then reports
+                success. The receipt replays later without contacting the chain.
+              </p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="coverage" id="coverage" aria-label="Coverage">
+        <h2>What it reads today.</h2>
+        <div class="table">
+          <div class="entry">
+            <button class="more" type="button" aria-expanded="false" role="row">
+              <span role="cell">SPL Token delegates</span><span role="cell">Read</span
+              ><span role="cell" class="on">Revoke</span>
+            </button>
+            <div class="extra">
+              <p>Who can spend from a token account and how much. Read and revoked live in the console.</p>
+            </div>
+          </div>
+          <div class="entry">
+            <button class="more" type="button" aria-expanded="false" role="row">
+              <span role="cell">Subscriptions</span><span role="cell">Read</span
+              ><span role="cell" class="off">Revoke</span>
+            </button>
+            <div class="extra">
+              <p>
+                Fixed and recurring delegations, plans, merchant and puller authority, cancellation and
+                expiry. Read from recorded native executions.
+              </p>
+            </div>
+          </div>
+          <div class="entry">
+            <button class="more" type="button" aria-expanded="false" role="row">
+              <span role="cell">Squads V4 spending limits</span><span role="cell">SDK</span
+              ><span role="cell" class="off">Console</span>
+            </button>
+            <div class="extra">
+              <p>
+                Token spending limits on controlled multisigs, proven against the deployed mainnet program.
+                Not yet wired into the runtime or this console.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="closing">
+        <h2>See it against a live validator.</h2>
+        <a class="button light" href="/app">Open console</a>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <span>Velon. Every permission shown is read from native state.</span>
+      <a href="https://github.com/dakewamama/catalyst-demo">Source ↗</a>
+    </footer>
+    <script type="module" src="./site.ts"></script>
+  </body>
+</html>

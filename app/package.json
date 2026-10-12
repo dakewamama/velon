@@ -1,0 +1,38 @@
+{
+  "name": "catalyst-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo": "bun scripts/demo.ts",
+    "build": "bun build --target=bun --production --outdir=dist src/server.ts",
+    "start": "bun scripts/demo.ts --production",
+    "typecheck": "tsc --noEmit",
+    "format:check": "prettier --check .",
+    "test": "bun test tests/*.test.ts",
+    "test:e2e": "playwright test",
+    "test:live": "playwright test --config playwright.live.config.ts",
+    "export": "bun run build && bun scripts/export.ts",
+    "local": "bun scripts/local.ts",
+    "local:reset": "bun scripts/reset.ts"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "5.3.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "@solana/addresses": "8.4.0",
+    "@solana/rpc": "8.4.0",
+    "@solana/rpc-types": "8.4.0",
+    "@solana/transaction-messages": "8.4.0",
+    "@solana/transactions": "8.4.0",
+    "@solana/wallet-standard-features": "1.5.0",
+    "@wallet-standard/app": "1.1.1",
+    "@wallet-standard/features": "1.1.1",
+    "catalyst-sdk": "git+https://github.com/dakewamama/catalyst-sdk.git#bdd9e865882c663598b271c45922492c8e3de251",
+    "lossless-json": "4.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@types/bun": "1.4.2",
+    "prettier": "3.9.9",
+    "typescript": "7.0.2"
+  }
+}
