@@ -1,4 +1,5 @@
 import {
+  call,
   array,
   authorization,
   integer,
@@ -38,7 +39,7 @@ function row(href: string, left: string, right: string): HTMLAnchorElement {
 }
 
 async function json(path: string) {
-  const response = await fetch(`/api/${path}`);
+  const response = await call(`/api/${path}`);
   if (!response.ok) throw new Error(path);
   return readJson(await response.text());
 }
@@ -56,7 +57,7 @@ async function live() {
   const network = await liveNetwork();
   let shown = "";
   for (;;) {
-    const response = await fetch("/api/live/spl/delegated");
+    const response = await call("/api/live/spl/delegated");
     if (!response.ok) throw new Error("no live ledger");
     const raw = await response.text();
     if (raw !== shown) {
@@ -135,7 +136,7 @@ function element(tag: string, content = "", className = "") {
 }
 
 async function observed(): Promise<Shown[]> {
-  const listed = await fetch("/api/live/spl/delegated");
+  const listed = await call("/api/live/spl/delegated");
   if (listed.ok) {
     const network = await liveNetwork();
     const shown: Shown[] = [];
@@ -143,7 +144,7 @@ async function observed(): Promise<Shown[]> {
       .map(object)
       .slice(0, 2)) {
       const source = text(entry.source);
-      const response = await fetch("/api/live/spl/observe", {
+      const response = await call("/api/live/spl/observe", {
         method: "POST",
         headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
         body: JSON.stringify({ source }),

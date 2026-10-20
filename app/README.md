@@ -188,6 +188,17 @@ that the page sent no transaction and the delegate is untouched both times. It t
 bytes, the validator executes the revoke, and the test confirms the finalized
 transaction and the cleared delegate through RPC independently of the page.
 
+### Hosted test bench
+
+https://velon-eta.vercel.app runs this local-validator setup on a remote sandbox, so
+visitors can grant and revoke on it without installing anything. It is a disposable
+test ledger, labelled as such, not devnet. `deploy/supervisor.py` starts the validator,
+demo and `deploy/gateway.ts`. The gateway allows only the RPC methods the console needs
+and limits grants, revokes and RPC calls per visitor and in total. The static export
+(`HOSTED_RUNTIME=1 npm run export`) serves the pages, and
+`scripts/hosted-proxy.cjs` forwards `/api` and `/rpc` to the gateway with a server-only
+token and the visitor address Vercel observed. No credential reaches the browser.
+
 Devnet and mainnet currently run newer Agave releases than the pinned loader, so no
 catalog record can carry truthful runtime evidence for them and their observations
 stay incomplete. The control tests under `tests/browser` register an ephemeral

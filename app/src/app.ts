@@ -16,6 +16,7 @@ import {
   getTransactionEncoder,
 } from "@solana/transactions";
 import {
+  call,
   array,
   authorization,
   compare,
@@ -67,7 +68,7 @@ function node<K extends keyof HTMLElementTagNameMap>(
 }
 
 async function get(path: string, signal?: AbortSignal): Promise<Json> {
-  const response = await fetch(`/api/${path}`, { signal });
+  const response = await call(`/api/${path}`, { signal });
   if (!response.ok) {
     if (response.status === 409)
       throw new Error("Conflicting observations at the same slot. No current permission can be shown.");
@@ -303,7 +304,7 @@ async function scan(historical = false, refresh = false) {
     compareTab(!live);
     if (live && (refresh || !scenario.scope)) {
       status("Observing the finalized token account...");
-      const observed = await fetch("/api/live/spl/observe", {
+      const observed = await call("/api/live/spl/observe", {
         method: "POST",
         headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
         body: JSON.stringify({ source: address }),
@@ -628,7 +629,7 @@ async function scanWallet(): Promise<boolean | undefined> {
   request?.abort();
   request = new AbortController();
   const signal = request.signal;
-  const listed = await fetch("/api/live/spl/delegated", { signal });
+  const listed = await call("/api/live/spl/delegated", { signal });
   if (!listed.ok) return false;
   mode = "scan";
   diff.hidden = true;
@@ -643,7 +644,7 @@ async function scanWallet(): Promise<boolean | undefined> {
   try {
     for (const entry of owned) {
       const source = text(entry.source);
-      const observed = await fetch("/api/live/spl/observe", {
+      const observed = await call("/api/live/spl/observe", {
         method: "POST",
         headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
         body: JSON.stringify({ source }),
@@ -696,7 +697,7 @@ grantButton.onclick = async () => {
   grantButton.disabled = true;
   try {
     say("Preparing a test token account…");
-    const funded = await fetch("/api/test/account", {
+    const funded = await call("/api/test/account", {
       method: "POST",
       headers: { "X-Velon-Action": "test", "Content-Type": "application/json" },
       body: JSON.stringify({ owner: session.account.address }),
@@ -707,7 +708,7 @@ grantButton.onclick = async () => {
     for (let attempt = 0; ; attempt++) {
       const held = await rpc
         .getTokenAccountBalance(source, { commitment: "confirmed" })
-        .send()
+        .send({ abortSignal: AbortSignal.timeout(15000) })
         .catch(() => null);
       if (held && held.value.amount !== "0") break;
       if (attempt === 60) throw new Error("The test account did not arrive. Try again.");
@@ -718,7 +719,9 @@ grantButton.onclick = async () => {
     data[0] = 4;
     new DataView(data.buffer).setBigUint64(1, allowance, true);
     const owner = toAddress(session.account.address);
-    const { value: latest } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
+    const { value: latest } = await rpc
+      .getLatestBlockhash({ commitment: "confirmed" })
+      .send({ abortSignal: AbortSignal.timeout(15000) });
     const message = appendTransactionMessageInstruction(
       {
         programAddress: toAddress("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
@@ -748,30 +751,37 @@ grantButton.onclick = async () => {
           preflightCommitment: "confirmed",
         },
       )
-      .send();
+      .send({ abortSignal: AbortSignal.timeout(30000) });
     say("Granted. Waiting for the chain to finalize it…");
     // Live means the finalized chain reports this delegate with this allowance, not that time passed.
     let finalized = false;
     for (let attempt = 0; attempt < 60 && connected === session && !finalized; attempt++) {
       await new Promise<void>((resolve) => setTimeout(resolve, 1500));
-      const listed = await fetch("/api/live/spl/delegated");
-      finalized =
-        listed.ok &&
-        array(readJson(await listed.text()))
-          .map(object)
-          .some(
-            (entry) =>
-              entry.source === source &&
-              entry.delegate === account.delegate &&
-              entry.amount === String(allowance),
-          );
+      try {
+        const listed = await call("/api/live/spl/delegated", {}, 10000);
+        finalized =
+          listed.ok &&
+          array(readJson(await listed.text()))
+            .map(object)
+            .some(
+              (entry) =>
+                entry.source === source &&
+                entry.delegate === account.delegate &&
+                entry.amount === String(allowance),
+            );
+      } catch {
+        /* A slow read is retried; only the chain's answer ends the wait. */
+      }
     }
     if (!finalized)
       throw new Error(
         "The approval was sent but is not finalized yet, so it is not shown as live. Try again shortly.",
       );
-    await scanWallet();
-    say("Your permission is live. Revoke it below.");
+    say(
+      (await scanWallet())
+        ? "Your permission is live. Revoke it below."
+        : "Your permission is live on chain, but the wallet could not be read. Scan again.",
+    );
   } catch (error) {
     say(error instanceof Error ? error.message : "The test permission failed.");
   } finally {
@@ -821,7 +831,7 @@ document.querySelector<HTMLButtonElement>("#receipts-tab")!.onclick = () => {
       replay.disabled = true;
       outcome.textContent = "Replaying from the journal…";
       try {
-        const response = await fetch(`/api/verifications/revoke/${receipt.id}`);
+        const response = await call(`/api/verifications/revoke/${receipt.id}`);
         if (!response.ok) throw new Error();
         const body = await response.text();
         outcome.textContent = "Replayed without the chain: the revoke and the cleared state still check out.";
@@ -1228,7 +1238,7 @@ async function watchMainnet() {
     };
   for (;;) {
     try {
-      const response = await fetch(`/api/${publicNet}/delegated`);
+      const response = await call(`/api/${publicNet}/delegated`);
       if (response.status === 404) {
         // A network the server was not given is removed from the choice, not shown empty.
         const missing = document.querySelector<HTMLElement>(`.segmented [data-net="${publicNet}"]`)!;
@@ -1284,7 +1294,7 @@ async function watch() {
   let shown = "";
   for (;;) {
     try {
-      const response = await fetch("/api/live/spl/delegated");
+      const response = await call("/api/live/spl/delegated");
       if (response.status === 404) return;
       const raw = await response.text();
       if (response.ok && raw !== shown) {
@@ -1332,7 +1342,7 @@ bench.onclick = async () => {
   bench.disabled = true;
   bench.textContent = "Approving on chain…";
   try {
-    const response = await fetch("/api/live/spl/approve", {
+    const response = await call("/api/live/spl/approve", {
       method: "POST",
       headers: { "X-Velon-Action": "test" },
     });

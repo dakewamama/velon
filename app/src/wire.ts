@@ -6,6 +6,21 @@ export type ObjectValue = { [key: string]: Json };
 
 export const readJson = (value: string): Json =>
   parse(value, undefined, { parseNumber: parseNumberAndBigInt }) as Json;
+// Every request carries a deadline, so one hung proxy call cannot freeze a polling loop.
+export async function call(input: string, init: RequestInit = {}, ms = 30000): Promise<Response> {
+  const deadline = AbortSignal.timeout(ms);
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: init.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
+    });
+  } catch (error) {
+    if (deadline.aborted && !init.signal?.aborted)
+      throw new Error("The server did not answer in time. Try again.");
+    throw error;
+  }
+}
+
 export const writeJson = (value: Json, space?: number): string => stringify(value, undefined, space)!;
 
 export function object(value: Json | undefined): ObjectValue {

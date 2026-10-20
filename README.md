@@ -6,7 +6,8 @@ When you approve an app to spend your tokens, that approval stays on chain after
 close the tab. Velon reads those permissions from native account state, explains them
 in plain words, lets you revoke one, and then checks the chain again to prove it is gone.
 
-**Live preview:** https://velon-eta.vercel.app (recorded evidence, read-only, no login)
+**Try it:** https://velon-eta.vercel.app. No login or wallet needed: grant yourself a test
+permission and revoke it on a hosted test validator, or browse recorded native evidence.
 
 ## What it does
 
@@ -28,7 +29,7 @@ in plain words, lets you revoke one, and then checks the chain again to prove it
 | SPL Token delegate: observe        | Works against a live chain                                           |
 | SPL Token delegate: revoke + proof | Works end to end on a local Solana validator, with real wallet signing |
 | Solana Subscriptions               | Read-only, from accounts captured by executed native tests           |
-| Squads V4 token spending limits    | Adapter in the SDK, tested against the deployed mainnet program      |
+| Squads V4 token spending limits    | Adapter in the SDK, tested by running the mainnet program locally    |
 | Revoke on devnet and mainnet       | Not enabled yet (see Limits)                                         |
 
 ## How the pieces fit
@@ -100,7 +101,7 @@ installing anything, or connect Phantom or Solflare.
 
 | Folder     | Command                                               | What runs                                           |
 | ---------- | ----------------------------------------------------- | --------------------------------------------------- |
-| `app/`     | `npm test`, `npm run test:e2e`                        | 16 unit tests, 48 browser tests on desktop, tablet and phone |
+| `app/`     | `npm test`, `npm run test:e2e`                        | 22 unit tests, 48 browser tests on desktop, tablet and phone |
 | `app/`     | `npx playwright test -c playwright.live.config.ts`    | 6 tests against a real local validator, including a full revoke |
 | `runtime/` | `cargo test --locked`                                 | 108 tests                                           |
 | `sdk/`     | `cargo test --locked`, `bun test`                     | 89 Rust tests, 48 TypeScript tests                  |
@@ -119,4 +120,6 @@ repeatable. Nothing from them is shown in the product or presented as chain evid
   account can be controlled. Anything it cannot fully read is marked unsupported
   instead of guessed.
 - **Amounts** are shown in base units. Velon does not infer token symbols or decimals.
-- **The hosted preview** serves recorded evidence only. It cannot observe, sign or revoke.
+- **The hosted test bench** runs the local-validator setup on a remote sandbox. It is a
+  disposable test ledger, not devnet, and is rate limited per visitor. See
+  `app/README.md` for how it is wired.

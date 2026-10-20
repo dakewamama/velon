@@ -26,6 +26,8 @@ module.exports = async (request, response) => {
     const headers = {
       "X-Daytona-Preview-Token": process.env.DAYTONA_PREVIEW_TOKEN,
       "X-Daytona-Skip-Preview-Warning": "true",
+      // Vercel sets x-real-ip itself; the gateway limits each visitor by it.
+      "X-Velon-Client": String(request.headers["x-real-ip"] || "unknown"),
     };
     for (const name of ["content-type", "x-velon-action"])
       if (request.headers[name]) headers[name] = request.headers[name];

@@ -156,28 +156,36 @@ if (process.env.RPC_URL) {
   if (network === "localnet") {
     const token = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
     const delegated = { memcmp: { offset: 72, bytes: "AQAAAA==", encoding: "base64" } };
+    // Every open page polls this list; concurrent polls share one scan for a second.
+    let scan: { at: number; found: Promise<Json> } | undefined;
     live.discover = async () => {
       try {
-        const found = array(
-          await rpc("getProgramAccounts", [
-            token,
-            { encoding: "jsonParsed", commitment: "finalized", filters: [{ dataSize: 165 }, delegated] },
-          ]),
-        ).map((entry) => {
-          const info = object(object(object(object(object(entry).account).data).parsed).info);
-          return {
-            source: text(object(entry).pubkey),
-            owner: text(info.owner),
-            delegate: text(info.delegate),
-            mint: text(info.mint),
-            amount: text(object(info.delegatedAmount).amount),
-          };
-        });
-        return Response.json(found, { headers: { "Cache-Control": "no-store" } });
+        if (!scan || Date.now() - scan.at > 1000) {
+          const found = scanDelegated();
+          scan = { at: Date.now(), found };
+          found.catch(() => (scan = undefined));
+        }
+        return Response.json(await scan.found, { headers: { "Cache-Control": "no-store" } });
       } catch {
         return Response.json({ error: "Live discovery is unavailable." }, { status: 502 });
       }
     };
+    const scanDelegated = async (): Promise<Json> =>
+      array(
+        await rpc("getProgramAccounts", [
+          token,
+          { encoding: "jsonParsed", commitment: "finalized", filters: [{ dataSize: 165 }, delegated] },
+        ]),
+      ).map((entry) => {
+        const info = object(object(object(object(object(entry).account).data).parsed).info);
+        return {
+          source: text(object(entry).pubkey),
+          owner: text(info.owner),
+          delegate: text(info.delegate),
+          mint: text(info.mint),
+          amount: text(object(info.delegatedAmount).amount),
+        };
+      });
     if (process.env.LIVE_TEST_BENCH === "1") {
       if (!process.env.AGAVE_BIN) throw new Error("LIVE_TEST_BENCH requires AGAVE_BIN.");
       control.testBench = true;

@@ -2,6 +2,7 @@ import { blockhash } from "@solana/rpc-types";
 import { getCompiledTransactionMessageDecoder } from "@solana/transaction-messages";
 import { getTransactionDecoder } from "@solana/transactions";
 import {
+  call,
   array,
   grants,
   integer,
@@ -29,15 +30,19 @@ export async function action(
   signal: AbortSignal,
   signedTransaction?: string,
 ): Promise<Response> {
-  return fetch(`/api/${path}`, {
-    method: "POST",
-    headers: {
-      "X-Velon-Action": "revoke",
-      ...(signedTransaction ? { "Content-Type": "application/json" } : {}),
+  return call(
+    `/api/${path}`,
+    {
+      method: "POST",
+      headers: {
+        "X-Velon-Action": "revoke",
+        ...(signedTransaction ? { "Content-Type": "application/json" } : {}),
+      },
+      body: signedTransaction ? JSON.stringify({ signed_transaction: signedTransaction }) : undefined,
+      signal,
     },
-    body: signedTransaction ? JSON.stringify({ signed_transaction: signedTransaction }) : undefined,
-    signal,
-  });
+    60000,
+  );
 }
 
 export async function result(response: Response): Promise<Json> {

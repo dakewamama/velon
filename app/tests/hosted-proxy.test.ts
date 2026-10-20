@@ -11,7 +11,7 @@ afterEach(() => {
 });
 process.env.DAYTONA_PREVIEW_URL = "https://3402-example.daytonaproxy01.eu";
 process.env.DAYTONA_PREVIEW_TOKEN = "test-server-only";
-async function call(path: string, body?: string, origin?: string) {
+async function call(path: string, body?: string, origin?: string, extra: Record<string, string> = {}) {
   const request = Object.assign(Readable.from(body === undefined ? [] : [Buffer.from(body)]), {
     url: `/api/live?path=${path}`,
     method: body === undefined ? "GET" : "POST",
@@ -20,6 +20,7 @@ async function call(path: string, body?: string, origin?: string) {
       ...(origin ? { origin } : {}),
       "content-type": "application/json",
       "x-velon-action": "revoke",
+      ...extra,
     },
   });
   const chunks: Buffer[] = [];
@@ -60,6 +61,14 @@ test("submission bytes survive and redirects are refused", async () => {
     return new Response('{"result":"signature"}');
   });
   expect((await call("rpc", body)).status).toBe(200);
+});
+test("the gateway sees the visitor address Vercel observed, not one the client claims", async () => {
+  mockFetch(async (_url: unknown, init: RequestInit = {}) => {
+    expect((init.headers as Record<string, string>)["X-Velon-Client"]).toBe("203.0.113.7");
+    return new Response("[]");
+  });
+  const extra = { "x-real-ip": "203.0.113.7", "x-velon-client": "198.51.100.1" };
+  expect((await call("api/live/spl/delegated", undefined, undefined, extra)).status).toBe(200);
 });
 test("invalid requests never reach sandbox", async () => {
   mockFetch(async () => {
