@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Velon shows every permission that can act on a Solana wallet, read from chain state, and lets you revoke it with proof."
+      content="Inspect supported Solana permissions and try a verified token delegate revoke on a test validator."
     />
     <title>Velon | Know what can act on your wallet</title>
     <link
@@ -35,7 +35,9 @@
         <div class="hero-copy">
           <p class="kicker">Permission infrastructure for Solana</p>
           <h1>Know what can act on your wallet.</h1>
-          <p class="lead">Every delegate, subscription and spending limit in one view. Revoke with proof.</p>
+          <p class="lead">
+            Understand native permissions. Try a token delegate revoke with proof on a test validator.
+          </p>
           <div class="hero-actions">
             <a class="button" href="/app">Open console</a>
             <a class="text-link" href="#proof">How a revoke is proven</a>
@@ -84,7 +86,7 @@
       <section class="showcase" id="showcase" aria-label="Velon reading the chain">
         <div class="showcase-copy">
           <p class="kicker">Velon, working</p>
-          <h2>The chain, read right now.</h2>
+          <h2>Permissions, backed by evidence.</h2>
           <p class="lead">
             A real permission from <span id="showcase-where">the chain</span>, in the same words Velon uses
             for every protocol.
@@ -266,7 +268,10 @@
               ><span role="cell" class="on">Revoke</span>
             </button>
             <div class="extra">
-              <p>Who can spend from a token account and how much. Read and revoked live in the console.</p>
+              <p>
+                Who can spend from a token account and how much. Try a live revoke on the demo's test
+                validator.
+              </p>
             </div>
           </div>
           <div class="entry">
@@ -297,13 +302,13 @@
       </section>
 
       <section class="closing">
-        <h2>See it against a live validator.</h2>
+        <h2>Try it on a test validator.</h2>
         <a class="button light" href="/app">Open console</a>
       </section>
     </main>
     <footer class="site-footer">
       <span>Velon. Every permission shown is read from native state.</span>
-      <a href="https://github.com/dakewamama/catalyst-demo">Source ↗</a>
+      <a href="https://github.com/dakewamama/velon">Source ↗</a>
     </footer>
     <script type="module" src="./site.ts"></script>
   </body>

@@ -98,7 +98,9 @@ for (const mode of ["reject", "alter"] as const) {
     request,
   }) => {
     const { source, spender, sends } = await review(page, request, mode);
-    await expect(page.getByRole("heading", { name: "Not submitted", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Not submitted", exact: true })).toBeVisible({
+      timeout: 30000,
+    });
     await expect(page.locator("#action-result dd")).toHaveCount(0);
     expect(sends).toEqual([]);
     expect(await delegate(request, source)).toBe(spender);

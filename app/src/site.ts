@@ -43,9 +43,17 @@ async function json(path: string) {
   return readJson(await response.text());
 }
 
+async function liveNetwork() {
+  const control = object(await json("control"));
+  if (control.network === "localnet") return "Local validator";
+  if (control.network === "devnet") return "Devnet";
+  throw new Error("Unsupported live network");
+}
+
 // The panel shows what the server can read right now: a live ledger when one is wired,
 // otherwise the recorded native evidence. Nothing here is typed into the page.
 async function live() {
+  const network = await liveNetwork();
   let shown = "";
   for (;;) {
     const response = await fetch("/api/live/spl/delegated");
@@ -68,15 +76,17 @@ async function live() {
           ),
       );
       note.textContent = found.length
-        ? "Local validator. Open one to observe it with evidence."
-        : "Local validator. No delegated accounts right now.";
+        ? `${network}. Open one to observe it with evidence.`
+        : `${network}. No delegated accounts right now.`;
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 3000));
   }
 }
 
 async function recorded() {
-  const scenarios = array(await json("scenarios")).map(object);
+  const scenarios = array(await json("scenarios"))
+    .map(object)
+    .filter((scenario) => scenario.live !== true);
   title.textContent = "Recorded native evidence";
   count.textContent = String(scenarios.length);
   rows.replaceChildren(
@@ -127,6 +137,7 @@ function element(tag: string, content = "", className = "") {
 async function observed(): Promise<Shown[]> {
   const listed = await fetch("/api/live/spl/delegated");
   if (listed.ok) {
+    const network = await liveNetwork();
     const shown: Shown[] = [];
     for (const entry of array(readJson(await listed.text()))
       .map(object)
@@ -146,7 +157,7 @@ async function observed(): Promise<Shown[]> {
         availability: text(first.availability),
         slot: String(integer(object(view.observation).slot)),
         origin: text(object(view.observation).origin),
-        where: "a local Solana validator",
+        where: network,
       });
     }
     if (shown.length) return shown;

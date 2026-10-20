@@ -1,8 +1,7 @@
-import { mkdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 
-// Writes a static copy of the site that serves the recorded native evidence exactly as the
-// runtime returned it. Live observation and control need the server, so they are not exported.
+// Recorded evidence remains the default. Hosted control forwards to an independently running runtime.
 const root = resolve(import.meta.dir, "..");
 const out = `${root}/site`;
 const port = 3410;
@@ -40,7 +39,11 @@ try {
       break;
     await Bun.sleep(500);
   }
+  const project = await Bun.file(`${out}/.vercel/project.json`)
+    .text()
+    .catch(() => undefined);
   await rm(out, { recursive: true, force: true });
+  if (project) await Bun.write(`${out}/.vercel/project.json`, project);
   await mkdir(`${out}/api`, { recursive: true });
   const get = async (path: string) => {
     const response = await fetch(`${origin}${path}`);
@@ -94,6 +97,13 @@ module.exports = (request, response) => {
 `,
   );
   const hosting = { cleanUrls: true, rewrites: [{ source: "/api/(.*)", destination: "/api/data?path=$1" }] };
+  if (process.env.HOSTED_RUNTIME === "1") {
+    await copyFile(`${root}/scripts/hosted-proxy.cjs`, `${out}/api/live.js`);
+    hosting.rewrites = [
+      { source: "/rpc", destination: "/api/live?path=rpc" },
+      { source: "/api/(.*)", destination: "/api/live?path=api/$1" },
+    ];
+  }
   await Bun.write(`${out}/vercel.json`, `${JSON.stringify(hosting, null, 2)}\n`);
   console.log(`Exported ${Object.keys(data).length} recorded responses to ${out}`);
 } finally {
