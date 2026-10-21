@@ -77,6 +77,7 @@ fn snapshot() -> Snapshot {
     snapshot.observation.slot = SLOT;
     snapshot.observation.unix_timestamp = TIMESTAMP;
     snapshot.observation.origin = Origin::Finalized;
+    snapshot.features = Some(support::features(support::MAINNET_FEATURES, SLOT));
     snapshot
 }
 
@@ -114,7 +115,12 @@ fn version() -> ProgramVersion {
         .find(|(key, _)| *key == get_program_data_address(&program))
         .unwrap()
         .1;
-    support::attest_fixture(&mut version, &account.data[solana_loader_v3_interface::state::UpgradeableLoaderState::size_of_programdata_metadata()..], SLOT);
+    support::attest_fixture(
+        &mut version,
+        &account.data[solana_loader_v3_interface::state::UpgradeableLoaderState::size_of_programdata_metadata()..],
+        SLOT,
+        snapshot.features.as_ref().unwrap(),
+    );
     version
 }
 
@@ -232,11 +238,13 @@ fn observed(snapshot: &Snapshot) -> Value {
 fn current_client(observations: Vec<Value>, simulations: Vec<Value>) -> RpcClient {
     use solana_rpc_client::mock_sender::MocksMap;
     let genesis = vec![metadata()["cluster"].clone(); observations.len() + simulations.len()];
+    let features = vec![support::feature_response(support::MAINNET_FEATURES); observations.len()];
     let mocks = MocksMap(
         [
             (RpcRequest::GetGenesisHash, genesis.into()),
             (RpcRequest::GetMultipleAccounts, observations.into()),
             (RpcRequest::SimulateTransaction, simulations.into()),
+            (RpcRequest::GetProgramAccounts, features.into()),
         ]
         .into(),
     );
@@ -504,7 +512,17 @@ async fn agave_rpc_capture_agrees_with_the_native_transition() {
         [solana_loader_v3_interface::state::UpgradeableLoaderState::size_of_programdata_metadata(
         )..]
         .to_vec();
-    support::attest_fixture(&mut version, &elf, before.observation.slot);
+    // The local capture's own features were not retained; mainnet's at that slot stand in.
+    before.features = Some(support::features(
+        support::MAINNET_FEATURES,
+        before.observation.slot,
+    ));
+    support::attest_fixture(
+        &mut version,
+        &elf,
+        before.observation.slot,
+        before.features.as_ref().unwrap(),
+    );
     let journal = Journal::open("sqlite::memory:").await.unwrap();
     let record = journal
         .ingest(before, &Catalog::new(vec![version]).unwrap())
@@ -575,19 +593,22 @@ async fn simulation_failure_retains_native_error_and_null_accounts() {
 }
 
 #[tokio::test]
-async fn newer_and_older_simulation_banks_fail_despite_the_slot_floor() {
+async fn older_provider_banks_fail_and_later_ones_must_reach_the_executed_state() {
     let journal = Journal::open("sqlite::memory:").await.unwrap();
     let record = record(&journal).await;
-    for slot in [SLOT - 1, SLOT + 1] {
-        let mut reply = response(&record.snapshot);
-        reply["context"]["slot"] = json!(slot);
-        assert!(matches!(
-            rpc::simulate_revoke(&client(reply), &journal, &record.id, source()).await,
-            Err(Error::InvalidObservation(
-                "simulation/context slot mismatch"
-            ))
-        ));
-    }
+    let mut reply = response(&record.snapshot);
+    reply["context"]["slot"] = json!(SLOT - 1);
+    assert!(matches!(
+        rpc::simulate_revoke(&client(reply), &journal, &record.id, source()).await,
+        Err(Error::InvalidObservation("simulation precedes observation"))
+    ));
+    // Velon executes in the observed bank; a provider's later bank only has to agree.
+    let later = response(&next_bank(&record.snapshot));
+    let result = rpc::simulate_revoke(&client(later), &journal, &record.id, source())
+        .await
+        .unwrap();
+    assert_eq!(result.observation.slot, SLOT);
+    assert_eq!(result.response.context.slot, SLOT + 1);
 }
 
 #[tokio::test]
@@ -641,15 +662,14 @@ async fn missing_truncated_and_undecodable_simulated_accounts_fail_closed() {
 }
 
 #[tokio::test]
-async fn the_simulated_clock_must_match_the_retained_bank() {
+async fn the_simulated_clock_must_belong_to_the_simulated_bank() {
     let journal = Journal::open("sqlite::memory:").await.unwrap();
     let record = record(&journal).await;
-    for case in ["timestamp", "slot", "owner", "null"] {
+    for case in ["slot", "owner", "null"] {
         let mut changed = record.snapshot.clone();
         let clock_account = account(&mut changed, sysvar::clock::id());
         let mut clock: Clock = bincode::deserialize(&clock_account.data).unwrap();
         match case {
-            "timestamp" => clock.unix_timestamp += 1,
             "slot" => clock.slot += 1,
             "owner" => clock_account.owner = owner(),
             "null" => (),
@@ -663,8 +683,9 @@ async fn the_simulated_clock_must_match_the_retained_bank() {
         assert!(
             matches!(
                 rpc::simulate_revoke(&client(reply), &journal, &record.id, source()).await,
-                Err(Error::InvalidObservation("simulation clock mismatch"))
-                    | Err(Error::Adapter(AdapterError::InvalidState(_)))
+                Err(Error::InvalidObservation(
+                    "simulation/context slot mismatch"
+                ))
             ),
             "{case}"
         );
@@ -885,16 +906,13 @@ async fn a_checkpoint_advancing_during_rpc_invalidates_the_simulation() {
 }
 
 #[tokio::test]
-async fn current_revoke_reobserves_until_simulation_shares_the_finalized_bank() {
+async fn current_revoke_executes_in_its_observed_bank_and_accepts_a_later_provider_bank() {
     let journal = Journal::open("sqlite::memory:").await.unwrap();
     let record = record(&journal).await;
     let scope = record.snapshot.scope_id().unwrap();
     let next = next_bank(&record.snapshot);
-    // The first simulation lands one slot after its observation and must be discarded.
-    let client = current_client(
-        vec![observed(&record.snapshot), observed(&next)],
-        vec![response(&next), response(&next)],
-    );
+    // A load-balanced provider answers from a newer node; that alone must not block review.
+    let client = current_client(vec![observed(&next)], vec![response(&next_bank(&next))]);
     let (status, result) = post_empty(
         rpc::action_router(journal.clone(), client),
         format!("/scopes/{scope}/actions/revoke/{}", source()),
@@ -903,32 +921,27 @@ async fn current_revoke_reobserves_until_simulation_shares_the_finalized_bank() 
     assert_eq!(status, StatusCode::OK, "{result}");
     let current = journal.latest(&scope).await.unwrap().unwrap();
     assert_eq!(current.snapshot.observation.slot, SLOT + 1);
-    assert_ne!(current.id, record.id);
     assert_eq!(result["state_version"], current.id);
     assert_eq!(result["observation"]["slot"], SLOT + 1);
-    assert_eq!(result["response"]["context"]["slot"], SLOT + 1);
+    assert_eq!(result["response"]["context"]["slot"], SLOT + 2);
     assert_eq!(result["changes"][0]["kind"], "removed");
     assert!(result["signing_transaction"].is_string());
 }
 
 #[tokio::test]
-async fn current_revoke_never_signs_for_a_bank_it_did_not_observe() {
+async fn current_revoke_never_signs_against_a_bank_older_than_its_observation() {
     let journal = Journal::open("sqlite::memory:").await.unwrap();
     let record = record(&journal).await;
     let scope = record.snapshot.scope_id().unwrap();
-    let later = response(&next_bank(&record.snapshot));
-    let client = current_client(
-        vec![observed(&record.snapshot); rpc::CURRENT_BANK_ATTEMPTS],
-        vec![later; rpc::CURRENT_BANK_ATTEMPTS],
-    );
+    let next = next_bank(&record.snapshot);
+    let client = current_client(vec![observed(&next)], vec![response(&record.snapshot)]);
     let (status, body) = post_empty(
         rpc::action_router(journal.clone(), client),
         format!("/scopes/{scope}/actions/revoke/{}", source()),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert!(body.get("signing_transaction").is_none());
-    assert_eq!(journal.latest(&scope).await.unwrap().unwrap().id, record.id);
     for (scope, source, expected) in [
         ("unknown", source(), StatusCode::NOT_FOUND),
         (&scope, owner(), StatusCode::UNPROCESSABLE_ENTITY),
@@ -1240,6 +1253,10 @@ fn verification_client(receipt: Value, after: &Snapshot) -> RpcClient {
             ),
             (RpcRequest::GetTransaction, [receipt].into()),
             (RpcRequest::GetMultipleAccounts, [observed(after)].into()),
+            (
+                RpcRequest::GetProgramAccounts,
+                [support::feature_response(support::MAINNET_FEATURES)].into(),
+            ),
         ]
         .into(),
     );
@@ -1520,6 +1537,11 @@ async fn verification_rpc_requires_finality_and_the_execution_slot_floor() {
                             .collect();
                         json!({"context": {"slot": SLOT + 1}, "value": values})
                     }
+                    "getProgramAccounts" => {
+                        let mut features = support::feature_response(support::MAINNET_FEATURES);
+                        features["context"]["slot"] = json!(SLOT + 1);
+                        features
+                    }
                     other => panic!("unexpected RPC: {other}"),
                 };
                 Json(json!({"jsonrpc": "2.0", "id": request["id"], "result": result}))
@@ -1547,7 +1569,8 @@ async fn verification_rpc_requires_finality_and_the_execution_slot_floor() {
             "getGenesisHash",
             "getTransaction",
             "getGenesisHash",
-            "getMultipleAccounts"
+            "getMultipleAccounts",
+            "getProgramAccounts"
         ]
     );
     assert_eq!(requests[1]["params"][0], expected_signature);
@@ -1555,6 +1578,8 @@ async fn verification_rpc_requires_finality_and_the_execution_slot_floor() {
     assert_eq!(requests[1]["params"][1]["encoding"], "base64");
     assert_eq!(requests[3]["params"][1]["commitment"], "finalized");
     assert_eq!(requests[3]["params"][1]["minContextSlot"], SLOT + 1);
+    assert_eq!(requests[4]["params"][1]["commitment"], "finalized");
+    assert_eq!(requests[4]["params"][1]["minContextSlot"], SLOT + 1);
 }
 
 struct VerificationDatabase(std::path::PathBuf);
@@ -1822,4 +1847,33 @@ async fn retained_evidence_checks_hash_and_replays_native_claims_even_if_rehashe
             .is_ok()
     );
     pool.close().await;
+}
+
+#[tokio::test]
+async fn unknown_missing_or_later_feature_evidence_blocks_review() {
+    for case in ["unknown", "missing", "later"] {
+        let mut snapshot = snapshot();
+        let features = snapshot.features.as_mut().unwrap();
+        match case {
+            "unknown" => features.active.push((Pubkey::new_from_array([42; 32]), 1)),
+            "later" => features.active[0].1 = SLOT + 1,
+            _ => snapshot.features = None,
+        }
+        let journal = Journal::open("sqlite::memory:").await.unwrap();
+        let record = journal.ingest(snapshot, &catalog()).await.unwrap();
+        assert!(
+            !matches!(
+                record.projection,
+                catalyst_indexer::Projection::Compiled { .. }
+            ),
+            "{case}"
+        );
+        let reply = response(&record.snapshot);
+        assert!(
+            rpc::simulate_revoke(&client(reply), &journal, &record.id, source())
+                .await
+                .is_err(),
+            "{case}"
+        );
+    }
 }

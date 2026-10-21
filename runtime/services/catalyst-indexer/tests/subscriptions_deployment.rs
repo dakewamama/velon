@@ -8,6 +8,8 @@ use solana_loader_v3_interface::{get_program_data_address, state::UpgradeableLoa
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar;
 
+mod support;
+
 const RAW: &[u8] = include_bytes!("fixtures/devnet-subscriptions-response.json");
 const RESPONSE_HASH: &str = "794c6c9fbb35697eabf1931fb42440cca8b8a8dc2a42de95fb95b1a945651f53";
 const SLOT: u64 = 509_022_453;
@@ -49,6 +51,7 @@ fn snapshot() -> Snapshot {
             mint: Pubkey::new_from_array([4; 32]),
             plan: None,
         }],
+        features: Some(support::features(support::DEVNET_FEATURES, SLOT)),
     };
     snapshot.accounts.sort_by_key(|(key, _)| *key);
     snapshot

@@ -5,10 +5,10 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-arm = { git = "https://github.com/dakewamama/arm", rev = "3b91100314473b616b5fd6f77214c6b6282a1dfb" }
-solana-instruction = "=3.4.0"
-solana-pubkey = { version = "=4.2.0", features = ["curve25519"] }
-solana-account = "=4.3.1"
+arm = { path = "../arm" }
+solana-instruction = "=3.5.1"
+solana-pubkey = { version = "=4.4.0", features = ["curve25519"] }
+solana-account = "=4.7.0"
 solana-program-pack = "=3.1.0"
 spl-token-interface = "=3.0.0"
 spl-token-2022-interface = "=3.1.2"
@@ -16,8 +16,8 @@ subscriptions = "=0.5.0"
 
 [dev-dependencies]
 serde_json = "1"
-mollusk-svm = "=0.15.1"
-mollusk-svm-programs-token = { version = "=0.15.1", default-features = false, features = ["token", "token-2022"] }
+mollusk-svm = "=0.16.2"
+mollusk-svm-programs-token = { version = "=0.16.2", default-features = false, features = ["token", "token-2022"] }
 solana-program-option = "=3.1.0"
 sha2 = "0.10"
 base64 = "0.22"

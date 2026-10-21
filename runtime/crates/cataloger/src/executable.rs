@@ -12,8 +12,9 @@ use solana_sbpf::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 
-pub const SBPF_REVISION: &str = "acd2c551a0f8df2a8f077a6e4b55f546d4deb98d";
-pub const AGAVE_REVISION: &str = "7bc9c805218ca06769956e2cb61601329f5a0f6c";
+/// solana-sbpf 0.23.0 and Agave v4.3.2, the loader code the environment is built with.
+pub const SBPF_REVISION: &str = "9476336b901181d68e00c5b38252a15694d4d6aa";
+pub const AGAVE_REVISION: &str = "a203300045b405f86c9c84308b2eae76af69ac3b";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -44,7 +45,7 @@ pub struct ExecutableEvidence {
     pub source_revision: Option<String>,
     pub build_toolchain: Option<String>,
     pub identity: ExecutableIdentity,
-    // A local loader result does not establish the observed bank's runtime environment.
+    // The environment derived from the cluster's activated features at capture time.
     pub runtime: Option<RuntimeEvidence>,
 }
 
@@ -54,7 +55,7 @@ fn bytes(hash: &mut Sha256, value: &[u8]) {
 }
 
 /// Fingerprint the upstream loader's verified image under the supplied environment.
-/// This does not authenticate that environment against a validator or compile JIT code.
+/// The caller derives that environment from observed features; JIT code is not compiled.
 pub fn inspect<C: ContextObject>(
     elf: &[u8],
     loader: Arc<BuiltinProgram<C>>,
@@ -77,7 +78,7 @@ pub fn inspect<C: ContextObject>(
     }
     let config = loader.get_config();
     let mut environment = Sha256::new();
-    bytes(&mut environment, b"cataloger:sbpf-environment:1");
+    bytes(&mut environment, b"cataloger:sbpf-environment:2");
     bytes(&mut environment, SBPF_REVISION.as_bytes());
     for value in [
         config.max_call_depth,
@@ -104,11 +105,17 @@ pub fn inspect<C: ContextObject>(
     }
     let environment_hash = format!("sha256:{:x}", environment.finalize());
     let mut image = Sha256::new();
-    bytes(&mut image, b"cataloger:sbpf-image:1");
+    bytes(&mut image, b"cataloger:sbpf-image:2");
     bytes(&mut image, environment_hash.as_bytes());
     image.update(sbpf_version.to_le_bytes());
     image.update((executable.get_entrypoint_instruction_offset() as u64).to_le_bytes());
-    image.update(executable.get_ro_region().vm_addr.to_le_bytes());
+    image.update(
+        executable
+            .get_ro_region()
+            .vm_addr_range()
+            .start
+            .to_le_bytes(),
+    );
     bytes(&mut image, executable.get_ro_section());
     let (address, text) = executable.get_text_bytes();
     image.update(address.to_le_bytes());

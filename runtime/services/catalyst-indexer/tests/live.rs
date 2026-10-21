@@ -89,6 +89,14 @@ fn client(response: Value) -> RpcClient {
         "succeeds".into(),
         [
             (RpcRequest::GetGenesisHash, metadata()["cluster"].clone()),
+            (RpcRequest::GetProgramAccounts, {
+                // The feature read is pinned to the observed bank by minContextSlot.
+                let mut features = support::feature_response(support::MAINNET_FEATURES);
+                if let Some(slot) = response["context"]["slot"].as_u64() {
+                    features["context"]["slot"] = json!(slot);
+                }
+                features
+            }),
             (RpcRequest::GetMultipleAccounts, response),
         ]
         .into_iter()
@@ -147,6 +155,7 @@ fn catalog() -> Catalog {
         &mut version,
         &account.data[UpgradeableLoaderState::size_of_programdata_metadata()..],
         SLOT,
+        &support::features(support::MAINNET_FEATURES, SLOT),
     );
     Catalog::new(vec![version]).unwrap()
 }
@@ -163,6 +172,8 @@ fn account(snapshot: &mut Snapshot, key: Pubkey) -> &mut Account {
 fn set_slot(snapshot: &mut Snapshot, slot: u64) {
     snapshot.observation.slot = slot;
     snapshot.observation.bank = format!("rpc:finalized:{slot}");
+    // A synthetic bank carries the feature set that was active at that bank.
+    snapshot.features = Some(support::features(support::MAINNET_FEATURES, slot));
     let account = account(snapshot, sysvar::clock::id());
     let mut clock: Clock = bincode::deserialize(&account.data).unwrap();
     clock.slot = slot;
@@ -188,6 +199,9 @@ async fn serve(
                 let mut response = match request["method"].as_str().unwrap() {
                     "getGenesisHash" => json!({"result": metadata()["cluster"]}),
                     "getMultipleAccounts" => reply,
+                    "getProgramAccounts" => {
+                        json!({"result": support::feature_response(support::MAINNET_FEATURES)})
+                    }
                     other => panic!("unexpected RPC method: {other}"),
                 };
                 response["jsonrpc"] = json!("2.0");
@@ -305,9 +319,18 @@ async fn official_client_requests_one_complete_finalized_batch_with_minimum_slot
     let observed = rpc::observe(&client, scope.clone()).await;
     task.abort();
     let requests = requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 3);
     assert_eq!(requests[0]["method"], "getGenesisHash");
     assert_eq!(requests[1]["method"], "getMultipleAccounts");
+    // Features are read from a bank no older than the observed one.
+    assert_eq!(requests[2]["method"], "getProgramAccounts");
+    assert_eq!(
+        requests[2]["params"][0],
+        solana_sdk_ids::feature::id().to_string()
+    );
+    assert_eq!(requests[2]["params"][1]["commitment"], "finalized");
+    assert_eq!(requests[2]["params"][1]["minContextSlot"], SLOT);
+    assert_eq!(requests[2]["params"][1]["withContext"], true);
     assert_eq!(
         requests[1]["params"][0],
         json!(keys.iter().map(ToString::to_string).collect::<Vec<_>>())
@@ -618,7 +641,12 @@ async fn executable_hash_deployment_and_catalog_identity_fail_closed() {
         let elf = account(&mut input, programdata()).data
             [UpgradeableLoaderState::size_of_programdata_metadata()..]
             .to_vec();
-        support::attest_fixture(&mut version, &elf, input.observation.slot);
+        support::attest_fixture(
+            &mut version,
+            &elf,
+            input.observation.slot,
+            &support::features(support::MAINNET_FEATURES, input.observation.slot),
+        );
         match case {
             "executable-bytes" => *account(&mut input, programdata()).data.last_mut().unwrap() ^= 1,
             "program-owner" => account(&mut input, program()).owner = Pubkey::default(),

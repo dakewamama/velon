@@ -24,6 +24,7 @@ use std::{
     time::Duration,
 };
 
+pub mod features;
 pub mod rpc;
 
 pub const SDK_REVISION: &str = "54ed06aa3a7c8a31268dface42d0bf27ca4adaee";
@@ -76,6 +77,8 @@ pub struct Snapshot {
     pub observation: Observation,
     pub accounts: Vec<(Pubkey, Account)>,
     pub targets: Vec<Target>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub features: Option<features::Features>,
 }
 
 impl Snapshot {

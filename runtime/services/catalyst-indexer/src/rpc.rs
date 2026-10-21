@@ -9,14 +9,18 @@ use axum::{
 use base64::{Engine, engine::general_purpose::STANDARD};
 use cataloger::{Catalog, ProgramVersion};
 use catalyst_sdk::{self as sdk, Adapter, Error as AdapterError, spl, subscriptions};
+use mollusk_svm::{Mollusk, program::ProgramCache};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_clock::Clock;
+use solana_commitment_config::CommitmentConfig;
+use solana_compute_budget::compute_budget::ComputeBudget;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_loader_v3_interface::{get_program_data_address, state::UpgradeableLoaderState};
 use solana_program_pack::Pack;
+use solana_program_runtime::execution_budget::SVMTransactionExecutionBudget;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
@@ -28,6 +32,7 @@ use solana_rpc_client_api::{
     response::{Response, RpcSimulateTransactionResult},
 };
 use solana_sdk_ids::{bpf_loader_upgradeable, sysvar};
+use solana_svm_feature_set::SVMFeatureSet;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::{
     EncodedConfirmedTransactionWithStatusMeta, EncodedTransaction, TransactionBinaryEncoding,
@@ -36,19 +41,76 @@ use solana_transaction_status_client_types::{
 use spl_token_interface::state::Account as TokenAccount;
 use std::{collections::BTreeSet, sync::Arc};
 
-/// Interpret an ELF with Agave 3.1.10's explicit local environment, not a live-bank claim.
+/// Interpret an ELF in the loader environment that a cluster's activated features define.
 pub fn executable_identity(
     elf: &[u8],
+    features: &SVMFeatureSet,
 ) -> Result<cataloger::executable::ExecutableIdentity, Box<dyn std::error::Error>> {
-    let loader = agave_syscalls::create_program_runtime_environment_v1(
-        &solana_svm_feature_set::SVMFeatureSet::all_enabled(),
-        &solana_program_runtime::execution_budget::SVMTransactionExecutionBudget::new_with_defaults(
-            true,
-        ),
+    let loader = solana_syscalls::create_program_runtime_environment(
+        features,
+        &SVMTransactionExecutionBudget::new_with_defaults(features.raise_cpi_nesting_limit_to_8),
         false,
         false,
     )?;
-    cataloger::executable::inspect(elf, std::sync::Arc::new(loader))
+    cataloger::executable::inspect(elf, Arc::clone(&loader))
+}
+
+#[derive(Serialize)]
+pub struct Capture {
+    pub cluster: String,
+    pub observed_slot: u64,
+    pub programdata_address: Pubkey,
+    pub deployment_slot: u64,
+    pub version: String,
+    pub features: crate::features::Features,
+    pub identity: cataloger::executable::ExecutableIdentity,
+    pub runtime: cataloger::executable::RuntimeEvidence,
+}
+
+/// Fingerprint a loader-v3 program's finalized code under the cluster's activated features.
+pub async fn capture(client: &RpcClient, program: Pubkey) -> Result<Capture, Error> {
+    let programdata_address = get_program_data_address(&program);
+    let keys = [program, programdata_address, sysvar::clock::id()];
+    let response = client
+        .get_multiple_accounts_with_commitment(&keys, CommitmentConfig::finalized())
+        .await?;
+    let [Some(_), Some(data), Some(clock_account)] = response.value.as_slice() else {
+        return Err(Error::NotFound);
+    };
+    let clock = clock(
+        &[(sysvar::clock::id(), clock_account.clone())],
+        response.context.slot,
+    )
+    .map_err(|_| Error::InvalidObservation("invalid bank clock"))?;
+    let offset = UpgradeableLoaderState::size_of_programdata_metadata();
+    let Ok(UpgradeableLoaderState::ProgramData { slot, .. }) =
+        bincode::deserialize(data.data.get(..offset).unwrap_or_default())
+    else {
+        return Err(AdapterError::InvalidState("loader programdata state".into()).into());
+    };
+    let features = crate::features::observe(client, clock.slot).await?;
+    let identity = executable_identity(&data.data[offset..], &features.runtime(clock.slot)?)
+        .map_err(|_| AdapterError::UnsupportedVersion)?;
+    let cluster = client.get_genesis_hash().await?.to_string();
+    let runtime = cataloger::executable::RuntimeEvidence {
+        revision: cataloger::executable::AGAVE_REVISION.into(),
+        environment_hash: identity.environment_hash.clone(),
+        evidence_reference: format!(
+            "features:{cluster}:{}:sha256:{:x}",
+            features.slot,
+            Sha256::digest(serde_json::to_vec(&features.active)?)
+        ),
+    };
+    Ok(Capture {
+        cluster,
+        observed_slot: clock.slot,
+        programdata_address,
+        deployment_slot: slot,
+        version: format!("sha256:{:x}", Sha256::digest(&data.data[offset..])),
+        features,
+        identity,
+        runtime,
+    })
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -179,6 +241,7 @@ pub async fn observe(client: &RpcClient, scope: Scope) -> Result<Snapshot, Error
         .collect::<Result<Vec<_>, Error>>()?;
     let clock = clock(&accounts, response.context.slot)
         .map_err(|_| Error::InvalidObservation("invalid bank clock"))?;
+    let features = crate::features::observe(client, clock.slot).await?;
     Ok(Snapshot {
         observation: Observation {
             cluster: scope.cluster,
@@ -189,6 +252,7 @@ pub async fn observe(client: &RpcClient, scope: Scope) -> Result<Snapshot, Error
         },
         accounts,
         targets: scope.targets,
+        features: Some(features),
     })
 }
 
@@ -264,6 +328,8 @@ pub async fn simulate_revoke(
         .map_err(|error| AdapterError::InvalidState(error.to_string()))?;
     let transaction = revoke_transaction(&action, native.owner);
     let keys = [source, native.owner, sysvar::clock::id()];
+    // Revoke runs in the observed bank itself, so no provider bank has to coincide with it.
+    let executed = execute_revoke(snapshot, &action, &keys[..2])?;
     let config = RpcSimulateTransactionConfig {
         sig_verify: false,
         replace_recent_blockhash: true,
@@ -284,11 +350,9 @@ pub async fn simulate_revoke(
     if response.value.err.is_some() {
         return Err(Error::SimulationFailed(Box::new(response)));
     }
-    // minContextSlot does not pin a bank; only the same finalized slot can agree.
-    if response.context.slot != snapshot.observation.slot {
-        return Err(Error::InvalidObservation(
-            "simulation/context slot mismatch",
-        ));
+    // The provider simulates in its own later bank and must reach the same token data.
+    if response.context.slot < snapshot.observation.slot {
+        return Err(Error::InvalidObservation("simulation precedes observation"));
     }
     let values = response
         .value
@@ -296,7 +360,7 @@ pub async fn simulate_revoke(
         .as_ref()
         .filter(|values| values.len() == keys.len())
         .ok_or(Error::InvalidObservation("missing simulated accounts"))?;
-    let mut after = snapshot.clone();
+    let mut simulated = Vec::new();
     for (key, value) in keys.into_iter().zip(values) {
         let account = match value {
             Some(value) => {
@@ -316,17 +380,18 @@ pub async fn simulate_revoke(
             }
             None => Account::default(),
         };
+        simulated.push((key, account));
+    }
+    clock(&simulated, response.context.slot)
+        .map_err(|_| Error::InvalidObservation("simulation/context slot mismatch"))?;
+    let mut after = snapshot.clone();
+    for (key, account) in executed {
         let entry = after
             .accounts
             .iter_mut()
             .find(|(address, _)| *address == key)
             .ok_or(AdapterError::InsufficientEvidence)?;
         entry.1 = account;
-    }
-    if clock(&after.accounts, response.context.slot)?
-        != clock(&snapshot.accounts, snapshot.observation.slot)?
-    {
-        return Err(Error::InvalidObservation("simulation clock mismatch"));
     }
     // The delegate projection omits owner authority; require Revoke's full token-data change.
     native.delegate = None.into();
@@ -340,7 +405,7 @@ pub async fn simulate_revoke(
         .find(|(key, _)| *key == source)
         .ok_or(AdapterError::InsufficientEvidence)?
         .1;
-    if after_source.data != expected {
+    if after_source.data != expected || simulated[0].1.data != expected {
         return Err(AdapterError::DiffMismatch.into());
     }
     let after_state = crate::spl_state(&after, source)?;
@@ -359,8 +424,8 @@ pub async fn simulate_revoke(
         .references
         .push(format!("simulation:sha256:{simulation_id}"));
     observed.evidence.observed_at = format!(
-        "{}:rpc:simulation:{}",
-        snapshot.observation.cluster, response.context.slot
+        "{}:execution:{}",
+        snapshot.observation.cluster, snapshot.observation.slot
     );
     let changes = sdk::verify_transaction_diff(
         &adapter,
@@ -417,6 +482,54 @@ pub async fn simulate_revoke(
         response,
         changes,
     })
+}
+
+/// Run the canonical Revoke through the verified token program under the observed features.
+fn execute_revoke(
+    snapshot: &Snapshot,
+    action: &sdk::Action,
+    keys: &[Pubkey],
+) -> Result<Vec<(Pubkey, Account)>, Error> {
+    let features = snapshot
+        .features
+        .as_ref()
+        .ok_or(AdapterError::InsufficientEvidence)?
+        .runtime(snapshot.observation.slot)?;
+    let program = spl::DelegateAdapter.protocol().program_id;
+    let offset = UpgradeableLoaderState::size_of_programdata_metadata();
+    let elf = snapshot
+        .accounts
+        .iter()
+        .find(|(key, _)| *key == get_program_data_address(&program))
+        .and_then(|(_, account)| account.data.get(offset..))
+        .ok_or(AdapterError::InsufficientEvidence)?;
+    let mut compute_budget =
+        ComputeBudget::new_with_defaults(features.raise_cpi_nesting_limit_to_8);
+    compute_budget.compute_unit_limit = REVOKE_UNIT_LIMIT.into();
+    let mut mollusk = Mollusk {
+        compute_budget,
+        ..Default::default()
+    };
+    mollusk.program_cache = ProgramCache::new(&features, &mollusk.compute_budget, false);
+    mollusk.feature_set = features;
+    mollusk.sysvars.clock = clock(&snapshot.accounts, snapshot.observation.slot)?;
+    mollusk.add_program_with_loader_and_elf(&program, &bpf_loader_upgradeable::id(), elf);
+    let accounts: Vec<_> = keys
+        .iter()
+        .map(|key| {
+            snapshot
+                .accounts
+                .iter()
+                .find(|(address, _)| address == key)
+                .cloned()
+                .ok_or(AdapterError::InsufficientEvidence)
+        })
+        .collect::<Result<_, _>>()?;
+    let result = mollusk.process_instruction_chain(&action.instructions, &accounts);
+    if result.raw_result.is_err() {
+        return Err(Error::InvalidObservation("native execution failed"));
+    }
+    Ok(result.resulting_accounts)
 }
 
 pub const CURRENT_BANK_ATTEMPTS: usize = 8;
@@ -938,8 +1051,14 @@ pub(crate) fn verify_program(
     {
         return Err(AdapterError::UnsupportedVersion);
     }
-    let identity =
-        executable_identity(&data.data[offset..]).map_err(|_| AdapterError::UnsupportedVersion)?;
+    let features = snapshot
+        .features
+        .as_ref()
+        .ok_or(AdapterError::InsufficientEvidence)?
+        .runtime(observed.slot)
+        .map_err(|_| AdapterError::UnsupportedVersion)?;
+    let identity = executable_identity(&data.data[offset..], &features)
+        .map_err(|_| AdapterError::UnsupportedVersion)?;
     version
         .verify_execution(programdata_address, observed.slot, &identity)
         .map_err(|error| match error {

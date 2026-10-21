@@ -8,11 +8,16 @@ use std::time::Duration;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if let [command, path] = args.as_slice()
-        && command == "inspect-executable"
+    if let [command, program] = args.as_slice()
+        && command == "capture"
     {
-        let identity = catalyst_indexer::rpc::executable_identity(&std::fs::read(path)?)?;
-        println!("{}", serde_json::to_string_pretty(&identity)?);
+        let client = RpcClient::new_with_timeout_and_commitment(
+            std::env::var("RPC_URL")?,
+            Duration::from_secs(30),
+            CommitmentConfig::finalized(),
+        );
+        let capture = catalyst_indexer::rpc::capture(&client, program.parse()?).await?;
+        println!("{}", serde_json::to_string_pretty(&capture)?);
         return Ok(());
     }
     let database_url = std::env::var("DATABASE_URL")?;
@@ -85,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         _ => {
             return Err(
-                "usage: authorization-api observe CATALOG SCOPE | import CATALOG SNAPSHOT | replay ID | simulate-revoke ID SOURCE | latest ID | serve ADDRESS"
+                "usage: authorization-api capture PROGRAM | observe CATALOG SCOPE | import CATALOG SNAPSHOT | replay ID | simulate-revoke ID SOURCE | latest ID | serve ADDRESS"
                     .into(),
             );
         }
