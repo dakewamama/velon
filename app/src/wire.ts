@@ -103,7 +103,21 @@ function periodName(seconds: bigint): string {
   return names.find(([length]) => length === seconds)?.[1] ?? `${seconds.toLocaleString("en-US")} seconds`;
 }
 
-export function permissionLabel(grant: ObjectValue): string {
+// The token mint a spend grant is limited to, read from its amount constraint.
+export function mintOf(grant: ObjectValue): string | undefined {
+  const constraints = object(grant.constraints);
+  const leaves = constraints.kind === "all" ? array(constraints.value).map(object) : [constraints];
+  for (const leaf of leaves) {
+    const asset = leaf.kind === "constraint" ? object(leaf.value).asset : undefined;
+    if (asset && object(asset).namespace === "solana:mint") return text(object(asset).id);
+  }
+  return undefined;
+}
+
+export function permissionLabel(
+  grant: ObjectValue,
+  units = (amount: bigint) => `${amount.toLocaleString("en-US")} base units`,
+): string {
   const capability = text(grant.capability).replaceAll("_", " ");
   const verb = capability[0]!.toUpperCase() + capability.slice(1);
   const usage = object(grant.usage);
@@ -122,7 +136,7 @@ export function permissionLabel(grant: ObjectValue): string {
       : usage.kind === "cumulative"
         ? " in total"
         : "";
-  return `${verb} up to ${amount.toLocaleString("en-US")} base units${period}${leaves.length > 1 ? ", subject to constraints" : ""}`;
+  return `${verb} up to ${units(amount)}${period}${leaves.length > 1 ? ", subject to constraints" : ""}`;
 }
 
 export type Change = { kind: "added" | "removed" | "changed"; before?: ObjectValue; after?: ObjectValue };
@@ -181,7 +195,8 @@ export const KINDS: Record<string, string> = {
   administrative: "Controls the rules",
   derived: "Acts through another permission",
 };
-export const short = (address: string) => `${address.slice(0, 4)}…${address.slice(-4)}`;
+// Word joiners keep a shortened address on one line.
+export const short = (address: string) => `${address.slice(0, 4)}\u2060…\u2060${address.slice(-4)}`;
 
 // One sentence a newcomer can read, built only from fields of the permission itself.
 export function meaning(grant: ObjectValue, viewer?: string): string {

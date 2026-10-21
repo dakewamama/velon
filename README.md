@@ -26,11 +26,11 @@ permission and revoke it on a hosted test validator, or browse recorded native e
 
 | Area                               | Status                                                               |
 | ---------------------------------- | -------------------------------------------------------------------- |
-| SPL Token delegate: observe        | Works against a live chain                                           |
-| SPL Token delegate: revoke + proof | Works end to end on a local Solana validator, with real wallet signing |
+| SPL Token delegate: observe        | Mainnet, devnet and a local validator                                |
+| SPL Token delegate: revoke + proof | Mainnet, devnet and a local validator, with real wallet signing      |
+| Token-2022 delegates               | Listed for the connected wallet, not verified or revocable yet       |
 | Solana Subscriptions               | Read-only, from accounts captured by executed native tests           |
 | Squads V4 token spending limits    | Adapter in the SDK, tested by running the mainnet program locally    |
-| Revoke on devnet and mainnet       | Not enabled yet (see Limits)                                         |
 
 ## How the pieces fit
 
@@ -64,32 +64,40 @@ repositories with their history: `catalyst-demo` (app), `cataloger` (runtime),
 
 Requirements: Bun 1.3.14 or newer, Node 22, npm, Git and stable Rust.
 
-The app refuses to start unless the runtime is checked out at the exact commit it was
-tested with. `runtime/` in this repository is that code, but the check reads a Git
-commit, so the app needs the runtime as its own checkout:
+The app builds and runs `runtime/` from this repository and refuses to start if it has
+uncommitted changes, because every record names the commit that produced it.
 
 ```sh
 git clone https://github.com/dakewamama/velon.git
-cd velon
-git clone https://github.com/dakewamama/cataloger.git .cataloger
-git -C .cataloger checkout 3ececf3f1a88542f07af2fc770683a43c6caaa69
-
-cd app
+cd velon/app
 npm ci --ignore-scripts
-CATALOGER_DIR="$PWD/../.cataloger" bun run demo
+bun run demo
 ```
 
 Open http://127.0.0.1:3000. The first run builds the runtime in release mode, which
 takes a few minutes. This mode shows recorded native evidence and needs no RPC key.
 
-### The full revoke journey
+### Revoke on mainnet or devnet
 
-The revoke flow needs a local validator running Agave 3.1.10, the version the runtime
-executes programs with. Download that release, then:
+Point the app at an RPC endpoint for the cluster. At launch it reads the SPL Token
+program's finalized code and the cluster's activated features, checks the code is the
+verified build, and records both in its catalog. Connect Phantom, Solflare or any Wallet
+Standard wallet and the console lists every delegate on that wallet's token accounts.
 
 ```sh
 cd app
-AGAVE_BIN=/path/to/agave-3.1.10/bin CATALOGER_DIR="$PWD/../.cataloger" bun run local
+RPC_URL=https://your-mainnet-rpc PUBLIC_RPC_URL=https://your-mainnet-rpc LIVE_NETWORK=mainnet bun run demo
+```
+
+`RPC_URL` stays on the server. `PUBLIC_RPC_URL` is what the browser submits the signed
+transaction to, so it must not carry a secret. Use `LIVE_NETWORK=devnet` with a devnet
+endpoint to try it with test funds first.
+
+### The full revoke journey on a local validator
+
+```sh
+cd app
+AGAVE_BIN=/path/to/agave-4.3.2/bin bun run local
 ```
 
 It starts the validator with the real mainnet SPL Token program, creates a token
@@ -112,10 +120,15 @@ repeatable. Nothing from them is shown in the product or presented as chain evid
 
 ## Limits
 
-- **Public networks.** Velon only issues a transaction to sign when it has executed
-  the deployed program itself and matched the result. That executor is pinned to
-  Agave 3.1.10. Devnet and mainnet run newer versions, so revoke is switched off there
-  until the executor is updated. Reading permissions is not affected.
+- **How a revoke is checked.** Velon builds the program's loader environment from the
+  features the cluster has activated, loads the deployed token program in it, and runs
+  the revoke itself against the account's finalized state. The provider's simulation,
+  from the same or a later bank, must produce the same bytes. Only then is there
+  anything to sign.
+- **Runtime version.** The executor uses the Agave 4.3.2 crates. If a cluster activates
+  a feature those crates do not know, Velon refuses to review a revoke until the runtime
+  is updated. It never guesses. Each launch captures the program again; a capture is
+  valid for one epoch.
 - **Coverage.** Velon shows the permission systems listed above, not every way an
   account can be controlled. Anything it cannot fully read is marked unsupported
   instead of guessed.

@@ -1,18 +1,17 @@
 import { resolve } from "node:path";
 import { mkdir, unlink } from "node:fs/promises";
 import { getAddressEncoder, isAddress, type Address } from "@solana/addresses";
-import { array, grants, object, publicKey, readJson, text, type Json } from "../src/wire.ts";
-import { DEVNET_GENESIS, type Control } from "../src/control.ts";
+import { array, grants, object, publicKey, readJson, text, writeJson, type Json } from "../src/wire.ts";
+import { DEVNET_GENESIS, MAINNET_GENESIS, type Control } from "../src/control.ts";
+import { tokenCatalog } from "./catalog.ts";
 import type { Live } from "../src/server.ts";
 
-const CATALOGER_REVISION = "3ececf3f1a88542f07af2fc770683a43c6caaa69";
-const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 const root = resolve(import.meta.dir, "..");
-const cataloger = resolve(process.env.CATALOGER_DIR ?? `${root}/../cataloger`);
+const cataloger = resolve(process.env.CATALOGER_DIR ?? `${root}/../runtime`);
 const dataDir = `${root}/.data`;
 await mkdir(dataDir, { recursive: true });
 if (!(await Bun.file(`${cataloger}/Cargo.toml`).exists()))
-  throw new Error("Cataloger checkout not found. Set CATALOGER_DIR as described in README.");
+  throw new Error("Runtime not found. Set CATALOGER_DIR as described in README.");
 
 function command(args: string[], env = process.env): string {
   const result = Bun.spawnSync(args, { cwd: cataloger, env, stdout: "pipe", stderr: "inherit" });
@@ -20,10 +19,11 @@ function command(args: string[], env = process.env): string {
   return result.stdout.toString();
 }
 
-if (command(["git", "rev-parse", "HEAD"]).trim() !== CATALOGER_REVISION)
-  throw new Error(`Cataloger must be checked out at ${CATALOGER_REVISION}. See README.`);
-command(["git", "diff", "--quiet", "HEAD"]);
-// Observation and simulation must share one 400ms bank; a debug build verifies too slowly.
+// Evidence names the commit it was built from, so the runtime must match that commit exactly.
+const CATALOGER_REVISION = command(["git", "rev-parse", "HEAD"]).trim();
+if (command(["git", "status", "--porcelain", "--", "."]).trim())
+  throw new Error("The runtime has uncommitted changes. Commit them before running the demo.");
+// Release keeps observe, execute and simulate well inside a provider's request timeouts.
 command(["cargo", "build", "--release", "--locked", "-p", "catalyst-indexer", "--bin", "authorization-api"]);
 const binary = `${resolve(cataloger, process.env.CARGO_TARGET_DIR ?? "target")}/release/authorization-api`;
 const env = {
@@ -86,17 +86,29 @@ async function run(args: string[]): Promise<string> {
 let control: Control | null = null;
 let live: Live | undefined;
 if (process.env.RPC_URL) {
-  if (!process.env.PUBLIC_RPC_URL || !process.env.LIVE_CATALOG)
-    throw new Error("Live control requires RPC_URL, PUBLIC_RPC_URL and LIVE_CATALOG.");
+  if (!process.env.PUBLIC_RPC_URL) throw new Error("Live control requires RPC_URL and PUBLIC_RPC_URL.");
   const network = process.env.LIVE_NETWORK ?? "devnet";
-  if (network !== "devnet" && network !== "localnet") throw new Error("Unsupported live network.");
+  if (network !== "mainnet" && network !== "devnet" && network !== "localnet")
+    throw new Error("Unsupported live network.");
   const rpcUrl = new URL(process.env.PUBLIC_RPC_URL);
   if (!["http:", "https:"].includes(rpcUrl.protocol) || rpcUrl.username || rpcUrl.password)
     throw new Error("PUBLIC_RPC_URL must be a browser-safe HTTP endpoint.");
   const cluster = text(await rpc("getGenesisHash"));
-  if (cluster === MAINNET_GENESIS || (network === "devnet") !== (cluster === DEVNET_GENESIS))
+  if (
+    (network === "mainnet") !== (cluster === MAINNET_GENESIS) ||
+    (network === "devnet") !== (cluster === DEVNET_GENESIS)
+  )
     throw new Error(`LIVE_NETWORK=${network} does not describe the cluster behind RPC_URL (${cluster}).`);
-  const catalog = resolve(process.env.LIVE_CATALOG);
+  // Public clusters are captured at launch: their own finalized code and activated features.
+  let catalog = process.env.LIVE_CATALOG && resolve(process.env.LIVE_CATALOG);
+  if (!catalog) {
+    if (network === "localnet") throw new Error("Localnet needs LIVE_CATALOG from scripts/local.ts.");
+    catalog = `${dataDir}/catalog-${network}-${CATALOGER_REVISION}.json`;
+    await Bun.write(
+      catalog,
+      writeJson(tokenCatalog(binary, cataloger, process.env.RPC_URL, CATALOGER_REVISION), 2),
+    );
+  }
   const verified = array(readJson(await Bun.file(catalog).text()))
     .map(object)
     .some(
@@ -151,7 +163,43 @@ if (process.env.RPC_URL) {
       return Response.json({ error: "Live observation failed. Check the token account." }, { status: 502 });
     }
   };
-  live = { observe };
+  // A wallet's own token accounts, as the RPC's index reports them; each is then observed natively.
+  const owned: Live["owned"] = async (owner) => {
+    try {
+      const found = [];
+      for (const [program, id] of [
+        ["spl-token", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+        ["spl-token-2022", "TokenzQdBNbLqP5VEhdkAS6EHpYxDocnoZPGCbbqDcmM"],
+      ] as const)
+        for (const entry of array(
+          object(
+            await rpc("getTokenAccountsByOwner", [
+              owner,
+              { programId: id },
+              { encoding: "jsonParsed", commitment: "finalized" },
+            ]),
+          ).value,
+        )) {
+          const info = object(object(object(object(object(entry).account).data).parsed).info);
+          if (typeof info.delegate !== "string") continue;
+          const delegated = object(info.delegatedAmount);
+          found.push({
+            program,
+            source: text(object(entry).pubkey),
+            owner: text(info.owner),
+            delegate: text(info.delegate),
+            mint: text(info.mint),
+            amount: text(delegated.amount),
+            ui: text(delegated.uiAmountString),
+            decimals: Number(delegated.decimals),
+          });
+        }
+      return Response.json(found, { headers: { "Cache-Control": "no-store" } });
+    } catch {
+      return Response.json({ error: "The wallet's token accounts could not be read." }, { status: 502 });
+    }
+  };
+  live = { observe, owned };
   // Enumerating a program's accounts is only reasonable on a ledger we started ourselves.
   if (network === "localnet") {
     const token = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -264,7 +312,11 @@ if (process.env.RPC_URL) {
   const example = process.env.LIVE_SOURCE;
   if (example && !isAddress(example)) throw new Error("LIVE_SOURCE must be a token account address.");
   scenarios.push({
-    name: network === "devnet" ? "Devnet SPL token account" : "Local validator SPL token account",
+    name: {
+      mainnet: "Mainnet SPL token account",
+      devnet: "Devnet SPL token account",
+      localnet: "Local validator SPL token account",
+    }[network],
     scope: "",
     live: true,
     snapshots: [],

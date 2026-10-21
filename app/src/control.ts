@@ -17,13 +17,14 @@ import {
 export type Control = {
   cluster: string;
   rpcUrl: string;
-  network: "devnet" | "localnet";
+  network: "mainnet" | "devnet" | "localnet";
   /// The server can mint fresh test permissions on its disposable ledger.
   testBench?: boolean;
 };
 export type ActionState =
   "PREPARING" | "SIMULATED" | "AWAITING_SIGNATURE" | "SUBMITTING" | "FINALIZING" | "VERIFIED" | "FAILED";
 export const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+export const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 
 export async function action(
   path: string,
@@ -78,6 +79,7 @@ export function reviewRevoke(
     integer(observation.slot) !== integer(object(view.observation).slot) ||
     observation.cluster !== control.cluster ||
     (control.network === "devnet" && observation.cluster !== DEVNET_GENESIS) ||
+    (control.network === "mainnet" && observation.cluster !== MAINNET_GENESIS) ||
     changes.length !== 1 ||
     change.kind !== "removed" ||
     writeJson(change.authorization!) !== writeJson(grant)
@@ -85,7 +87,8 @@ export function reviewRevoke(
     throw new Error("Simulation does not match the permission under review.");
   const nativeResponse = object(simulation.response);
   const native = object(nativeResponse.value);
-  if (native.err !== null || integer(object(nativeResponse.context).slot) !== integer(observation.slot))
+  // The runtime executed in the observed bank; the provider's agreeing bank may be later.
+  if (native.err !== null || integer(object(nativeResponse.context).slot) < integer(observation.slot))
     throw new Error("Simulation did not verify the observed state.");
   const bytes = Uint8Array.from(atob(text(simulation.signing_transaction)), (c) => c.charCodeAt(0));
   const transaction = getTransactionDecoder().decode(bytes);

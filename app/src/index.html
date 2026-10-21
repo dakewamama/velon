@@ -44,32 +44,44 @@
           </div>
         </div>
         <div class="stage">
-          <svg class="orbit" viewBox="0 0 520 420" aria-hidden="true">
-            <path class="link spl cut" d="M92 92C190 92 200 210 262 210" />
-            <path class="link sub" d="M92 330C190 330 200 210 262 210" />
-            <path class="link lim" d="M432 96C360 96 340 210 262 210" />
-            <circle class="dot spl cut-dot" r="5">
-              <animateMotion dur="2.2s" repeatCount="indefinite" path="M92 92C190 92 200 210 262 210" />
-            </circle>
-            <circle class="dot sub" r="5">
-              <animateMotion dur="2.8s" repeatCount="indefinite" path="M92 330C190 330 200 210 262 210" />
-            </circle>
-            <circle class="dot lim" r="5">
-              <animateMotion dur="2.5s" repeatCount="indefinite" path="M432 96C360 96 340 210 262 210" />
-            </circle>
-            <circle class="node spl cut-node" cx="64" cy="92" r="28" />
-            <text x="24" y="146">Delegate</text>
-            <circle class="node sub" cx="64" cy="330" r="28" />
-            <text x="14" y="384">Subscription</text>
-            <circle class="node lim" cx="460" cy="96" r="28" />
-            <text x="400" y="150">Spending limit</text>
-            <rect class="wallet" x="212" y="160" width="100" height="100" rx="28" />
-            <path class="tick" d="M240 204 257 232 286 190" />
-            <g class="proofed">
-              <rect x="178" y="282" width="168" height="36" rx="18" />
-              <text x="198" y="305">Revoked · verified</text>
-            </g>
-          </svg>
+          <div class="orbit-frame">
+            <svg class="orbit" viewBox="0 0 520 420" aria-hidden="true">
+              <path class="link spl cut" d="M92 92C190 92 200 210 262 210" />
+              <path class="link sub" d="M92 330C190 330 200 210 262 210" />
+              <path class="link lim" d="M432 96C360 96 340 210 262 210" />
+              <circle class="dot spl cut-dot" r="5">
+                <animateMotion dur="2.2s" repeatCount="indefinite" path="M92 92C190 92 200 210 262 210" />
+              </circle>
+              <circle class="dot sub" r="5">
+                <animateMotion dur="2.8s" repeatCount="indefinite" path="M92 330C190 330 200 210 262 210" />
+              </circle>
+              <circle class="dot lim" r="5">
+                <animateMotion dur="2.5s" repeatCount="indefinite" path="M432 96C360 96 340 210 262 210" />
+              </circle>
+              <rect class="wallet" x="212" y="160" width="100" height="100" rx="28" />
+              <path class="tick" d="M240 204 257 232 286 190" />
+              <g class="proofed">
+                <rect x="178" y="282" width="168" height="36" rx="18" />
+                <text x="198" y="305">Revoked · verified</text>
+              </g>
+            </svg>
+            <!-- Each grant is drawn the way a wallet lists an asset: its mark, then what it is. -->
+            <div class="chip cut-chip" style="--x: 64; --y: 92">
+              <img src="./assets/delegate.svg" alt="" width="32" height="32" class="tile" />
+              <span><b>Delegate</b><small>Another key can spend</small></span>
+            </div>
+            <div class="chip" style="--x: 64; --y: 330">
+              <img src="./assets/tokens/sol.png" alt="" width="32" height="32" />
+              <span><b>Subscription</b><small>Pulls on a schedule</small></span>
+            </div>
+            <div class="chip end" style="--x: 460; --y: 96">
+              <span class="pair">
+                <img src="./assets/tokens/usdc.png" alt="" width="32" height="32" />
+                <img src="./assets/tokens/usdt.svg" alt="" width="32" height="32" />
+              </span>
+              <span><b>Spending limit</b><small>USDC, USDT per day</small></span>
+            </div>
+          </div>
         </div>
       </section>
 

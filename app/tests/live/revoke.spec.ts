@@ -77,8 +77,9 @@ async function review(page: Page, request: APIRequestContext, mode: "sign" | "re
   await page.goto("/app");
   await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
   // The wallet's accounts are read from the chain before the first one is shown.
-  await expect(page.locator("#address")).not.toHaveValue("", { timeout: 30000 });
-  const source = await page.locator("#address").inputValue();
+  const from = page.locator("#results .permission .field", { hasText: "From" }).locator(".mono").first();
+  await expect(from).toBeVisible({ timeout: 30000 });
+  const source = await from.innerText();
   const spender = await delegate(request, source);
   expect(spender).toBeTruthy();
   await expect(page.locator("#results article")).toContainText(spender!);
@@ -187,7 +188,11 @@ test("a visitor with no wallet gets a permission, revokes it and keeps a replaya
   await page.getByRole("button", { name: "Get a test permission" }).click();
   await expect(page.locator("#try-status")).toContainText("Your permission is live", { timeout: 120000 });
   // The wallet granted it by signing; the chain, not the page, is asked whether it exists.
-  const source = await page.locator("#address").inputValue();
+  const source = await page
+    .locator("#results .permission .field", { hasText: "From" })
+    .locator(".mono")
+    .first()
+    .innerText();
   const spender = await delegate(request, source);
   expect(spender).toBeTruthy();
   await expect(page.locator("#results article")).toContainText(spender!, { timeout: 30000 });

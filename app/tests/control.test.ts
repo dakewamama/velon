@@ -37,6 +37,9 @@ test("review binds native revoke bytes, owner, permission and simulation bank", 
   expect(() => reviewRevoke(simulation, view, grant, fixture.signing.source, devnet)).toThrow(
     "required owner",
   );
+  // A mainnet console never reviews bytes observed on another cluster, whatever it is told.
+  const mainnet = { ...devnet, network: "mainnet" } as const;
+  expect(() => reviewRevoke(simulation, view, grant, fixture.signing.owner, mainnet)).toThrow();
   const elsewhere = { ...devnet, cluster: "another-genesis", network: "localnet" } as const;
   expect(() => reviewRevoke(simulation, view, grant, fixture.signing.owner, elsewhere)).toThrow();
   for (const mutate of [
@@ -46,7 +49,7 @@ test("review binds native revoke bytes, owner, permission and simulation bank", 
     (s: ObjectValue) => (object(s.observation).slot = 11),
     (s: ObjectValue) => (s.changes = []),
     (s: ObjectValue) => (object(object(s.response).value).err = "failed"),
-    (s: ObjectValue) => (object(object(s.response).context).slot = 11),
+    (s: ObjectValue) => (object(object(s.response).context).slot = 9),
     (s: ObjectValue) =>
       (object(object(object(s.response).value).replacementBlockhash).blockhash = "different"),
   ]) {
@@ -54,6 +57,10 @@ test("review binds native revoke bytes, owner, permission and simulation bank", 
     mutate(changed);
     expect(() => reviewRevoke(changed, view, grant, fixture.signing.owner, devnet)).toThrow();
   }
+  // The runtime executed in the observed bank; a provider may agree from a later one.
+  const later = structuredClone(simulation) as ObjectValue;
+  object(object(later.response).context).slot = 11;
+  expect(() => reviewRevoke(later, view, grant, fixture.signing.owner, devnet)).not.toThrow();
 });
 
 function finalized() {

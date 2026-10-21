@@ -15,6 +15,8 @@ import {
   getTransactionDecoder,
   getTransactionEncoder,
 } from "@solana/transactions";
+import { avatar, icon, solana, type IconName } from "./icons.ts";
+import { TOKENS, describeDelegate, tokenLogo } from "./tokens.ts";
 import {
   call,
   array,
@@ -23,6 +25,7 @@ import {
   grants,
   integer,
   object,
+  mintOf,
   permissionLabel,
   principalLabel,
   readJson,
@@ -94,6 +97,37 @@ function field(title: string, value: string): HTMLElement {
   return row;
 }
 
+// An address with its avatar and a copy button; the full key stays selectable.
+function address(title: string, value: string): HTMLElement {
+  const row = field(title, "");
+  const cell = row.querySelector("dd")!;
+  cell.classList.add("address-cell");
+  const copy = node("button", "", "icon-button");
+  copy.type = "button";
+  copy.title = "Copy address";
+  copy.setAttribute("aria-label", `Copy ${title.toLowerCase()} address`);
+  copy.append(icon("copy"));
+  copy.onclick = async () => {
+    await navigator.clipboard?.writeText(value).catch(() => {});
+    copy.replaceChildren(icon("check"));
+    setTimeout(() => copy.replaceChildren(icon("copy")), 1200);
+  };
+  cell.append(avatar(value), node("span", value, "mono"), copy);
+  return row;
+}
+
+// A button or link that leads with its icon.
+function labelled<T extends HTMLElement>(element: T, name: IconName): T {
+  element.prepend(icon(name));
+  return element;
+}
+
+// The header names the network, with Solana's mark whenever a real cluster is behind it.
+function badge(label: string, chain = true) {
+  const target = document.querySelector<HTMLElement>(".header-links .badge")!;
+  target.replaceChildren(...(chain && control ? [solana()] : []), label);
+}
+
 function metadata(view: ObjectValue): HTMLElement {
   const observation = object(view.observation);
   const coverage = object(view.coverage);
@@ -141,8 +175,6 @@ function toggleDetail(row: HTMLElement, button: HTMLButtonElement, grant: Object
   const facts = node("dl", "", "facts");
   const usage = object(grant.usage);
   facts.append(
-    field("From", text(object(grant.resource).id)),
-    field("Native system", system(grant)),
     field("Enforcement", text(grant.enforcement)),
     field("Observability", text(grant.observability)),
     field("Lifecycle", text(object(grant.lifecycle).kind)),
@@ -154,7 +186,7 @@ function toggleDetail(row: HTMLElement, button: HTMLButtonElement, grant: Object
         "Remaining at observation",
         usage.remaining === null
           ? "Unknown"
-          : `${integer(usage.remaining).toLocaleString("en-US")} base units`,
+          : allowance(text(object(grant.resource).id), integer(usage.remaining)),
       ),
     );
   detail.append(facts);
@@ -209,16 +241,33 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string, scope
   const actor = object(grant.principal);
   row.dataset.who = actor.kind === "identity" ? short(text(actor.value)) : "several keys";
   const left = object(grant.usage).remaining;
-  row.dataset.amount = left == null ? "" : integer(left).toLocaleString("en-US");
+  row.dataset.amount = left == null ? "" : compact(integer(left));
   row.dataset.system = text(object(grant.native_context).protocol);
   const header = node("div", "", "permission-header");
   const state = node("span", STATUS[availability] ?? availability, "availability");
   state.dataset.state = availability;
   const kind = text(object(grant.authority_kind).kind);
+  const source = text(object(grant.resource).id);
+  const mint = mintOf(grant);
+  const asset = node("span", "", "token");
+  if (mint) {
+    const known = TOKENS[mint];
+    asset.append(tokenLogo(mint), node("span", known?.symbol ?? short(mint)));
+    asset.title = known ? `${known.name}: ${mint}` : `Token mint ${mint}`;
+  }
+  header.prepend(asset);
   header.append(node("span", KINDS[kind] ?? kind, "badge"), state);
   row.append(
     header,
-    node("h3", permissionLabel(grant)),
+    node(
+      "h3",
+      permissionLabel(grant, (units) =>
+        units === UNLIMITED
+          ? "every token, with no limit"
+          : (tokens(units, source, mint) ?? `${units.toLocaleString("en-US")} base units`),
+      ),
+    ),
+    delegate(grant),
     node("p", meaning(grant, connected?.account.address), "explain"),
   );
   const usage = object(grant.usage);
@@ -228,19 +277,23 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string, scope
         "p",
         usage.remaining === null
           ? "Remaining allowance is unknown."
-          : `${integer(usage.remaining).toLocaleString("en-US")} base units remain at this observation.`,
-        "remaining",
+          : `${allowance(source, integer(usage.remaining), mint)} remain at this observation.`,
+        usage.remaining !== null && integer(usage.remaining) === UNLIMITED
+          ? "remaining unlimited"
+          : "remaining",
       ),
     );
   const facts = node("dl");
   facts.append(
-    field("Who", principalLabel(grant.principal)),
-    field("From", text(object(grant.resource).id)),
+    object(grant.principal).kind === "identity"
+      ? address("Who", text(object(grant.principal).value))
+      : field("Who", principalLabel(grant.principal)),
+    address("From", text(object(grant.resource).id)),
     field("Native system", system(grant)),
   );
   // The wallet that owns the account the permission applies to.
   const holder = object(grant.subject);
-  if (holder.kind === "identity") facts.prepend(field("Owner", text(holder.value)));
+  if (holder.kind === "identity") facts.prepend(address("Owner", text(holder.value)));
   const actions = node("div", "", "permission-actions");
   const button = node("button", "View details", "link-button");
   button.setAttribute("aria-expanded", "false");
@@ -260,7 +313,7 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string, scope
     object(grant.subject).kind === "identity" &&
     object(grant.subject).value === connected.account.address
   ) {
-    const revoke = node("button", "Revoke", "action-button");
+    const revoke = labelled(node("button", "Revoke", "action-button"), "revoke");
     revoke.onclick = () => void prepare(grant, scope);
     actions.prepend(revoke);
   } else if (scope && grant.capability === "spend") {
@@ -268,13 +321,47 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string, scope
     const holder = object(grant.subject);
     const owner = holder.kind === "identity" ? text(holder.value) : "";
     if (!connected) {
-      const start = node("button", "Connect to revoke", "action-button");
+      const start = labelled(node("button", "Connect to revoke", "action-button"), "wallet");
       start.onclick = () => connectButton.click();
       actions.prepend(start);
     } else if (owner && owner !== connected.account.address)
       actions.append(node("span", `Only wallet ${short(owner)} can revoke this.`, "muted"));
   }
   return row;
+}
+
+// Who holds the permission, named from what the chain says the key is.
+function delegate(grant: ObjectValue): HTMLElement {
+  const actor = object(grant.principal);
+  const line = node("div", "", "delegate");
+  if (actor.kind !== "identity") {
+    line.append(
+      node("strong", "Several keys"),
+      node("span", "Any of them can use this one shared permission", "muted"),
+    );
+    return line;
+  }
+  const key = text(actor.value);
+  const name = node("strong", short(key));
+  const detail = node("span", `Delegate through ${system(grant)}`, "muted");
+  line.append(avatar(key), name, detail);
+  if (control)
+    void describeDelegate(control.rpcUrl, key)
+      .then((found) => {
+        name.textContent = found.title;
+        detail.textContent = `${found.detail} · ${short(key)}`;
+      })
+      .catch(() => {});
+  return line;
+}
+
+// Short enough for the diagram's node: 25, 1.2K, 4.5M, then powers of ten.
+function compact(units: bigint): string {
+  if (units === UNLIMITED) return "∞";
+  if (units < 1_000_000_000_000n)
+    return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(units);
+  const digits = units.toString();
+  return `${digits[0]}.${digits[1]}e${digits.length - 1}`;
 }
 
 function currentScenario(): Scenario {
@@ -288,7 +375,7 @@ async function scan(historical = false, refresh = false) {
   request?.abort();
   request = new AbortController();
   const signal = request.signal;
-  const address = input.value.trim();
+  const address = input.value.trim() || subject;
   results.replaceChildren();
   scanButton.disabled = false;
   if (!isAddress(address)) {
@@ -312,11 +399,7 @@ async function scan(historical = false, refresh = false) {
       });
       scenario.scope = text(object(await result(observed)).scope_id);
     }
-    document.querySelector(".header-links .badge")!.textContent = live
-      ? control!.network === "devnet"
-        ? "Devnet observation"
-        : "Local validator"
-      : "Recorded native evidence";
+    badge(live ? network().label : "Recorded native evidence", live);
     document.querySelector(".scope-note")!.textContent = live
       ? "Read from a finalized observation of this token account. Coverage is partial."
       : "Read from accounts captured in executed native tests. Coverage is partial.";
@@ -413,10 +496,10 @@ async function showDiff() {
     for (const change of changes) {
       const grant = change.after ?? change.before!;
       const row = node("article", "", "permission");
-      row.append(
-        node("span", change.kind, "badge"),
-        node("h3", `${text(object(grant.authority_kind).kind)} authority: ${permissionLabel(grant)}`),
-      );
+      const header = node("div", "", "permission-header");
+      const kind = text(object(grant.authority_kind).kind);
+      header.append(node("span", change.kind, "badge change"), node("span", KINDS[kind] ?? kind, "badge"));
+      row.append(header, node("h3", permissionLabel(grant)));
       row.append(node("p", principalLabel(grant.principal), "address"));
       if (change.before) row.append(raw("Before", change.before));
       if (change.after) row.append(raw("After", change.after));
@@ -461,6 +544,8 @@ function setMode(next: "scan" | "diff", refresh = false) {
   } else void (refresh ? scan(false, true) : reload());
 }
 
+// The account shown when the visitor has not typed or picked one.
+let subject = "";
 function selectScenario() {
   const scenario = currentScenario();
   const examples = document.querySelector<HTMLElement>("#examples")!;
@@ -476,12 +561,45 @@ function selectScenario() {
     };
     examples.append(button);
   }
-  input.value = scenario.examples[0]?.address ?? "";
+  // The first example opens with the set, but the box stays the visitor's to fill.
+  subject = scenario.examples[0]?.address ?? "";
+  input.value = "";
   if (mode === "diff") void showDiff();
   else void scan();
 }
 
 let control: Control | null = null;
+// Wallet Standard chain, plain name and Explorer suffix for the server's network.
+const NETWORKS = {
+  mainnet: { chain: "solana:mainnet", label: "Mainnet", explorer: () => "" },
+  devnet: { chain: "solana:devnet", label: "Devnet", explorer: () => "?cluster=devnet" },
+  localnet: {
+    chain: "solana:localnet",
+    label: "Local validator",
+    explorer: () => `?cluster=custom&customUrl=${encodeURIComponent(control?.rpcUrl ?? "")}`,
+  },
+} as const;
+const network = () => NETWORKS[control?.network ?? "localnet"];
+const explorer = (kind: "address" | "tx", value: string) =>
+  `https://explorer.solana.com/${kind}/${value}${network().explorer()}`;
+// Mint decimals as the RPC's token index reported them, keyed by token account. Display only:
+// every check and every signed byte stays in base units.
+const decimals = new Map<string, number>();
+const UNLIMITED = 18446744073709551615n;
+function tokens(units: bigint, source: string, mint?: string): string | undefined {
+  const known = mint ? TOKENS[mint] : undefined;
+  const scale = known?.decimals ?? decimals.get(source);
+  if (scale === undefined) return undefined;
+  const whole = (units / 10n ** BigInt(scale)).toLocaleString("en-US");
+  const fraction = (units % 10n ** BigInt(scale)).toString().padStart(scale, "0").replace(/0+$/, "");
+  return `${whole}${fraction ? `.${fraction}` : ""} ${known?.symbol ?? "tokens"}`;
+}
+function allowance(source: string, units: bigint, mint?: string): string {
+  if (units === UNLIMITED) return "Unlimited: every token this account will ever hold";
+  const base = `${units.toLocaleString("en-US")} base units`;
+  const shown = tokens(units, source, mint);
+  return shown ? `${shown} (${base})` : base;
+}
 let connected: { wallet: SigningWallet; account: SigningWallet["accounts"][number] } | undefined;
 let unsubscribe: (() => void) | undefined;
 let actionAbort: AbortController | undefined;
@@ -512,6 +630,7 @@ wallets.on("unregister", () => {
   if (connected && !wallets.get().includes(connected.wallet)) disconnected();
   refreshWallets();
 });
+connectButton.prepend(icon("wallet"));
 refreshWallets();
 
 function disconnected() {
@@ -570,13 +689,16 @@ async function connect(wallet: SigningWallet | undefined) {
     const account = accounts.find(
       (account) =>
         account.features.includes("solana:signTransaction") &&
-        (control?.network !== "devnet" || account.chains.includes("solana:devnet")),
+        (control?.network === "localnet" || account.chains.includes(network().chain)),
     );
     if (!account) throw new Error("This wallet has no compatible Solana signing account.");
     unsubscribe?.();
     connected = { wallet, account };
     unsubscribe = wallet.features["standard:events"].on("change", disconnected);
-    walletStatus.textContent = `${account.address.slice(0, 4)}…${account.address.slice(-4)}`;
+    const logo = node("img", "", "wallet-icon");
+    logo.src = wallet.icon;
+    logo.alt = "";
+    walletStatus.replaceChildren(logo, `${account.address.slice(0, 4)}…${account.address.slice(-4)}`);
     walletStatus.title = `${wallet.name}: ${account.address}`;
     disconnectButton.hidden = false;
     refreshWallets();
@@ -584,10 +706,11 @@ async function connect(wallet: SigningWallet | undefined) {
     bench.hidden = true;
     tryPanel.dataset.state = "connected";
     draw();
-    document.querySelector("#try-status")!.textContent = "Test tokens arrive, then you sign one approval.";
+    if (control?.testBench)
+      document.querySelector("#try-status")!.textContent = "Test tokens arrive, then you sign one approval.";
     const live = scenarios.findIndex((scenario) => scenario.live);
     if (live >= 0) select.value = String(live);
-    if (control?.network === "localnet" && (await scanWallet())) return;
+    if (control && (await scanWallet())) return;
     if (live >= 0) selectScenario();
     else {
       input.value = account.address;
@@ -601,7 +724,7 @@ async function connect(wallet: SigningWallet | undefined) {
 // Tells the wallet which cluster the bytes belong to. Without it a wallet assumes its own
 // network, cannot simulate a test-chain transaction there and may rewrite the blockhash.
 function chainFor(wallet: SigningWallet) {
-  const chain = control?.network === "devnet" ? ("solana:devnet" as const) : ("solana:localnet" as const);
+  const { chain } = network();
   return wallet.chains.includes(chain) ? { chain } : {};
 }
 
@@ -621,23 +744,37 @@ document.querySelector<HTMLButtonElement>("#connect-own")!.onclick = () => conne
 // Comparing two recorded states only exists for recorded examples.
 const compareTab = (shown: boolean) => (document.querySelector<HTMLElement>("#diff-tab")!.hidden = !shown);
 
-// Every permission across the connected wallet's token accounts on the test chain.
-// Each account is observed through the runtime; the chain's own list only says where to look.
+// Every permission across the connected wallet's token accounts.
+// Each account is observed through the runtime; the RPC's index only says where to look.
 async function scanWallet(): Promise<boolean | undefined> {
   if (!connected) return false;
   const owner = connected.account.address;
   request?.abort();
   request = new AbortController();
   const signal = request.signal;
-  const listed = await call("/api/live/spl/delegated", { signal });
+  // Only a ledger we started can be enumerated; public clusters answer per owner.
+  const listed =
+    control?.network === "localnet"
+      ? await call("/api/live/spl/delegated", { signal })
+      : await call("/api/live/spl/owned", {
+          method: "POST",
+          headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
+          body: JSON.stringify({ owner }),
+          signal,
+        });
   if (!listed.ok) return false;
   mode = "scan";
   diff.hidden = true;
   receipts.hidden = true;
   results.hidden = false;
-  const owned = array(readJson(await listed.text()))
+  const reported = array(readJson(await listed.text()))
     .map(object)
     .filter((entry) => entry.owner === owner);
+  for (const entry of reported)
+    if (typeof entry.decimals === "number") decimals.set(text(entry.source), entry.decimals);
+  // Token-2022 delegations are real, but this runtime cannot verify or revoke them yet.
+  const owned = reported.filter((entry) => entry.program !== "spl-token-2022");
+  const unsupported = reported.filter((entry) => entry.program === "spl-token-2022");
   const content = document.createDocumentFragment();
   const cards: HTMLElement[] = [];
   let last: ObjectValue | undefined;
@@ -664,9 +801,16 @@ async function scanWallet(): Promise<boolean | undefined> {
     return false;
   }
   if (signal.aborted) return false;
-  input.value = text(owned[0]?.source ?? "");
-  document.querySelector(".header-links .badge")!.textContent = "Local validator";
+  badge(network().label);
   content.append(node("h2", "Who can act on your wallet"));
+  if (control?.network === "mainnet")
+    content.append(
+      node(
+        "p",
+        "Mainnet: a revoke is a real transaction and costs a small fee in SOL. Velon only asks you to sign after it has executed the revoke itself against the account's finalized state.",
+        "notice",
+      ),
+    );
   if (last) content.append(metadata(last));
   if (cards.length) content.append(...cards);
   else
@@ -675,10 +819,42 @@ async function scanWallet(): Promise<boolean | undefined> {
         "p",
         control?.testBench
           ? "No classic SPL token delegates found on this wallet. Get a test permission above, then revoke it here."
-          : "No classic SPL token delegates found on this wallet. Other kinds of permission were not checked.",
+          : "No SPL Token delegates found on this wallet. Other kinds of permission were not checked.",
         "empty",
       ),
     );
+  for (const entry of unsupported) {
+    const row = node("article", "", "permission reported");
+    const header = node("div", "", "permission-header");
+    header.append(
+      node("span", "Token-2022", "badge"),
+      node("span", "Reported, not verified", "availability"),
+    );
+    const link = labelled(node("a", "Open on Solana Explorer", "link-button"), "external");
+    link.href = explorer("address", text(entry.source));
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    const actions = node("div", "", "permission-actions");
+    actions.append(link);
+    const facts = node("dl");
+    facts.append(
+      address("Who", text(entry.delegate)),
+      address("From", text(entry.source)),
+      address("Token", text(entry.mint)),
+    );
+    row.append(
+      header,
+      node("h3", `Spend up to ${text(entry.ui)} tokens`),
+      node(
+        "p",
+        "Velon cannot verify or revoke Token-2022 delegations yet. Revoke this one from your wallet.",
+        "explain",
+      ),
+      facts,
+      actions,
+    );
+    content.append(row);
+  }
   compareTab(false);
   results.replaceChildren(content);
   notice.replaceChildren();
@@ -848,7 +1024,10 @@ document.querySelector<HTMLButtonElement>("#receipts-tab")!.onclick = () => {
     const actions = node("div", "", "permission-actions");
     actions.append(replay, outcome);
     row.append(
-      node("h3", `Revoked on ${receipt.network === "devnet" ? "devnet" : "the test chain"}`),
+      node(
+        "h3",
+        `Revoked on ${{ mainnet: "mainnet", devnet: "devnet" }[receipt.network] ?? "the test chain"}`,
+      ),
       node("p", new Date(receipt.at).toLocaleString(), "remaining"),
       facts,
       actions,
@@ -897,7 +1076,15 @@ function draw() {
   const cards = [...results.querySelectorAll<HTMLElement>(".permission[data-id]")].slice(0, SPOTS.length);
   const parts: string[] = [];
   for (const [index, item] of cards.entries()) {
-    const [x, y] = SPOTS[index]!;
+    const [x, y] =
+      cards.length === 1
+        ? [190, 190]
+        : cards.length === 2
+          ? [
+              [170, 190],
+              [830, 190],
+            ][index]!
+          : SPOTS[index]!;
     const bend = x < 500 ? x + 170 : x - 170;
     const path = `M${x} ${y}C${bend} ${y} ${bend} 190 500 190`;
     const kind = item.dataset.system === "spl-token" ? "spl" : "sub";
@@ -1027,15 +1214,23 @@ async function prepare(scanned: ObjectValue, scope: string) {
       ),
     );
     if (walletHint()) review.append(node("p", walletHint(), "notice"));
+    if (config.network === "mainnet")
+      review.append(
+        node(
+          "p",
+          "This is mainnet. The fee is about 0.000015 SOL: the 5,000-lamport base fee plus a fixed 10,000-lamport priority fee. Nothing else leaves your wallet.",
+          "notice",
+        ),
+      );
     const facts = node("dl", "", "facts");
     facts.append(
       field("Who", principalLabel(grant.principal)),
       field("Can", "Spend"),
-      field("From", source),
-      field("Limit", `${integer(object(grant.usage).remaining).toLocaleString("en-US")} base units`),
+      address("From", source),
+      field("Limit", allowance(source, integer(object(grant.usage).remaining), mintOf(grant))),
       field("Native system", system(grant)),
-      field("Network", config.network === "devnet" ? "Devnet" : "Local validator"),
-      field("Simulation", "Verified"),
+      field("Network", network().label),
+      field("Executed by Velon", "Delegate and allowance cleared, nothing else changed"),
       field("Deployment", "Verified"),
     );
     const confirm = node("button", "Confirm in wallet", "action-button");
@@ -1095,7 +1290,7 @@ async function prepare(scanned: ObjectValue, scope: string) {
             ? "Submission response is uncertain. Checking finalization without resending."
             : "Waiting for finalized native verification...",
         );
-        actionResult.append(field("Transaction signature", sent.signature));
+        actionResult.append(link("Transaction", sent.signature));
         for (let attempt = 0; attempt < 60; attempt++) {
           signal.throwIfAborted();
           const response = await action(path, signal, sent.signedTransaction);
@@ -1130,12 +1325,9 @@ async function prepare(scanned: ObjectValue, scope: string) {
             at: new Date().toISOString(),
           });
           signal.throwIfAborted();
-          setAction(
-            "VERIFIED",
-            config.network === "devnet" ? "Verified on chain (devnet)." : "Verified on the local validator.",
-          );
+          setAction("VERIFIED", `Revoked and verified on ${network().label.toLowerCase()}.`);
           actionResult.append(
-            field("Transaction signature", sent.signature),
+            link("Transaction", sent.signature),
             field("Finalized slot", String(checked.slot)),
             field("Verification ID", checked.id),
           );
@@ -1151,7 +1343,7 @@ async function prepare(scanned: ObjectValue, scope: string) {
         setAction(
           "FAILED",
           /message|changed/i.test(reason) && !sendRequested
-            ? "Your wallet altered the transaction before signing, so Velon did not send it. Set the wallet to this network (in Phantom: Settings, Developer Settings, Testnet Mode, Localnet) and try again."
+            ? `Your wallet altered the transaction before signing, so Velon did not send it. Set the wallet to ${network().label} and try again.`
             : reason,
         );
         if (submittedSignature) actionResult.append(field("Transaction signature", submittedSignature));
@@ -1167,8 +1359,34 @@ review.addEventListener("cancel", invalidateReview);
 function lesson() {
   compareTab(false);
   results.replaceChildren();
-  document.querySelector(".header-links .badge")!.textContent =
-    control?.network === "devnet" ? "Devnet" : "Local validator";
+  // On a public cluster the visitor's own wallet is the whole point; ask for it first.
+  if (control && !control.testBench && !connected) {
+    const start = labelled(node("button", "Connect wallet", "action-button"), "wallet");
+    start.onclick = () => connectButton.click();
+    const panel = node("section", "", "start");
+    panel.append(
+      node("h2", "See who can spend your tokens"),
+      node(
+        "p",
+        `Connect a wallet to list every SPL Token delegate on its accounts on ${network().label.toLowerCase()}. Connecting signs nothing. You choose what to revoke, and you approve every transaction in your wallet.`,
+        "muted",
+      ),
+      start,
+    );
+    results.append(panel);
+  }
+  badge(network().label);
+}
+
+// A signature the visitor can open on Solana Explorer.
+function link(title: string, signature: string): HTMLElement {
+  const row = field(title, "");
+  const anchor = labelled(node("a", short(signature)), "external");
+  anchor.href = explorer("tx", signature);
+  anchor.target = "_blank";
+  anchor.rel = "noreferrer";
+  row.querySelector("dd")!.append(anchor);
+  return row;
 }
 
 // A mainnet row is shown as its RPC reports it. This runtime holds no mainnet evidence,
@@ -1185,12 +1403,12 @@ function showMainnet(entry: ObjectValue) {
   );
   const facts = node("dl");
   facts.append(
-    field("Who", text(entry.delegate)),
-    field("From", text(entry.source)),
+    address("Who", text(entry.delegate)),
+    address("From", text(entry.source)),
     field("Wallet", text(entry.owner)),
-    field("Token", text(entry.mint)),
+    address("Token", text(entry.mint)),
   );
-  const link = node("a", "Open on Solana Explorer ↗", "link-button");
+  const link = labelled(node("a", "Open on Solana Explorer", "link-button"), "external");
   link.href = `https://explorer.solana.com/address/${text(entry.source)}${net === "devnet" ? "?cluster=devnet" : ""}`;
   link.target = "_blank";
   link.rel = "noreferrer";
@@ -1219,8 +1437,7 @@ function showMainnet(entry: ObjectValue) {
   notice.replaceChildren();
   compareTab(false);
   results.replaceChildren(node("h2", `Seen on ${net}`), row);
-  document.querySelector(".header-links .badge")!.textContent =
-    `${net === "devnet" ? "Devnet" : "Mainnet"}, read only`;
+  badge(`${net === "devnet" ? "Devnet" : "Mainnet"}, read only`);
   guide(2);
   if (innerWidth < 960) results.scrollIntoView({ block: "start" });
 }
@@ -1367,7 +1584,7 @@ try {
   const [scenarioData, controlData] = await Promise.all([get("scenarios"), get("control")]);
   if (controlData !== null) {
     const config = object(controlData);
-    if (config.network !== "devnet" && config.network !== "localnet")
+    if (config.network !== "mainnet" && config.network !== "devnet" && config.network !== "localnet")
       throw new Error("Unsupported control network.");
     const rpcUrl = new URL(text(config.rpcUrl));
     if (!["http:", "https:"].includes(rpcUrl.protocol)) throw new Error("Invalid public RPC URL.");

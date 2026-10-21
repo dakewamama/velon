@@ -8,6 +8,8 @@ export type Live = {
   /// Recent mainnet delegations as its RPC reports them; read only and unverified.
   mainnet?: () => Response;
   devnet?: () => Response;
+  /// Lists one wallet's delegated token accounts, as the RPC's owner index reports them.
+  owned?: (owner: string) => Promise<Response>;
   /// Lists delegated token accounts the cluster reports right now.
   discover?: () => Promise<Response>;
   /// Test bench only: approves a fresh delegate allowance on a disposable ledger.
@@ -47,6 +49,7 @@ export function createServer(
       const observe = live?.observe;
       const observePath = observe && url.pathname === "/api/live/spl/observe";
       const fund = url.pathname === "/api/test/account" ? live?.fund : undefined;
+      const owned = url.pathname === "/api/live/spl/owned" ? live?.owned : undefined;
       const discover = url.pathname === "/api/live/spl/delegated" ? live?.discover : undefined;
       const approve = url.pathname === "/api/live/spl/approve" ? live?.approve : undefined;
       const mainnet =
@@ -63,6 +66,7 @@ export function createServer(
           !controlPath &&
           !observePath &&
           !fund &&
+          !owned &&
           !discover &&
           !approve &&
           !mainnet) ||
@@ -70,7 +74,7 @@ export function createServer(
         (action && !isAddress(action[1]!))
       )
         return new Response("Not found", { status: 404 });
-      const method = action || observePath || approve || fund ? "POST" : "GET";
+      const method = action || observePath || approve || fund || owned ? "POST" : "GET";
       if (request.method !== method)
         return new Response("Method not allowed", { status: 405, headers: { Allow: method } });
       if (scenariosPath) return Response.json(scenarios);
@@ -86,13 +90,13 @@ export function createServer(
           ? new Response("Test approval takes no input", { status: 400 })
           : approve();
       if (
-        (verify || observePath || fund) &&
+        (verify || observePath || fund || owned) &&
         request.headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase() !== "application/json"
       )
         return new Response("JSON body required", { status: 415 });
-      if (observePath || fund) {
+      if (observePath || fund || owned) {
         // Only a validated address leaves this handler; the launcher builds everything else.
-        const key = fund ? "owner" : "source";
+        const key = fund || owned ? "owner" : "source";
         let address: unknown;
         try {
           const input: unknown = JSON.parse(await request.text());
@@ -103,7 +107,7 @@ export function createServer(
         }
         if (typeof address !== "string" || !isAddress(address))
           return new Response("Address required", { status: 400 });
-        return fund ? fund(address) : observe!(address);
+        return fund ? fund(address) : owned ? owned(address) : observe!(address);
       }
       const body = action ? await request.arrayBuffer() : undefined;
       if (simulate && body!.byteLength)

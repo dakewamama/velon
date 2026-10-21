@@ -5,7 +5,7 @@ import { integer, object, readJson, text, type Json } from "../src/wire.ts";
 const ALLOWANCE = process.env.ALLOWANCE ?? "25";
 if (!/^[1-9]\d{0,17}$/.test(ALLOWANCE)) throw new Error("ALLOWANCE must be a positive integer.");
 const tools = process.env.AGAVE_BIN;
-if (!tools) throw new Error("Set AGAVE_BIN to an Agave 3.1.10 release bin directory.");
+if (!tools) throw new Error("Set AGAVE_BIN to an Agave release bin directory.");
 const dir = `${resolve(import.meta.dir, "..")}/.data/local`;
 const url = `http://127.0.0.1:${Number(process.env.LOCAL_RPC_PORT ?? 8899)}`;
 
