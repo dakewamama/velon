@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Velon OG image source</title>
+    <link rel="stylesheet" href="../styles.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 1200px;
+        height: 630px;
+        overflow: hidden;
+        color-scheme: light;
+      }
+      body {
+        background: #f3f0e8;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        padding: 64px 72px;
+        box-sizing: border-box;
+      }
+      .top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .brand {
+        font-size: 28px;
+        gap: 14px;
+        color: #111814;
+      }
+      .brand .mark {
+        width: 40px;
+        height: 40px;
+      }
+      .label {
+        font-family: var(--mono);
+        font-size: 16px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #5b665f;
+      }
+      h1 {
+        align-self: center;
+        font-family: var(--serif);
+        font-weight: 380;
+        font-size: 112px;
+        line-height: 0.96;
+        letter-spacing: -0.025em;
+        color: #111814;
+        margin: 0;
+      }
+      h1 em {
+        font-style: italic;
+        color: #08734f;
+        font-weight: 360;
+      }
+      .bottom {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        font-family: var(--mono);
+        font-size: 18px;
+        color: #38433d;
+      }
+      .t {
+        height: 2px;
+        width: 150px;
+        background: #b83a22;
+        position: relative;
+      }
+      .t::before {
+        content: "";
+        position: absolute;
+        left: -4px;
+        top: -3px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #b83a22;
+      }
+      .gap {
+        width: 36px;
+        text-align: center;
+        color: #111814;
+        font-size: 22px;
+      }
+      .t2 {
+        height: 2px;
+        width: 60px;
+        background: #aba493;
+      }
+      .key {
+        padding: 6px 12px;
+        border-radius: 6px;
+        box-shadow: inset 0 0 0 1px #d8d2c4;
+        color: #5b665f;
+        text-decoration: line-through;
+      }
+      .ok {
+        margin-left: auto;
+        color: #08734f;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="top">
+      <span class="brand"
+        ><svg class="mark" viewBox="0 0 32 32">
+          <rect width="32" height="32" rx="8" />
+          <path d="M9 11.5 14.6 21.5 23.5 9" /></svg
+        ><span>Velon</span></span
+      >
+      <span class="label">Solana token approvals</span>
+    </div>
+    <h1>Proof before you sign.<br /><em>Proof after.</em></h1>
+    <div class="bottom">
+      <span>Delegate</span><span class="t"></span><span class="gap">×</span><span class="t2"></span
+      ><span class="key">EXAMPLE…DEX</span>
+      <span class="ok">Revoked · verified on re-read</span>
+    </div>
+  </body>
+</html>

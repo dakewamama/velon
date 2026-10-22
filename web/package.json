@@ -1,0 +1,10 @@
+{
+  "name": "velon-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build src/main.ts --outfile main.js --target browser --minify",
+    "serve": "bun serve.ts 4321",
+    "dev": "bun run build && bun serve.ts 4321"
+  }
+}
