@@ -229,3 +229,19 @@ test("action redirects and provider failures cannot become a success or a second
   upstream.stop(true);
   expect((await fetch(new URL(revokePath, server.url), post)).status).toBe(502);
 });
+
+test("the RPC relay is POST only and exists only when configured", async () => {
+  const upstream = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("{}") });
+  const bodies: string[] = [];
+  const relay = async (body: string) => (bodies.push(body), new Response('{"result":1}'));
+  const server = createServer(String(upstream.url), [], 0, "127.0.0.1", null, { relay });
+  const bare = createServer(String(upstream.url), [], 0);
+  servers.push(upstream, server, bare);
+  const call = '{"jsonrpc":"2.0","id":1,"method":"getGenesisHash"}';
+  const post = { method: "POST", headers: { "Content-Type": "application/json" }, body: call };
+  expect(await (await fetch(new URL("/rpc", server.url), post)).text()).toBe('{"result":1}');
+  expect(bodies).toEqual([call]);
+  expect((await fetch(new URL("/rpc", server.url))).status).toBe(405);
+  expect((await fetch(new URL("/rpc?x=1", server.url), post)).status).toBe(404);
+  expect((await fetch(new URL("/rpc", bare.url), post)).status).toBe(404);
+});

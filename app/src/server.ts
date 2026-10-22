@@ -16,6 +16,8 @@ export type Live = {
   approve?: () => Promise<Response>;
   /// Test bench only: gives a visitor's wallet a funded token account on that ledger.
   fund?: (owner: string) => Promise<Response>;
+  /// Forwards the browser's allowed JSON-RPC calls to a cluster that refuses browser origins.
+  relay?: (body: string) => Promise<Response>;
 };
 
 export function createServer(
@@ -52,6 +54,7 @@ export function createServer(
       const owned = url.pathname === "/api/live/spl/owned" ? live?.owned : undefined;
       const discover = url.pathname === "/api/live/spl/delegated" ? live?.discover : undefined;
       const approve = url.pathname === "/api/live/spl/approve" ? live?.approve : undefined;
+      const relay = url.pathname === "/rpc" ? live?.relay : undefined;
       const mainnet =
         url.pathname === "/api/mainnet/delegated"
           ? live?.mainnet
@@ -69,16 +72,18 @@ export function createServer(
           !owned &&
           !discover &&
           !approve &&
+          !relay &&
           !mainnet) ||
         (match?.[4] && !isAddress(match[4])) ||
         (action && !isAddress(action[1]!))
       )
         return new Response("Not found", { status: 404 });
-      const method = action || observePath || approve || fund || owned ? "POST" : "GET";
+      const method = action || observePath || approve || fund || owned || relay ? "POST" : "GET";
       if (request.method !== method)
         return new Response("Method not allowed", { status: 405, headers: { Allow: method } });
       if (scenariosPath) return Response.json(scenarios);
       if (controlPath) return Response.json(control, { headers: { "Cache-Control": "no-store" } });
+      if (relay) return relay(await request.text());
       if (discover) return discover();
       if (mainnet) return mainnet();
       // Cross-origin browser requests cannot supply this header without a CORS preflight.

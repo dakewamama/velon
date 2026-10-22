@@ -26,7 +26,7 @@ permission and revoke it on a hosted test validator, or browse recorded native e
 
 | Area                               | Status                                                               |
 | ---------------------------------- | -------------------------------------------------------------------- |
-| SPL Token delegate: observe        | Mainnet, devnet and a local validator                                |
+| SPL Token delegate: observe        | Mainnet, devnet and a local validator; program-held delegates too    |
 | SPL Token delegate: revoke + proof | Mainnet, devnet and a local validator, with real wallet signing      |
 | Token-2022 delegates               | Listed for the connected wallet, not verified or revocable yet       |
 | Solana Subscriptions               | Read-only, from accounts captured by executed native tests           |
@@ -92,6 +92,23 @@ RPC_URL=https://your-mainnet-rpc PUBLIC_RPC_URL=https://your-mainnet-rpc LIVE_NE
 `RPC_URL` stays on the server. `PUBLIC_RPC_URL` is what the browser submits the signed
 transaction to, so it must not carry a secret. Use `LIVE_NETWORK=devnet` with a devnet
 endpoint to try it with test funds first.
+
+The public endpoints (`api.mainnet-beta.solana.com`, `api.devnet.solana.com`) refuse
+requests from browsers. With `RPC_RELAY=1` the app relays the few methods the console
+needs through its own `/rpc`, so the browser never calls the provider directly:
+
+```sh
+RPC_URL=https://api.mainnet-beta.solana.com PUBLIC_RPC_URL=http://127.0.0.1:3000/rpc \
+RPC_RELAY=1 LIVE_NETWORK=mainnet MAINNET_RPC_URL=https://api.mainnet-beta.solana.com bun run demo
+```
+
+`MAINNET_RPC_URL` (or `DEVNET_RPC_URL`) adds a feed of the newest approvals on that
+cluster, limited to ones a wallet can revoke. On the console's own cluster, choosing a
+row observes the account and opens the same verified review as your own wallet.
+
+The hosted deployment runs the same way with `VELON_NETWORK=mainnet` and a private
+`UPSTREAM_RPC_URL` for `deploy/supervisor.py`. No local validator is started, and
+`deploy/gateway.ts` allows only the console's RPC methods and limits each visitor.
 
 ### The full revoke journey on a local validator
 

@@ -252,7 +252,7 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string, scope
   const asset = node("span", "", "token");
   if (mint) {
     const known = TOKENS[mint];
-    asset.append(tokenLogo(mint), node("span", known?.symbol ?? short(mint)));
+    asset.append(tokenLogo(mint), node("span", known?.symbol ?? `Token ${short(mint)}`));
     asset.title = known ? `${known.name}: ${mint}` : `Token mint ${mint}`;
   }
   header.prepend(asset);
@@ -277,7 +277,9 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string, scope
         "p",
         usage.remaining === null
           ? "Remaining allowance is unknown."
-          : `${allowance(source, integer(usage.remaining), mint)} remain at this observation.`,
+          : integer(usage.remaining) === UNLIMITED
+            ? "No limit: the delegate can move every token this account holds, now and later."
+            : `${allowance(source, integer(usage.remaining), mint)} remain at this observation.`,
         usage.remaining !== null && integer(usage.remaining) === UNLIMITED
           ? "remaining unlimited"
           : "remaining",
@@ -1116,10 +1118,16 @@ function draw() {
   }
 }
 new MutationObserver(draw).observe(results, { childList: true });
-document.querySelector<HTMLButtonElement>("#browse")!.onclick = (event) => {
+const browse = document.querySelector<HTMLButtonElement>("#browse")!;
+browse.onclick = () => {
   const open = document.body.classList.toggle("browsing");
-  (event.currentTarget as HTMLElement).setAttribute("aria-expanded", String(open));
+  browse.setAttribute("aria-expanded", String(open));
 };
+// Choosing an account closes the list so the result is not covered.
+function closeBrowse() {
+  document.body.classList.remove("browsing");
+  browse.setAttribute("aria-expanded", "false");
+}
 
 // Marks how far the visitor is in the three-step guide.
 function guide(step: number) {
@@ -1389,11 +1397,12 @@ function link(title: string, signature: string): HTMLElement {
   return row;
 }
 
-// A mainnet row is shown as its RPC reports it. This runtime holds no mainnet evidence,
-// so nothing here is presented as a verified permission and nothing can be revoked.
+// A row from another cluster is shown as its RPC reports it. This console holds evidence only
+// for its own cluster, so nothing here is presented as a verified permission or revocable.
 let publicNet: "devnet" | "mainnet" = "devnet";
 function showMainnet(entry: ObjectValue) {
   const net = publicNet;
+  closeBrowse();
   const unlimited = text(entry.amount) === "18446744073709551615";
   const row = node("article", "", "permission reported");
   const header = node("div", "", "permission-header");
@@ -1426,7 +1435,7 @@ function showMainnet(entry: ObjectValue) {
     actions,
     node(
       "p",
-      `This is what ${net}'s RPC reported a moment ago. Velon can only verify and revoke where it holds evidence for the chain's runtime, which in this build is the test chain.`,
+      `This is what ${net}'s RPC reported a moment ago. This console verifies and revokes on ${network().label.toLowerCase()}; open Velon on ${net} to act on it.`,
       "notice",
     ),
   );
@@ -1444,15 +1453,21 @@ function showMainnet(entry: ObjectValue) {
 
 async function watchMainnet() {
   const list = document.querySelector<HTMLElement>("#mainnet-feed")!;
+  const mode = document.querySelector<HTMLElement>("#mainnet-mode")!;
   let shown = "";
-  for (const choice of document.querySelectorAll<HTMLButtonElement>(".segmented button"))
-    choice.onclick = () => {
-      publicNet = choice.dataset.net as typeof publicNet;
-      shown = "";
-      list.replaceChildren(node("p", `Reading recent ${publicNet} blocks…`, "muted"));
-      for (const other of document.querySelectorAll(".segmented button"))
-        other.classList.toggle("selected", other === choice);
-    };
+  // Rows on the console's own cluster can be verified and revoked; others are only reported.
+  const choose = (choice: HTMLButtonElement) => {
+    publicNet = choice.dataset.net as typeof publicNet;
+    shown = "";
+    list.replaceChildren(node("p", `Reading recent ${publicNet} blocks…`, "muted"));
+    for (const other of document.querySelectorAll(".segmented button"))
+      other.classList.toggle("selected", other === choice);
+    mode.textContent = control?.network === publicNet ? "Verify and revoke" : "Read only";
+  };
+  for (const choice of document.querySelectorAll<HTMLButtonElement>(".segmented button")) {
+    choice.onclick = () => choose(choice);
+    if (choice.dataset.net === control?.network) choose(choice);
+  }
   for (;;) {
     try {
       const response = await call(`/api/${publicNet}/delegated`);
@@ -1461,8 +1476,11 @@ async function watchMainnet() {
         const missing = document.querySelector<HTMLElement>(`.segmented [data-net="${publicNet}"]`)!;
         if (missing.hidden) return;
         missing.hidden = true;
-        publicNet = publicNet === "devnet" ? "mainnet" : "devnet";
-        document.querySelector(`.segmented [data-net="${publicNet}"]`)!.classList.add("selected");
+        choose(
+          document.querySelector<HTMLButtonElement>(
+            `.segmented [data-net="${publicNet === "devnet" ? "mainnet" : "devnet"}"]`,
+          )!,
+        );
         continue;
       }
       const raw = await response.text();
@@ -1483,7 +1501,9 @@ async function watchMainnet() {
               for (const other of document.querySelectorAll(".feed-row"))
                 other.removeAttribute("aria-current");
               row.setAttribute("aria-current", "");
-              showMainnet(entry);
+              // On the cluster this console runs on, the row opens the verified flow.
+              if (control?.network === publicNet) openLive(text(entry.source));
+              else showMainnet(entry);
             };
             return row;
           }),
@@ -1498,6 +1518,17 @@ async function watchMainnet() {
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 5000));
   }
+}
+
+// A listed account is only a lead: opening it observes it through the runtime first.
+function openLive(source: string) {
+  const live = scenarios.findIndex((scenario) => scenario.live);
+  if (live < 0 || select.disabled) return;
+  closeBrowse();
+  select.value = String(live);
+  selectScenario();
+  input.value = source;
+  setMode("scan", true);
 }
 
 const feed = document.querySelector<HTMLElement>("#feed")!;
@@ -1535,14 +1566,7 @@ async function watch() {
             );
             if (connected && entry.owner === connected.account.address)
               row.append(node("span", "Yours", "badge"));
-            row.onclick = () => {
-              const live = scenarios.findIndex((scenario) => scenario.live);
-              if (live < 0 || select.disabled) return;
-              select.value = String(live);
-              selectScenario();
-              input.value = text(entry.source);
-              setMode("scan", true);
-            };
+            row.onclick = () => openLive(text(entry.source));
             return row;
           }),
         );

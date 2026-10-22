@@ -51,13 +51,16 @@
           <header>
             <span class="pulse" aria-hidden="true"></span>
             <strong>Public Solana</strong>
-            <span class="badge">Read only</span>
+            <span class="badge" id="mainnet-mode">Read only</span>
           </header>
           <div class="segmented" role="group" aria-label="Network">
             <button type="button" data-net="devnet" class="selected">Devnet</button>
             <button type="button" data-net="mainnet">Mainnet</button>
           </div>
-          <p class="muted">The newest wallets that let another key spend their tokens, five at most.</p>
+          <p class="muted">
+            The newest wallets that let another key spend their tokens, five at most. Only approvals a wallet
+            can revoke are listed.
+          </p>
           <div id="mainnet-feed" class="feed"></div>
         </section>
         <details class="search-panel">

@@ -200,6 +200,41 @@ if (process.env.RPC_URL) {
     }
   };
   live = { observe, owned };
+  // Public clusters refuse browser-origin RPC, so a local console relays the methods it needs.
+  // The hosted bench does the same in deploy/gateway.ts; keep the two lists in step.
+  if (process.env.RPC_RELAY === "1") {
+    const methods = new Set([
+      "getGenesisHash",
+      "getBlockHeight",
+      "isBlockhashValid",
+      "getLatestBlockhash",
+      "getTokenAccountBalance",
+      "getAccountInfo",
+      "getTransaction",
+      "sendTransaction",
+    ]);
+    live.relay = async (body) => {
+      let input: unknown;
+      try {
+        input = JSON.parse(body);
+      } catch {
+        return new Response("Invalid JSON", { status: 400 });
+      }
+      const call = input as { jsonrpc?: unknown; method?: unknown } | null;
+      if (!call || Array.isArray(call) || call.jsonrpc !== "2.0" || !methods.has(String(call.method)))
+        return new Response("RPC method refused", { status: 403 });
+      const response = await fetch(process.env.RPC_URL!, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        signal: AbortSignal.timeout(45000),
+      });
+      return new Response(await response.text(), {
+        status: response.status,
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+      });
+    };
+  }
   // Enumerating a program's accounts is only reasonable on a ledger we started ourselves.
   if (network === "localnet") {
     const token = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
