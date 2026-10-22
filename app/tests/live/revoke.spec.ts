@@ -129,11 +129,14 @@ test("owner revokes a finalized SPL delegate and the chain agrees", async ({ pag
   await expect(page.locator("#results article")).toHaveCount(0);
   await page.screenshot({ path: `test-results/live-${info.project.name}-verified.png`, fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  const [signature, slot, verification] = (await page.locator("#action-result dd").allTextContents()) as [
+  const [, slot, verification] = (await page.locator("#action-result dd").allTextContents()) as [
     string,
     string,
     string,
   ];
+  // The receipt shows a short signature; its Explorer link carries the full one.
+  const href = (await page.locator("#action-result dd a").getAttribute("href"))!;
+  const signature = new URL(href).pathname.split("/").pop()!;
   const params = [signature, { commitment: "finalized", encoding: "json" }];
   const reply = await request.post(rpcUrl!, {
     data: { jsonrpc: "2.0", id: 1, method: "getTransaction", params },

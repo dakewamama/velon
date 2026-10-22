@@ -97,8 +97,7 @@ pub async fn observe(client: &RpcClient, slot: u64) -> Result<Features, Error> {
         }
     }
     active.sort();
-    Ok(Features {
-        slot: response.context.slot,
-        active,
-    })
+    // The set is the observed bank's, whichever later bank answered; recording the observed
+    // slot keeps two observations of one bank identical.
+    Ok(Features { slot, active })
 }

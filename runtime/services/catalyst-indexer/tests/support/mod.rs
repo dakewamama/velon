@@ -33,10 +33,7 @@ pub fn features(raw: &str, slot: u64) -> Features {
         })
         .collect();
     active.sort();
-    Features {
-        slot: result["context"]["slot"].as_u64().unwrap(),
-        active,
-    }
+    Features { slot, active }
 }
 
 // These operator attestations exercise trust checks; they are not evidence about a public bank.
