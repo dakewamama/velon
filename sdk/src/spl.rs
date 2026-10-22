@@ -6,7 +6,7 @@ use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
 use spl_token_interface::{
     instruction,
-    state::{Account as TokenAccount, Mint},
+    state::{Account as TokenAccount, Mint, Multisig},
 };
 
 pub const PROGRAM_VERSION: &str =
@@ -429,10 +429,11 @@ impl Adapter for DelegateAdapter {
         let Some(delegate) = Option::<Pubkey>::from(account.delegate) else {
             return Ok(vec![]);
         };
-        // A multisig principal needs threshold interpretation, not an ordinary signer identity.
-        if state.delegate.owner != Pubkey::default()
-            || !state.delegate.data.is_empty()
-            || state.delegate.executable
+        // The token program reads a delegate as M-of-N signers only when it owns an account of
+        // exactly multisig size. Any other key, a wallet or a program-derived address, spends by
+        // signing for itself, so it is exactly that identity.
+        if state.delegate.owner == spl_token_interface::id()
+            && state.delegate.data.len() == Multisig::LEN
         {
             return Err(Error::UnsupportedOperation);
         }

@@ -1,4 +1,4 @@
-use arm::{AuthorizationChange, Availability, EvidenceBundle, NativeContext};
+use arm::{AuthorizationChange, Availability, EvidenceBundle, NativeContext, Principal};
 use catalyst_sdk::{self as sdk, spl::*, Adapter, Context, Error};
 use mollusk_svm::Mollusk;
 use mollusk_svm_programs_token::token;
@@ -505,8 +505,25 @@ fn requirements_and_wrong_program_owner_are_explicit() {
             Option::<Pubkey>::from(native.delegate).unwrap()
         ]
     );
+    // Program-held keys spend by signing for themselves, like a wallet.
+    for (owner, data, executable) in [
+        (Pubkey::new_unique(), vec![7; 8], false),
+        (Pubkey::new_unique(), vec![], true),
+        (token::ID, vec![0; TokenAccount::LEN], false),
+    ] {
+        state.delegate.owner = owner;
+        state.delegate.data = data;
+        state.delegate.executable = executable;
+        let compiled = sdk::compile_state(&DelegateAdapter, &state, &context()).unwrap();
+        assert_eq!(
+            compiled[0].principal,
+            Principal::Identity(Option::<Pubkey>::from(native.delegate).unwrap().to_string())
+        );
+    }
+    // Only a token-program multisig needs threshold interpretation.
     state.delegate.owner = token::ID;
     state.delegate.data = vec![0; 355];
+    state.delegate.executable = false;
     assert_eq!(
         sdk::compile_state(&DelegateAdapter, &state, &context()),
         Err(Error::UnsupportedOperation)

@@ -325,7 +325,7 @@ if (process.env.RPC_URL) {
 }
 
 // Optional read-only feeds: the newest token delegations on a public cluster, as its RPC reports them.
-// They are shown as reported, never as verified permissions; this runtime has no evidence for those clusters.
+// A row is only a lead. Opening it observes the account, and only that observation is evidence.
 function publicFeed(endpoint: string): () => Response {
   type Seen = {
     source: string;
@@ -357,7 +357,10 @@ function publicFeed(endpoint: string): () => Response {
     let weighed = 0;
     for (
       let slot = tip, read = 0;
-      slot > scanned && read < (scanned ? 10 : 40) && weighed < (scanned ? 2000 : 8000) && sources.length < 8;
+      slot > scanned &&
+      read < (scanned ? 10 : 40) &&
+      weighed < (scanned ? 2000 : 8000) &&
+      sources.length < 60;
       slot--
     ) {
       let block;
@@ -398,7 +401,7 @@ function publicFeed(endpoint: string): () => Response {
       { encoding: "jsonParsed", commitment: "finalized" },
     ]);
     // Only delegations still in force at the latest finalized state are listed.
-    seen = candidates
+    const current = candidates
       .slice(0, 100)
       .flatMap(([source, slot], index): Seen[] => {
         const info = accounts.value[index]?.data?.parsed?.info;
@@ -419,7 +422,18 @@ function publicFeed(endpoint: string): () => Response {
         [entry.source, entry.owner, entry.delegate, entry.mint].every((key) => isAddress(key)),
       )
       .sort((a, b) => b.slot - a.slot)
-      .filter((entry, index, all) => all.findIndex((other) => other.owner === entry.owner) === index)
+      .filter((entry, index, all) => all.findIndex((other) => other.owner === entry.owner) === index);
+    if (!current.length) return void (seen = []);
+    // Only a wallet can sign a revoke; accounts held by programs are left out of the feed.
+    const owners = await mainnet("getMultipleAccounts", [
+      current.map((entry) => entry.owner),
+      { encoding: "base64", dataSlice: { offset: 0, length: 0 }, commitment: "finalized" },
+    ]);
+    seen = current
+      .filter((_, index) => {
+        const owner = owners.value[index];
+        return owner === null || (owner.owner === "11111111111111111111111111111111" && !owner.executable);
+      })
       .slice(0, 5);
   }
   void (async () => {
