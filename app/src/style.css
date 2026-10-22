@@ -2575,3 +2575,253 @@ dialog .action-button {
     display: none;
   }
 }
+
+/* Console theme, shared with the public site: forest surfaces, cream cards, one mint accent.
+   Cards and dialogs stay cream so the console reads exactly as the site shows it. */
+.console {
+  --forest-950: #051f18;
+  --forest-900: #072a21;
+  --forest-800: #0b3529;
+  --forest-700: #104233;
+  --forest-line: rgb(255 255 255 / 9%);
+  --forest-line-strong: rgb(255 255 255 / 16%);
+  --on-forest: #eef5f1;
+  --on-forest-2: #a9c2b8;
+  --on-forest-3: #7f9a8f;
+  --r-xl: 28px;
+  color-scheme: dark;
+  min-height: 100vh;
+  background:
+    radial-gradient(60% 40% at 80% 0%, rgb(63 224 165 / 9%), transparent 70%),
+    radial-gradient(70% 50% at 0% 0%, var(--forest-800), transparent 70%), var(--forest-950);
+  background-attachment: fixed;
+  color: var(--on-forest-2);
+}
+.console .topbar {
+  padding-block: 12px;
+  border-bottom-color: var(--forest-line);
+  background: rgb(5 31 24 / 82%);
+  backdrop-filter: saturate(1.4) blur(14px);
+}
+.console .mark rect {
+  fill: var(--forest-700);
+  stroke: var(--forest-line-strong);
+}
+.console .tag {
+  border-color: var(--forest-line-strong);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.console .topbar .badge {
+  border-color: var(--forest-line-strong);
+  color: var(--on-forest-2);
+}
+.console .topbar .link-button,
+.console .wallet-panel p {
+  color: var(--on-forest);
+}
+
+/* Buttons share the site's pill shape; the primary one is mint. */
+.console :is(.button, #scan, #connect-wallet, .action-button, .ghost),
+.console dialog :is(button, .button) {
+  border-radius: 999px;
+}
+.console #connect-wallet {
+  height: 40px;
+  padding: 0 18px;
+  font-weight: 600;
+}
+.console #connect-wallet:hover:not(:disabled) {
+  background: #5cebb8;
+}
+.console .action-button {
+  padding: 11px 20px;
+}
+
+/* The stage and every page-level panel are forest tiles with a hairline edge. */
+.console .stage,
+.console .try,
+.console #action-result {
+  border: 1px solid var(--forest-line);
+  border-radius: var(--r-xl);
+}
+.console .stage {
+  background:
+    radial-gradient(ellipse 55% 75% at 50% 45%, rgb(63 224 165 / 13%), transparent 70%),
+    linear-gradient(180deg, var(--forest-800), var(--forest-900));
+}
+.console .try {
+  background: linear-gradient(180deg, var(--forest-800), var(--forest-900));
+}
+.console .try .button {
+  padding: 14px 26px;
+  font-weight: 600;
+}
+.console .try .button:hover:not(:disabled) {
+  background: #5cebb8;
+}
+.console #action-result {
+  padding: clamp(24px, 3vw, 36px);
+  background: linear-gradient(180deg, var(--forest-800), var(--forest-900));
+}
+.console #action-result :is(dt, .field dt) {
+  color: var(--on-forest-3);
+}
+
+/* Headings and tabs on the page itself. */
+.console :is(#results, #receipts, #diff) > h2 {
+  margin: 28px 0 16px;
+  color: var(--on-forest);
+  font-size: clamp(26px, 2.6vw, 36px);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+}
+.console .tabs {
+  gap: 32px;
+  border-bottom-color: var(--forest-line);
+}
+.console .tabs button {
+  color: var(--on-forest-3);
+}
+.console .tabs button:hover {
+  color: var(--on-forest-2);
+}
+.console .tabs button.selected {
+  border-bottom-color: var(--mint);
+  color: var(--on-forest);
+}
+.console #notice :is(.notice, .error) {
+  border: 1px solid var(--forest-line);
+  background: var(--forest-900);
+  color: var(--on-forest-2);
+}
+.console #notice .error {
+  border-color: rgb(240 180 106 / 30%);
+  color: #f0b46a;
+}
+
+/* Cards stay cream and lift off the forest like the site's screenshots. */
+.console :is(.permission, dialog) {
+  color-scheme: light;
+}
+.console .permission {
+  border-color: transparent;
+  border-radius: 22px;
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 6%) inset,
+    0 24px 48px -28px rgb(0 0 0 / 55%);
+}
+.console .permission:hover {
+  border-color: transparent;
+  box-shadow:
+    0 0 0 1px rgb(63 224 165 / 45%),
+    0 28px 56px -28px rgb(0 0 0 / 60%);
+}
+.console .permission.picked {
+  box-shadow: 0 0 0 3px var(--mint);
+}
+.console .reported {
+  border: 1px dashed var(--forest-line-strong);
+}
+.console dialog {
+  border-radius: var(--r-xl);
+}
+.console dialog::backdrop {
+  background: rgb(5 31 24 / 70%);
+  backdrop-filter: blur(6px);
+}
+
+/* The browse drawer and the side rail are forest surfaces. */
+.console :is(.search-panel, .live) {
+  border-color: var(--forest-line);
+  border-radius: 20px;
+  background: var(--forest-900);
+  color: var(--on-forest-2);
+}
+.console.is-live .rail-panel {
+  border-right-color: var(--forest-line);
+  background: var(--forest-950);
+  box-shadow: 24px 0 64px -24px rgb(0 0 0 / 60%);
+}
+.console :is(.live header, details.search-panel > summary) {
+  color: var(--on-forest);
+}
+.console .rail-panel .badge {
+  border-color: var(--forest-line-strong);
+  background: none;
+  color: var(--on-forest-2);
+}
+.console .live .pulse {
+  background: var(--mint);
+  box-shadow: 0 0 0 0 rgb(63 224 165 / 45%);
+}
+.console .rail-panel :is(label, .scope-note) {
+  color: var(--on-forest-3);
+}
+.console .rail-panel :is(input, select) {
+  border-color: var(--forest-line-strong);
+  background: var(--forest-950);
+  color: var(--on-forest);
+}
+.console .rail-panel input:focus {
+  border-color: var(--mint);
+  background: var(--forest-950);
+}
+.console .rail-panel input::placeholder {
+  color: var(--on-forest-3);
+}
+.console .example {
+  border-color: var(--forest-line-strong);
+  color: var(--on-forest-2);
+}
+.console .example:hover {
+  border-color: var(--mint);
+  color: var(--on-forest);
+}
+.console .feed-row {
+  border-color: var(--forest-line);
+  background: var(--forest-800);
+  color: var(--on-forest);
+}
+.console .feed-row .muted {
+  color: var(--on-forest-3);
+}
+.console .feed-row:hover {
+  border-color: var(--forest-line-strong);
+}
+.console .feed-row[aria-current] {
+  border-color: rgb(63 224 165 / 55%);
+  background: rgb(63 224 165 / 10%);
+}
+.console .feed-row .badge {
+  background: rgb(63 224 165 / 14%);
+  color: var(--mint);
+}
+.console .ghost {
+  border-color: var(--forest-line-strong);
+  color: var(--on-forest);
+}
+.console .ghost:hover:not(:disabled) {
+  border-color: var(--mint);
+  background: rgb(63 224 165 / 8%);
+}
+.console .segmented {
+  border-color: var(--forest-line-strong);
+  background: var(--forest-950);
+}
+.console .segmented button {
+  color: var(--on-forest-2);
+}
+.console .segmented button.selected {
+  background: var(--mint);
+  color: var(--ink);
+}
+/* Cream surfaces keep the console's dark text; the page's light text stays outside them. */
+.console :is(.permission, dialog, .reported) {
+  color: var(--body);
+}
+/* Inside the stage the next step is part of the picture, not a second box. */
+.console .stage .try {
+  border: 0;
+  background: none;
+}
