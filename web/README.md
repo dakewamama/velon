@@ -19,11 +19,11 @@ bun serve.ts 4321      # serves this folder on http://127.0.0.1:4321
 | Path | What it is |
 | --- | --- |
 | `index.html` | The page |
-| `styles.css` | All styles: tokens, light and dark themes, layout |
-| `src/main.ts` | Hero animation, scroll-stepped "How it works", receipt replay, copy button |
+| `styles.css` | All styles: tokens, sections, responsive rules |
+| `src/main.ts` | Hero steps through the real screens, reveal on scroll, timeline progress, copy button |
 | `main.js` | Built bundle of `src/main.ts` |
-| `fonts/` | Newsreader, Geist and Geist Mono, Latin subsets (SIL Open Font License) |
-| `assets/` | Token marks and the delegate key mark from `app/src/assets` |
+| `fonts/` | Geist and Geist Mono, Latin subsets (SIL Open Font License) |
+| `shots/` | Captures of the real console from a test-bench revoke (see `DESIGN.md`) |
 | `og/og.html` | Source for `og.png` (1200 × 630). Render it at that viewport to regenerate. |
 | `DESIGN.md` | Concept, type, colour, grid and motion decisions |
 

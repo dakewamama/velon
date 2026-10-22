@@ -3,653 +3,445 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Velon: revoke Solana token approvals, with proof</title>
+    <title>Velon · Take back every token approval on Solana</title>
     <meta
       name="description"
-      content="Velon finds every SPL Token delegate on a Solana wallet, executes the revoke itself before you sign, and reads the chain again afterwards to prove the delegate is gone. Open source."
+      content="Velon finds every key allowed to spend your Solana tokens, runs the revoke against finalized state before you sign, and reads the chain again to prove it is gone."
     />
-    <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#f3f0e8" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0d110f" media="(prefers-color-scheme: dark)" />
-
+    <meta name="theme-color" content="#072a21" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Velon" />
-    <meta property="og:title" content="Velon: proof before you sign, proof after" />
+    <meta property="og:title" content="Velon · Take back every token approval" />
     <meta
       property="og:description"
-      content="Find every SPL Token delegate on your wallet and revoke it with proof on both sides of the signature."
+      content="Proof before you sign, and proof after. Open source, for Solana mainnet and devnet."
     />
     <meta property="og:image" content="og.png" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Velon. Proof before you sign. Proof after." />
     <meta name="twitter:card" content="summary_large_image" />
-
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png" />
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-
-    <link rel="preload" href="fonts/newsreader.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="fonts/geist.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="styles.css" />
-    <script>
-      document.documentElement.classList.add("js");
-    </script>
     <script type="module" src="main.js"></script>
   </head>
   <body>
     <a class="skip" href="#main">Skip to content</a>
 
-    <header class="nav" id="top">
-      <div class="nav-inner">
-        <a class="brand" href="#top" aria-label="Velon, back to top">
-          <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+    <header class="nav" data-nav>
+      <div class="wrap nav-inner">
+        <a class="brand" href="#top" aria-label="Velon home">
+          <svg viewBox="0 0 32 32" aria-hidden="true">
             <rect width="32" height="32" rx="8" />
             <path d="M9 11.5 14.6 21.5 23.5 9" />
           </svg>
-          <span>Velon</span>
+          Velon
         </a>
-        <nav aria-label="Sections">
-          <ul class="nav-links">
-            <li><a href="#how">How it works</a></li>
-            <li><a href="#proof">Receipts</a></li>
-            <li><a href="#coverage">Coverage</a></li>
-            <li><a href="#developers">Developers</a></li>
-          </ul>
+        <nav class="nav-links" aria-label="Primary">
+          <a href="#proof">Proof</a>
+          <a href="#how">How it works</a>
+          <a href="#uses">Use cases</a>
+          <a href="#developers">Developers</a>
         </nav>
         <div class="nav-actions">
-          <a class="nav-source" href="https://github.com/dakewamama/velon">
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path
-                d="M8 .2a8 8 0 0 0-2.5 15.6c.4 0 .5-.2.5-.4v-1.5c-2.2.5-2.7-1-2.7-1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.3 1.9.9 2.3.7.1-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.1-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8a7.5 7.5 0 0 1 4 0c1.5-1 2.2-.8 2.2-.8.4 1.1.2 1.9.1 2.1.5.6.8 1.3.8 2.1 0 3.1-1.9 3.8-3.6 4 .3.3.5.8.5 1.5v2.2c0 .2.1.5.6.4A8 8 0 0 0 8 .2Z"
-              />
-            </svg>
-            <span>Source</span>
-          </a>
-          <a class="btn btn-sm" href="https://velon-eta.vercel.app">Try the test bench</a>
+          <a class="nav-link" href="https://github.com/dakewamama/velon">GitHub</a>
+          <a class="button button-sm" href="https://velon-eta.vercel.app/app">Open test bench</a>
         </div>
       </div>
     </header>
 
     <main id="main">
-      <!-- Hero -->
-      <section class="hero" aria-labelledby="hero-title">
-        <div class="hero-copy">
-          <p class="eyebrow">
-            <span class="dot" aria-hidden="true"></span>Open source, for Solana token approvals
-          </p>
-          <h1 id="hero-title" class="display">Proof before you&nbsp;sign. <em>Proof&nbsp;after.</em></h1>
-          <p class="lead">
-            Velon finds every SPL Token delegate on your wallet. Before you sign a revoke, it runs that exact
-            instruction itself. After you sign, it reads the chain again to confirm the delegate is&nbsp;gone.
-          </p>
-          <div class="cta-row">
-            <a class="btn" href="https://velon-eta.vercel.app">
-              Try the test bench
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8h8.5M8.5 4.5 12 8l-3.5 3.5" /></svg>
-            </a>
-            <a class="btn btn-ghost" href="https://github.com/dakewamama/velon">Read the source</a>
+      <section class="hero" id="top">
+        <div class="wrap hero-grid">
+          <div class="hero-copy">
+            <p class="pill reveal">
+              <span class="pill-dot" aria-hidden="true"></span>
+              Open source · Solana mainnet and devnet
+            </p>
+            <h1 class="reveal">Take back <span class="nowrap">every approval.</span></h1>
+            <p class="lede reveal">
+              Apps you used once can still move your tokens. Velon finds every key that can, proves the revoke
+              before you sign, and proves it again after.
+            </p>
+            <div class="cta reveal">
+              <a class="button" href="https://velon-eta.vercel.app/app">
+                Try it on the test bench
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" /></svg>
+              </a>
+              <a class="button button-ghost" href="https://github.com/dakewamama/velon">Read the source</a>
+            </div>
+            <ul class="assurances reveal">
+              <li>Connecting signs nothing</li>
+              <li>You approve every transaction</li>
+            </ul>
           </div>
-          <p class="fine">No install. Connecting a wallet signs nothing.</p>
+
+          <figure class="stage reveal" data-stage data-step="0">
+            <div class="frames">
+              <img
+                class="frame frame-permission"
+                src="shots/permission.png"
+                width="552"
+                height="505"
+                alt="Velon console card: a program-derived address may spend up to 194 base units from the wallet's token account, with a Revoke button."
+              />
+              <img
+                class="frame frame-review"
+                src="shots/review.png"
+                width="540"
+                height="744"
+                alt="Velon review dialog before signing: who, what, limit, network, and the result Velon executed itself: delegate and allowance cleared, nothing else changed. Deployment verified."
+              />
+              <img
+                class="frame frame-verified"
+                src="shots/verified.png"
+                width="1116"
+                height="333"
+                alt="Velon result: Revoked and verified, with the transaction, finalized slot 419474793 and a verification ID."
+              />
+            </div>
+            <div class="stage-steps" role="tablist" aria-label="The revoke, step by step">
+              <button type="button" role="tab" data-go="0" aria-selected="true">
+                <span class="n">01</span>The permission
+              </button>
+              <button type="button" role="tab" data-go="1" aria-selected="false">
+                <span class="n">02</span>The review
+              </button>
+              <button type="button" role="tab" data-go="2" aria-selected="false">
+                <span class="n">03</span>The proof
+              </button>
+            </div>
+            <figcaption>
+              Captured from a real revoke on a local Agave 4.3.2 validator, finalized at slot 419,474,793.
+            </figcaption>
+          </figure>
         </div>
 
-        <figure class="spec" id="spec" data-step="4" aria-labelledby="spec-cap">
-          <div class="spec-bar">
-            <ol class="rail" aria-label="Revoke steps">
-              <li>
-                <button type="button" class="rail-step" data-go="1"><span class="n">01</span>Observe</button>
-              </li>
-              <li>
-                <button type="button" class="rail-step" data-go="2"><span class="n">02</span>Execute</button>
-              </li>
-              <li>
-                <button type="button" class="rail-step" data-go="3"><span class="n">03</span>Sign</button>
-              </li>
-              <li>
-                <button type="button" class="rail-step" data-go="4"><span class="n">04</span>Verify</button>
-              </li>
-            </ol>
-            <button type="button" class="spec-toggle" id="spec-toggle" aria-label="Pause animation" hidden>
-              <svg class="i-pause" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M5.5 3.5v9M10.5 3.5v9" />
-              </svg>
-              <svg class="i-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.2v9.6L12.5 8z" /></svg>
-            </button>
+        <div class="wrap facts-wrap">
+          <div class="facts reveal">
+            <div>
+              <span class="facts-k">Networks</span><span>Solana mainnet, devnet and a local validator</span>
+            </div>
+            <div><span class="facts-k">Wallets</span><span>Any Wallet Standard wallet</span></div>
+            <div><span class="facts-k">Revocable</span><span>SPL Token delegates</span></div>
+            <div><span class="facts-k">Read only</span><span>Solana Subscriptions, Token-2022</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="problem" aria-labelledby="problem-title">
+        <div class="wrap problem-grid">
+          <div class="problem-copy">
+            <p class="eyebrow reveal">The problem</p>
+            <h2 id="problem-title" class="reveal">An approval outlives the app that asked for it.</h2>
+            <p class="reveal">
+              Swaps, aggregators, payment and subscription apps ask for a delegate on your token account. The
+              tab closes. The delegate stays, and it can move tokens without asking again until you revoke it.
+            </p>
+            <p class="reveal">
+              When one of those apps is compromised, every wallet that approved it needs a revoke it can
+              trust, fast.
+            </p>
           </div>
 
-          <div class="acct" aria-hidden="true">
-            <div class="acct-head">
-              <img src="assets/usdc.png" alt="" width="36" height="36" />
-              <div>
-                <b>USDC token account</b>
-                <span class="mono">EXAMPLE…ACCT</span>
-              </div>
-              <span class="tag">Example</span>
+          <figure class="account reveal">
+            <div class="account-head">
+              <span class="account-title">getAccountInfo</span>
+              <span class="mono dim">AqYP…yWKu</span>
             </div>
-            <dl class="rows">
-              <div class="row">
-                <dt>Owner</dt>
-                <dd class="mono">EXAMPLE…OWNER</dd>
+            <dl>
+              <div>
+                <dt>program</dt>
+                <dd class="mono">spl-token</dd>
               </div>
-              <div class="row">
-                <dt>Balance</dt>
-                <dd class="mono num">1,240.00</dd>
+              <div>
+                <dt>owner</dt>
+                <dd class="mono">CBYs…5SeU</dd>
               </div>
-              <div class="row row-delegate">
-                <dt>Delegate</dt>
-                <dd>
-                  <span class="thread"><i class="t t-l"></i><i class="t t-r"></i><i class="snip"></i></span>
-                  <span class="keychip"
-                    ><img src="assets/delegate.svg" alt="" width="20" height="20" /><span class="mono"
-                      >EXAMPLE…DEX</span
-                    ></span
-                  >
-                </dd>
+              <div>
+                <dt>mint</dt>
+                <dd class="mono">BNUj…PmZN</dd>
               </div>
-              <div class="row row-allow">
-                <dt>Allowance</dt>
-                <dd class="mono num swap"><span class="v-live">500.00</span><span class="v-gone">0</span></dd>
+              <div>
+                <dt>tokenAmount</dt>
+                <dd class="mono">100</dd>
+              </div>
+              <div class="hot">
+                <dt>delegate</dt>
+                <dd class="mono">EQ3c…rxgN</dd>
+              </div>
+              <div class="hot">
+                <dt>delegatedAmount</dt>
+                <dd class="mono">25</dd>
               </div>
             </dl>
-            <span class="scan"></span>
-
-            <div class="status">
-              <div class="st st-1">
-                <p class="st-title"><span class="pip"></span>Reading the finalized bank</p>
-                <p class="mono">SPL Token program bytes · verified build</p>
-              </div>
-              <div class="st st-2">
-                <p class="cmp">
-                  <span class="mono">Velon execution</span><span class="arrow" aria-hidden="true">→</span
-                  ><span class="mono res">delegate: none</span>
-                </p>
-                <p class="cmp">
-                  <span class="mono">RPC simulation</span><span class="arrow" aria-hidden="true">→</span
-                  ><span class="mono res">delegate: none</span>
-                </p>
-                <span class="match">Same state</span>
-              </div>
-              <div class="st st-3">
-                <div class="wallet">
-                  <div>
-                    <p class="st-title">Revoke delegate</p>
-                    <p class="mono">In your wallet · network fee &lt; 1¢</p>
-                  </div>
-                  <span class="approve">Approve</span>
-                </div>
-              </div>
-              <div class="st st-4">
-                <p class="st-title ok">
-                  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" /></svg>Delegate gone
-                  on re-read
-                </p>
-                <p class="mono">Finalized · read again · absent</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="slip-slot" aria-hidden="true">
-            <div class="slip">
-              <p class="slip-head"><span>Verified revoke</span><span>Example</span></p>
-              <p class="slip-row"><span>Delegate</span><span>EXAMPLE…DEX → none</span></p>
-              <p class="slip-row"><span>Verification ID</span><span>EXAMPLE-7Q4K</span></p>
-            </div>
-          </div>
-
-          <figcaption id="spec-cap" class="spec-cap">
-            <span class="visually-hidden"
-              >Illustration of a revoke in four steps. A USDC token account has a delegate allowed to spend
-              500 USDC. Velon observes it, executes the revoke and matches the RPC simulation, you approve in
-              your wallet, and Velon reads the account again and prints a receipt with a verification ID. </span
-            >Illustration. Addresses and amounts are examples.
-          </figcaption>
-        </figure>
-      </section>
-
-      <!-- 01 Problem -->
-      <section class="section problem" id="problem" aria-labelledby="problem-title">
-        <header class="folio reveal"><span>01</span><span>The problem</span></header>
-        <div class="problem-grid">
-          <div class="problem-copy">
-            <h2 id="problem-title" class="h2 reveal">Approvals outlive the&nbsp;tab.</h2>
-            <p class="reveal">
-              A delegate, or approval, is a key allowed to spend tokens from your token account. On Solana,
-              apps you used once (DEXs, aggregators, payment and subscription apps) can be left holding that
-              authority over your USDC, USDT and other tokens, long after you closed the page.
-            </p>
-            <p class="reveal">
-              When a protocol is compromised, every wallet that approved it needs a fast revoke it can trust:
-              one that is executed and checked before you sign it, and confirmed on chain after.
-            </p>
-          </div>
-
-          <figure class="ledger reveal" aria-labelledby="ledger-cap">
-            <div class="ledger-head">
-              <span class="mono">Example wallet</span>
-              <span class="mono ledger-count">3 delegates</span>
-            </div>
-            <ul class="ledger-rows">
-              <li>
-                <img src="assets/usdc.png" alt="" width="28" height="28" />
-                <span class="lg-token"><b>USDC</b><span class="mono">EXAMPLE…ACCT1</span></span>
-                <span class="lg-thread" aria-hidden="true"></span>
-                <span class="lg-who"><b>Example DEX</b><span class="mono">may spend 500.00</span></span>
-              </li>
-              <li>
-                <img src="assets/usdt.svg" alt="" width="28" height="28" />
-                <span class="lg-token"><b>USDT</b><span class="mono">EXAMPLE…ACCT2</span></span>
-                <span class="lg-thread" aria-hidden="true"></span>
-                <span class="lg-who"
-                  ><b>Example payments app</b><span class="mono">may spend 2,000.00</span></span
-                >
-              </li>
-              <li>
-                <span class="lg-generic" aria-hidden="true">SPL</span>
-                <span class="lg-token"><b>Other token</b><span class="mono">EXAMPLE…ACCT3</span></span>
-                <span class="lg-thread" aria-hidden="true"></span>
-                <span class="lg-who"
-                  ><b>Example aggregator</b><span class="mono">may spend 120.00</span></span
-                >
-              </li>
-            </ul>
-            <figcaption id="ledger-cap" class="cap">
-              What Velon lists for a wallet: each token account with a live delegate. Example data.
-            </figcaption>
-          </figure>
-        </div>
-        <div class="pull-block">
-          <p class="pull reveal">An approval is a key that can still&nbsp;spend.</p>
-          <p class="pull-note reveal">
-            Wallets, treasuries and exploit responders all need to see which keys those are, for every token
-            account.
-          </p>
-        </div>
-      </section>
-
-      <!-- 02 How it works -->
-      <section class="section how" id="how" aria-labelledby="how-title">
-        <header class="folio reveal"><span>02</span><span>How it works</span></header>
-        <h2 id="how-title" class="h2 how-title reveal">Four steps. Two of them are&nbsp;proof.</h2>
-
-        <div class="flow" id="flow">
-          <ol class="flow-steps">
-            <li class="step" data-plate="1">
-              <p class="step-n"><span>01</span>Observe</p>
-              <h3>Read what is true now.</h3>
-              <p>
-                Velon reads your token accounts and lists every SPL Token delegate: which account, which key,
-                and how much it may spend. It records the finalized bank it read from, the cluster’s activated
-                feature set, and checks the SPL Token program bytes against the verified build.
-              </p>
-              <div class="plate plate-1" aria-hidden="true">
-                <p class="plate-label mono">Finalized bank</p>
-                <ul class="checks">
-                  <li><span>Token account</span><span class="mono">owner, delegate, allowance</span></li>
-                  <li><span>Feature set</span><span class="mono">as activated on the cluster</span></li>
-                  <li><span>SPL Token program</span><span class="mono">bytes = verified build</span></li>
-                  <li><span>Commitment</span><span class="mono">finalized</span></li>
-                </ul>
-              </div>
-            </li>
-            <li class="step" data-plate="2">
-              <p class="step-n"><span>02</span>Execute</p>
-              <h3>Run the revoke before you see&nbsp;it.</h3>
-              <p>
-                Velon executes that exact Revoke instruction itself, against the finalized bank it observed,
-                with the cluster’s features and the verified program. Your provider’s RPC simulation must
-                reach the same resulting token account state. If the two disagree, nothing is offered for
-                signing.
-              </p>
-              <div class="plate plate-2" aria-hidden="true">
-                <div class="lanes">
-                  <div class="lane">
-                    <p class="plate-label mono">Velon execution</p>
-                    <p class="lane-in mono">Revoke, observed bank</p>
-                    <p class="lane-out"><span class="mono">delegate</span><b class="mono">none</b></p>
-                    <p class="lane-out"><span class="mono">delegated amount</span><b class="mono">0</b></p>
-                  </div>
-                  <span class="eq">=</span>
-                  <div class="lane">
-                    <p class="plate-label mono">RPC simulation</p>
-                    <p class="lane-in mono">Revoke, provider RPC</p>
-                    <p class="lane-out"><span class="mono">delegate</span><b class="mono">none</b></p>
-                    <p class="lane-out"><span class="mono">delegated amount</span><b class="mono">0</b></p>
-                  </div>
-                </div>
-                <p class="verdict"><span class="mono">Same resulting state</span>Offered for signing</p>
-              </div>
-            </li>
-            <li class="step" data-plate="3">
-              <p class="step-n"><span>03</span>Sign</p>
-              <h3>You approve, in your own&nbsp;wallet.</h3>
-              <p>
-                Connecting a wallet signs nothing. The revoke appears in your wallet like any other
-                transaction, and you approve it there. The cost is a normal Solana network fee, a fraction of
-                a cent.
-              </p>
-              <div class="plate plate-3" aria-hidden="true">
-                <div class="sheet">
-                  <p class="plate-label mono">Your wallet</p>
-                  <p class="sheet-title">Revoke delegate</p>
-                  <dl>
-                    <div>
-                      <dt>Token account</dt>
-                      <dd class="mono">EXAMPLE…ACCT</dd>
-                    </div>
-                    <div>
-                      <dt>Removes</dt>
-                      <dd class="mono">EXAMPLE…DEX</dd>
-                    </div>
-                    <div>
-                      <dt>Network fee</dt>
-                      <dd class="mono">&lt; 1¢</dd>
-                    </div>
-                  </dl>
-                  <div class="sheet-actions"><span>Cancel</span><span class="approve">Approve</span></div>
-                </div>
-              </div>
-            </li>
-            <li class="step" data-plate="4">
-              <p class="step-n"><span>04</span>Verify</p>
-              <h3>Then read the chain&nbsp;again.</h3>
-              <p>
-                After you sign, Velon waits for finalization, reads the account again and confirms the
-                delegate is gone. Only then does it issue a verification ID.
-              </p>
-              <div class="plate plate-4" aria-hidden="true">
-                <ol class="timeline">
-                  <li><span class="mono">Signed</span><span>in your wallet</span></li>
-                  <li><span class="mono">Finalized</span><span>by the cluster</span></li>
-                  <li><span class="mono">Read again</span><span>delegate absent</span></li>
-                  <li class="t-id">
-                    <span class="mono">Verification ID</span><b class="mono">EXAMPLE-7Q4K</b>
-                  </li>
-                </ol>
-              </div>
-            </li>
-          </ol>
-          <div class="flow-stage" id="flow-stage" aria-hidden="true"></div>
-        </div>
-      </section>
-
-      <!-- 03 Proof -->
-      <section class="section proof" id="proof" aria-labelledby="proof-title">
-        <header class="folio reveal"><span>03</span><span>Receipts</span></header>
-        <div class="proof-grid">
-          <div class="proof-copy">
-            <h2 id="proof-title" class="h2 reveal">
-              A receipt that does not need the chain to&nbsp;believe&nbsp;it.
-            </h2>
-            <p class="lead reveal">
-              Every verified revoke ends with a verification ID and the evidence behind it. Receipts replay
-              from that recorded evidence, without trusting the chain again.
-            </p>
-            <ol class="notes reveal">
-              <li><span class="mono">1</span>The finalized bank the revoke was executed against.</li>
-              <li>
-                <span class="mono">2</span>The verified SPL Token program bytes and activated feature set.
-              </li>
-              <li><span class="mono">3</span>Velon’s result and the RPC simulation, which had to match.</li>
-              <li>
-                <span class="mono">4</span>Your signature, and the finalized re-read with the delegate gone.
-              </li>
-            </ol>
-          </div>
-
-          <figure class="receipt-fig reveal" aria-labelledby="receipt-cap">
-            <div class="receipt-paper">
-              <div class="receipt" id="receipt">
-                <div class="r-top">
-                  <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
-                    <rect width="32" height="32" rx="8" />
-                    <path d="M9 11.5 14.6 21.5 23.5 9" />
-                  </svg>
-                  <div>
-                    <p class="r-title">Verified revoke</p>
-                    <p class="mono r-sub">Example receipt · mainnet</p>
-                  </div>
-                </div>
-                <dl class="r-rows">
-                  <div>
-                    <dt>Token account</dt>
-                    <dd>EXAMPLE…ACCT</dd>
-                  </div>
-                  <div>
-                    <dt>Delegate before</dt>
-                    <dd>EXAMPLE…DEX</dd>
-                  </div>
-                  <div>
-                    <dt>Delegate after</dt>
-                    <dd>none</dd>
-                  </div>
-                  <div class="r-sep" data-n="1">
-                    <dt>Executed against</dt>
-                    <dd>finalized bank</dd>
-                  </div>
-                  <div data-n="2">
-                    <dt>Program</dt>
-                    <dd>SPL Token, verified bytes</dd>
-                  </div>
-                  <div data-n="2">
-                    <dt>Feature set</dt>
-                    <dd>cluster-activated</dd>
-                  </div>
-                  <div data-n="3">
-                    <dt>Execution vs simulation</dt>
-                    <dd>match</dd>
-                  </div>
-                  <div class="r-sep" data-n="4">
-                    <dt>Signature</dt>
-                    <dd>EXAMPLE…SIG</dd>
-                  </div>
-                  <div data-n="4">
-                    <dt>Re-read, finalized</dt>
-                    <dd>delegate absent</dd>
-                  </div>
-                </dl>
-                <div class="r-id">
-                  <span>Verification ID</span>
-                  <b>EXAMPLE-7Q4K</b>
-                </div>
-              </div>
-            </div>
-            <figcaption class="receipt-bar">
-              <span id="receipt-cap" class="cap">Illustration with example values.</span>
-              <button type="button" class="btn btn-ghost btn-sm" id="replay">
-                <svg viewBox="0 0 16 16" aria-hidden="true">
-                  <path d="M3 8a5 5 0 1 0 1.6-3.7M3 2.5v2.8h2.8" />
-                </svg>
-                Replay the evidence
-              </button>
-              <span class="visually-hidden" id="replay-status" role="status"></span>
+            <figcaption>
+              A live token account on the Velon test validator, read at finalized slot 419,475,046. The
+              delegate can move 25 of its 100 tokens without the owner signing again.
             </figcaption>
           </figure>
         </div>
       </section>
 
-      <!-- 04 Coverage -->
-      <section class="section coverage" id="coverage" aria-labelledby="coverage-title">
-        <header class="folio reveal"><span>04</span><span>Coverage</span></header>
-        <h2 id="coverage-title" class="h2 reveal">What it covers today, and what it only&nbsp;shows.</h2>
-        <div class="table-wrap reveal">
-          <table class="cov">
-            <thead>
-              <tr>
-                <th scope="col">Authority</th>
-                <th scope="col">Where</th>
-                <th scope="col">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <th scope="row">
-                  SPL Token delegates
-                  <span class="sub">Any key approved to spend from a token account</span>
-                </th>
-                <td>Mainnet, devnet, local test validator</td>
-                <td><span class="state on">Revoke with proof</span></td>
-              </tr>
-              <tr>
-                <th scope="row">
-                  Solana Subscriptions grants
-                  <span class="sub">Listed with your other permissions</span>
-                </th>
-                <td>Read-only</td>
-                <td><span class="state ro">Visible, not yet revocable</span></td>
-              </tr>
-              <tr>
-                <th scope="row">
-                  Token-2022 accounts
-                  <span class="sub">Delegates on Token-2022 token accounts</span>
-                </th>
-                <td>Read-only</td>
-                <td><span class="state ro">Visible, not yet revocable</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <section class="proof" id="proof" aria-labelledby="proof-title">
+        <div class="wrap">
+          <div class="section-head">
+            <p class="eyebrow reveal">Why Velon</p>
+            <h2 id="proof-title" class="reveal">Proof on both sides of your signature.</h2>
+          </div>
 
-      <!-- 05 Use cases -->
-      <section class="section uses" id="uses" aria-labelledby="uses-title">
-        <header class="folio reveal"><span>05</span><span>Who it is for</span></header>
-        <h2 id="uses-title" class="h2 reveal">Wallets, treasuries and exploit&nbsp;response.</h2>
-        <ol class="use-list">
-          <li class="reveal">
-            <span class="use-n">i</span>
-            <h3>Wallets</h3>
-            <p>
-              A wallet can list the delegate on each of a user’s token accounts, and offer a revoke that has
-              already been executed and matched against the RPC simulation before the user is asked to sign.
-            </p>
-          </li>
-          <li class="reveal">
-            <span class="use-n">ii</span>
-            <h3>Treasuries</h3>
-            <p>
-              A multisig’s token accounts can carry delegates too. Its members need the list of keys that can
-              spend from them, and a verification ID showing a revoke removed the delegate.
-            </p>
-          </li>
-          <li class="reveal">
-            <span class="use-n">iii</span>
-            <h3>Exploit response</h3>
-            <p>
-              When a protocol is compromised, every wallet that approved it needs to revoke quickly. Each
-              verified revoke ends with a re-read of the account and a verification ID a responder can check.
-            </p>
-          </li>
-        </ol>
-      </section>
-
-      <!-- 06 Developers -->
-      <section class="dev" id="developers" aria-labelledby="dev-title">
-        <div class="dev-inner">
-          <header class="folio reveal"><span>06</span><span>For developers</span></header>
-          <div class="dev-grid">
-            <div class="dev-copy">
-              <h2 id="dev-title" class="h2 reveal">Open source, end to&nbsp;end.</h2>
-              <p class="reveal">
-                The runtime that observes, executes and verifies, the SDK, and the console all live in one
-                public repository. Run it locally with recorded evidence, point it at a mainnet or devnet RPC
-                endpoint, or start a local test validator with the real SPL Token program.
-              </p>
-              <a class="btn reveal" href="https://github.com/dakewamama/velon">
-                dakewamama/velon on GitHub
-                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 11 11 5M6 5h5v5" /></svg>
-              </a>
-            </div>
-            <div class="dev-side reveal">
-              <div class="term">
-                <div class="term-bar">
-                  <span class="mono">Run it locally</span>
-                  <button
-                    type="button"
-                    class="copy"
-                    id="copy"
-                    data-copy="git clone https://github.com/dakewamama/velon.git
-cd velon/app
-npm ci --ignore-scripts
-bun run demo"
-                  >
-                    Copy
-                  </button>
-                </div>
-                <pre><code><span class="c"># Bun 1.3.14+, Node 22, stable Rust</span>
-<span class="p">$</span> git clone https://github.com/dakewamama/velon.git
-<span class="p">$</span> cd velon/app
-<span class="p">$</span> npm ci --ignore-scripts
-<span class="p">$</span> bun run demo
-<span class="c"># open http://127.0.0.1:3000</span></code></pre>
+          <div class="bento">
+            <article class="tile tile-evidence reveal">
+              <div class="tile-copy">
+                <h3>Executed before you sign</h3>
+                <p>
+                  Velon runs the exact Revoke instruction itself, on the finalized bank it observed, with that
+                  cluster's activated features and the verified SPL Token program. A provider's simulation
+                  must reach the same account state.
+                </p>
               </div>
-              <dl class="repo">
+              <dl class="evidence" aria-label="Mainnet evidence captured by Velon">
                 <div>
-                  <dt class="mono">runtime/</dt>
-                  <dd>Observes finalized state, executes revokes, verifies results. Rust.</dd>
+                  <dt>Cluster</dt>
+                  <dd>Solana mainnet</dd>
                 </div>
                 <div>
-                  <dt class="mono">sdk/</dt>
-                  <dd>Protocol adapters and reviewed signing. Rust and TypeScript.</dd>
+                  <dt>Observed</dt>
+                  <dd class="mono">finalized slot 460,066,667</dd>
                 </div>
                 <div>
-                  <dt class="mono">arm/</dt>
-                  <dd>The permission model: who can do what, to which account. Rust.</dd>
+                  <dt>Program</dt>
+                  <dd class="mono">sha256 8190d3f7…f697</dd>
                 </div>
                 <div>
-                  <dt class="mono">app/</dt>
-                  <dd>The console. TypeScript on Bun.</dd>
+                  <dt>Deployed</dt>
+                  <dd class="mono">slot 419,472,000</dd>
+                </div>
+                <div>
+                  <dt>Runtime</dt>
+                  <dd class="mono">Agave a2033000</dd>
+                </div>
+                <div>
+                  <dt>Features</dt>
+                  <dd class="mono">sha256 d19ca0d3…8f48</dd>
                 </div>
               </dl>
-            </div>
+            </article>
+
+            <article class="tile tile-shot tile-delegate reveal">
+              <div class="tile-copy">
+                <h3>Names the delegate</h3>
+                <p>
+                  Who holds the permission, read from the chain: a wallet, a program's signer or a known
+                  program.
+                </p>
+              </div>
+              <div class="crop crop-delegate">
+                <img src="shots/permission.png" width="552" height="505" alt="" loading="lazy" />
+              </div>
+            </article>
+
+            <article class="tile tile-closed reveal">
+              <div class="tile-copy">
+                <h3>Fails closed</h3>
+                <p>If anything disagrees, nothing is offered for signing. Some of the runtime's refusals:</p>
+              </div>
+              <ul class="stops mono">
+                <li>feature unknown to the pinned runtime</li>
+                <li>simulation precedes observation</li>
+                <li>simulation/context slot mismatch</li>
+                <li>feature evidence outside observed bank</li>
+              </ul>
+            </article>
+
+            <article class="tile tile-shot tile-verified reveal">
+              <div class="tile-copy">
+                <h3>Read again after finality</h3>
+                <p>"Revoked" appears only after the chain confirms the delegate is gone.</p>
+              </div>
+              <img
+                class="shot"
+                src="shots/verified.png"
+                width="1116"
+                height="333"
+                alt="Revoked and verified, with transaction, finalized slot and verification ID."
+                loading="lazy"
+              />
+            </article>
+
+            <article class="tile tile-shot tile-receipt reveal">
+              <div class="tile-copy">
+                <h3>A receipt that replays without the chain</h3>
+                <p>
+                  Every verified revoke keeps its evidence. Replay it later and the result still checks out.
+                </p>
+              </div>
+              <img
+                class="shot"
+                src="shots/receipt.png"
+                width="1116"
+                height="343"
+                alt="Receipt: Revoked on the test chain, with account, finalized slot, signature, verification ID and a Replay proof button."
+                loading="lazy"
+              />
+            </article>
           </div>
         </div>
       </section>
 
-      <!-- CTA -->
-      <section class="cta" aria-labelledby="cta-title">
-        <div class="cta-inner">
-          <h2 id="cta-title" class="display cta-title reveal">Try a revoke on a disposable&nbsp;chain.</h2>
-          <div class="cta-side">
-            <p class="lead reveal">
-              The test bench gives you a test permission on a disposable test chain and a test wallet to
-              revoke it with. Nothing to install, nothing real at stake.
+      <section class="how" id="how" aria-labelledby="how-title">
+        <div class="wrap">
+          <div class="section-head">
+            <p class="eyebrow reveal">How it works</p>
+            <h2 id="how-title" class="reveal">Four steps. Two of them are proof.</h2>
+          </div>
+          <ol class="steps" data-steps>
+            <li class="step reveal">
+              <span class="step-n">01</span>
+              <h3>Observe</h3>
+              <p>
+                Reads your token accounts from a finalized bank and lists every delegate, with how much it may
+                spend.
+              </p>
+            </li>
+            <li class="step reveal">
+              <span class="step-n">02</span>
+              <h3>Execute</h3>
+              <p>
+                Runs the revoke on that bank itself. A provider's simulation must reach the same account
+                state.
+              </p>
+            </li>
+            <li class="step reveal">
+              <span class="step-n">03</span>
+              <h3>Sign</h3>
+              <p>Your wallet signs the exact bytes that were reviewed, and nothing else.</p>
+            </li>
+            <li class="step reveal">
+              <span class="step-n">04</span>
+              <h3>Verify</h3>
+              <p>
+                Waits for finality, reads the account again, confirms the delegate is gone and issues a
+                verification ID.
+              </p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="uses" id="uses" aria-labelledby="uses-title">
+        <div class="wrap">
+          <div class="section-head">
+            <p class="eyebrow reveal">Who it is for</p>
+            <h2 id="uses-title" class="reveal">Wherever a key can still spend.</h2>
+          </div>
+          <div class="use-grid">
+            <article class="use reveal">
+              <span class="use-n">Wallets</span>
+              <h3>Who can spend this, next to every balance.</h3>
+              <p>
+                The SDK turns token accounts into exact permissions and builds revokes your users review
+                before they sign.
+              </p>
+            </article>
+            <article class="use reveal">
+              <span class="use-n">Treasuries</span>
+              <h3>Know every delegate on the team's tokens.</h3>
+              <p>
+                List delegates across a treasury's token accounts. Squads V4 spending limits are modelled in
+                the SDK.
+              </p>
+            </article>
+            <article class="use reveal">
+              <span class="use-n">Exploit response</span>
+              <h3>A revoke people can trust when it matters.</h3>
+              <p>
+                When a protocol is compromised, each affected wallet sees the exact delegate, signs one
+                reviewed revoke and gets a verification ID.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="dev" id="developers" aria-labelledby="dev-title">
+        <div class="wrap dev-grid">
+          <div>
+            <p class="eyebrow reveal">Developers</p>
+            <h2 id="dev-title" class="reveal">Open source, end to end.</h2>
+            <p class="reveal">
+              The runtime that observes, executes and verifies, the SDK and the console live in one public
+              repository. Run it with recorded evidence, point it at mainnet or devnet, or start a local
+              validator with the real SPL Token program.
             </p>
-            <div class="cta-row reveal">
-              <a class="btn" href="https://velon-eta.vercel.app">
-                Open the test bench
-                <svg viewBox="0 0 16 16" aria-hidden="true">
-                  <path d="M3.5 8h8.5M8.5 4.5 12 8l-3.5 3.5" />
-                </svg>
-              </a>
-              <a class="btn btn-ghost" href="https://github.com/dakewamama/velon">Read the source</a>
+            <dl class="repo reveal">
+              <div>
+                <dt class="mono">runtime/</dt>
+                <dd>Observes finalized state, executes and verifies revokes</dd>
+              </div>
+              <div>
+                <dt class="mono">sdk/</dt>
+                <dd>Protocol adapters and reviewed signing</dd>
+              </div>
+              <div>
+                <dt class="mono">arm/</dt>
+                <dd>The permission model</dd>
+              </div>
+              <div>
+                <dt class="mono">app/</dt>
+                <dd>The console</dd>
+              </div>
+            </dl>
+          </div>
+          <div class="terminal reveal">
+            <div class="terminal-bar">
+              <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span>Run it locally</span>
+              <button type="button" class="copy" data-copy>Copy</button>
+            </div>
+            <pre><code data-code><span class="dim">$</span> git clone https://github.com/dakewamama/velon.git
+<span class="dim">$</span> cd velon/app
+<span class="dim">$</span> npm ci --ignore-scripts
+<span class="dim">$</span> bun run demo</code></pre>
+            <p class="terminal-note">
+              Opens on http://127.0.0.1:3000 with recorded evidence. No RPC key needed.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="final" aria-labelledby="final-title">
+        <div class="wrap">
+          <div class="final-panel reveal">
+            <div>
+              <h2 id="final-title">Try a revoke on a disposable chain.</h2>
+              <p>
+                The test bench gives you a real permission on a test validator and a test wallet to revoke it.
+                Nothing to install, nothing at stake.
+              </p>
+            </div>
+            <div class="cta">
+              <a class="button button-dark" href="https://velon-eta.vercel.app/app">Open the test bench</a>
+              <a class="button button-outline" href="https://github.com/dakewamama/velon">Read the source</a>
             </div>
           </div>
         </div>
       </section>
     </main>
 
-    <footer class="foot">
-      <div class="foot-inner">
-        <div class="foot-brand">
-          <a class="brand" href="#top" aria-label="Velon, back to top">
-            <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
-              <rect width="32" height="32" rx="8" />
-              <path d="M9 11.5 14.6 21.5 23.5 9" />
-            </svg>
-            <span>Velon</span>
-          </a>
-          <p>Proof before you sign. Proof after.</p>
-        </div>
-        <nav class="foot-nav" aria-label="Footer">
-          <ul>
-            <li><a href="https://velon-eta.vercel.app">Test bench</a></li>
-            <li><a href="https://velon-eta.vercel.app/app">Console</a></li>
-            <li><a href="https://github.com/dakewamama/velon">Source on GitHub</a></li>
-          </ul>
+    <footer class="footer">
+      <div class="wrap footer-inner">
+        <a class="brand" href="#top" aria-label="Velon home">
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <rect width="32" height="32" rx="8" />
+            <path d="M9 11.5 14.6 21.5 23.5 9" />
+          </svg>
+          Velon
+        </a>
+        <p>Screens and values on this page come from real runs of Velon.</p>
+        <nav aria-label="Footer">
+          <a href="https://velon-eta.vercel.app/app">Test bench</a>
+          <a href="https://github.com/dakewamama/velon">GitHub</a>
         </nav>
-        <p class="foot-note">
-          Illustrations on this page use example addresses and amounts. They are not real accounts.
-        </p>
       </div>
     </footer>
   </body>
