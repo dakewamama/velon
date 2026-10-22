@@ -29,7 +29,10 @@ test("native subscriptions scan, evidence and state comparison", async ({ page }
   await page.getByRole("button", { name: "What changed", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Observed changes: slot 108 → 122" })).toBeVisible();
   await expect(
-    page.locator("#diff article").filter({ hasText: "removed" }).filter({ hasText: "derived authority" }),
+    page
+      .locator("#diff article")
+      .filter({ hasText: "removed" })
+      .filter({ hasText: "Acts through another permission" }),
   ).toHaveCount(1);
   await page.screenshot({ path: `test-results/${info.project.name}-diff.png`, fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

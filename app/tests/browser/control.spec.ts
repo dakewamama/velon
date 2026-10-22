@@ -181,6 +181,17 @@ async function browserProvider(page: Page, mode = "success") {
     let result: unknown;
     if (request.method === "getGenesisHash") result = DEVNET_GENESIS;
     else if (request.method === "getBlockHeight") result = mode === "expired" ? 101 : 99;
+    // The console names the delegate for display; the bench delegate is a plain wallet.
+    else if (request.method === "getAccountInfo")
+      result = {
+        context: { slot: 10 },
+        value: {
+          owner: "11111111111111111111111111111111",
+          executable: false,
+          lamports: 1,
+          data: ["", "base64"],
+        },
+      };
     else if (request.method === "isBlockhashValid") result = { context: { slot: 10 }, value: true };
     else if (request.method === "sendTransaction") {
       sends++;
@@ -235,7 +246,7 @@ test("wallet signs exact revoke and success waits for finalized verification and
   await expect(page.getByRole("heading", { name: "Finalizing", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toBeVisible();
   await expect(page.locator("#results article")).toHaveCount(0);
-  await expect(page.locator("#action-result")).toContainText("Verified on chain (devnet).");
+  await expect(page.locator("#action-result")).toContainText("Revoked and verified on devnet.");
   await expect(page.locator("#action-result")).toContainText("c".repeat(64));
   expect(provider.counts()).toEqual({ sends: 1, polls: 2, observes: 1 });
   await page.screenshot({ path: `test-results/${info.project.name}-verified.png`, fullPage: true });

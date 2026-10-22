@@ -1361,7 +1361,7 @@ function lesson() {
   results.replaceChildren();
   // On a public cluster the visitor's own wallet is the whole point; ask for it first.
   if (control && !control.testBench && !connected) {
-    const start = labelled(node("button", "Connect wallet", "action-button"), "wallet");
+    const start = labelled(node("button", "Connect your wallet", "action-button"), "wallet");
     start.onclick = () => connectButton.click();
     const panel = node("section", "", "start");
     panel.append(
