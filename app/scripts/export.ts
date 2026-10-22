@@ -50,15 +50,24 @@ try {
     if (!response.ok) throw new Error(`${path}: ${response.status}`);
     return response;
   };
+  const media = /["(]\.\/([\w.-]+\.(?:png|svg|webp|jpg))[")]/g;
+  const images = new Set<string>();
   for (const [path, file] of [
     ["/", "index.html"],
     ["/app", "app.html"],
   ] as const) {
     const html = await (await get(path)).text();
     await Bun.write(`${out}/${file}`, html);
-    for (const [, asset] of html.matchAll(/(?:src|href)="\.\/([^"]+\.(?:js|css))"/g))
-      await Bun.write(`${out}/${asset}`, await (await get(`/${asset}`)).arrayBuffer());
+    for (const [, asset] of html.matchAll(/(?:src|href)="\.\/([^"]+\.(?:js|css))"/g)) {
+      const body = await (await get(`/${asset}`)).arrayBuffer();
+      await Bun.write(`${out}/${asset}`, body);
+      for (const [, image] of new TextDecoder().decode(body).matchAll(media)) images.add(image!);
+    }
+    for (const [, image] of html.matchAll(media)) images.add(image!);
   }
+  // Token marks are bundled as hashed files that the HTML and scripts point to.
+  for (const image of images)
+    await Bun.write(`${out}/${image}`, await (await get(`/${image}`)).arrayBuffer());
   // Bodies are kept as the runtime's raw text so native u64 values survive untouched.
   const data: Record<string, string> = {};
   const keep = async (path: string) => (data[path] = await (await get(path)).text());
