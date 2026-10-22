@@ -245,3 +245,32 @@ test("the RPC relay is POST only and exists only when configured", async () => {
   expect((await fetch(new URL("/rpc?x=1", server.url), post)).status).toBe(404);
   expect((await fetch(new URL("/rpc", bare.url), post)).status).toBe(404);
 });
+
+test("the wallet endpoint takes one owner address and an observe header", async () => {
+  const upstream = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("{}") });
+  const owners: string[] = [];
+  const holdings = async (owner: string) => (
+    owners.push(owner),
+    Response.json({ lamports: "1", tokens: [] })
+  );
+  const server = createServer(String(upstream.url), [], 0, "127.0.0.1", null, { holdings });
+  servers.push(upstream, server);
+  const owner = "11111111111111111111111111111111";
+  const post = (body: string, headers: Record<string, string> = actionHeaders) =>
+    fetch(new URL("/api/live/wallet", server.url), {
+      method: "POST",
+      headers: { ...headers, "X-Velon-Action": "observe", "Content-Type": "application/json" },
+      body,
+    });
+  expect(await (await post(JSON.stringify({ owner }))).json()).toEqual({ lamports: "1", tokens: [] });
+  expect(owners).toEqual([owner]);
+  expect((await post(JSON.stringify({ owner: "invalid" }))).status).toBe(400);
+  expect((await post(JSON.stringify({ source: owner }))).status).toBe(400);
+  const unmarked = await fetch(new URL("/api/live/wallet", server.url), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ owner }),
+  });
+  expect(unmarked.status).toBe(403);
+  expect((await fetch(new URL("/api/live/wallet", server.url))).status).toBe(405);
+});

@@ -2825,3 +2825,112 @@ dialog .action-button {
   border: 0;
   background: none;
 }
+
+/* Your wallet: every asset and whether another key can spend it. */
+.holdings {
+  margin-top: 28px;
+  padding: 24px 28px;
+  border-radius: 22px;
+  background: var(--card);
+  color: var(--body);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 6%) inset,
+    0 24px 48px -28px rgb(0 0 0 / 55%);
+}
+.holdings-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.holdings-head h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 22px;
+  letter-spacing: -0.03em;
+}
+.holdings-head .mono {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.holdings-head .link-button {
+  margin-left: auto;
+  font-size: 14px;
+}
+.holdings-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.holding {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.holding .token-logo,
+.holding .avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+.holding-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.holding-name strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.holding-name .muted {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.holding-amount {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.holding-status {
+  justify-self: end;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 560;
+  white-space: nowrap;
+}
+.holding-status.ok {
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+.holding-status.risk {
+  background: var(--warn-wash);
+  color: var(--warn);
+}
+.holdings > .muted {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+@media (max-width: 640px) {
+  .holdings {
+    padding: 20px;
+  }
+  .holding {
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+  }
+  .holding-status {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+}

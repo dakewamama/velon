@@ -746,6 +746,84 @@ document.querySelector<HTMLButtonElement>("#connect-own")!.onclick = () => conne
 // Comparing two recorded states only exists for recorded examples.
 const compareTab = (shown: boolean) => (document.querySelector<HTMLElement>("#diff-tab")!.hidden = !shown);
 
+const WSOL = "So11111111111111111111111111111111111111112";
+function units(amount: bigint, scale: number): string {
+  const whole = (amount / 10n ** BigInt(scale)).toLocaleString("en-US");
+  const fraction = (amount % 10n ** BigInt(scale))
+    .toString()
+    .padStart(scale, "0")
+    .slice(0, 4)
+    .replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : whole;
+}
+
+// What the wallet holds, as its RPC reports it, and whether any other key can spend each token.
+// Display only: the permissions below are the ones Velon observed and can act on.
+// Amounts arrive as decimal strings so u64 values survive JSON.
+async function holdingsPanel(owner: string, signal: AbortSignal): Promise<HTMLElement | undefined> {
+  const response = await call("/api/live/wallet", {
+    method: "POST",
+    headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
+    body: JSON.stringify({ owner }),
+    signal,
+  }).catch(() => undefined);
+  if (!response?.ok) return undefined;
+  const wallet = object(readJson(await response.text()));
+  const all = array(wallet.tokens).map(object);
+  const shown = all
+    .filter((entry) => entry.delegate !== null || text(entry.amount) !== "0")
+    .sort(
+      (a, b) =>
+        Number(b.delegate !== null) - Number(a.delegate !== null) ||
+        Number(Boolean(TOKENS[text(b.mint)])) - Number(Boolean(TOKENS[text(a.mint)])),
+    );
+  const panel = node("section", "", "holdings");
+  const head = node("div", "", "holdings-head");
+  const link = labelled(node("a", "Explorer", "link-button"), "external");
+  link.href = explorer("address", owner);
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  head.append(node("h2", "Your wallet"), node("span", short(owner), "mono"), link);
+  const list = node("ul", "", "holdings-list");
+  const row = (logo: Element, name: string, detail: string, amount: string, status: HTMLElement) => {
+    const item = node("li", "", "holding");
+    const label = node("div", "", "holding-name");
+    label.append(node("strong", name), node("span", detail, "muted"));
+    item.append(logo, label, node("span", amount, "holding-amount"), status);
+    return item;
+  };
+  const safe = () => node("span", "Only you can move it", "holding-status ok");
+  list.append(row(tokenLogo(WSOL), "SOL", "Native balance", units(BigInt(text(wallet.lamports)), 9), safe()));
+  for (const entry of shown) {
+    const mint = text(entry.mint);
+    const known = TOKENS[mint];
+    const scale = Number(entry.decimals);
+    let status = safe();
+    if (entry.delegate !== null) {
+      const delegated = BigInt(text(entry.delegated));
+      const limit = delegated === UNLIMITED ? "with no limit" : `up to ${units(delegated, scale)}`;
+      status = node("span", `${short(text(entry.delegate))} can spend ${limit}`, "holding-status risk");
+    }
+    const detail = `${known?.name ?? "Unlisted token"}${entry.program === "spl-token-2022" ? " · Token-2022" : ""}`;
+    list.append(
+      row(
+        tokenLogo(mint),
+        known?.symbol ?? `Token ${short(mint)}`,
+        detail,
+        units(BigInt(text(entry.amount)), scale),
+        status,
+      ),
+    );
+  }
+  panel.append(head, list);
+  const empty = all.length - shown.length;
+  if (empty)
+    panel.append(
+      node("p", `${empty} empty token account${empty === 1 ? "" : "s"} with no delegate not shown.`, "muted"),
+    );
+  return panel;
+}
+
 // Every permission across the connected wallet's token accounts.
 // Each account is observed through the runtime; the RPC's index only says where to look.
 async function scanWallet(): Promise<boolean | undefined> {
@@ -754,6 +832,7 @@ async function scanWallet(): Promise<boolean | undefined> {
   request?.abort();
   request = new AbortController();
   const signal = request.signal;
+  const wallet = holdingsPanel(owner, signal);
   // Only a ledger we started can be enumerated; public clusters answer per owner.
   const listed =
     control?.network === "localnet"
@@ -804,6 +883,10 @@ async function scanWallet(): Promise<boolean | undefined> {
   }
   if (signal.aborted) return false;
   badge(network().label);
+  // The panel is display only; if it cannot be read, the permissions still are.
+  const holdings = await wallet.catch(() => undefined);
+  if (signal.aborted) return false;
+  if (holdings) content.append(holdings);
   content.append(node("h2", "Who can act on your wallet"));
   if (control?.network === "mainnet")
     content.append(

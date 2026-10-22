@@ -1,7 +1,17 @@
 import { resolve } from "node:path";
 import { mkdir, unlink } from "node:fs/promises";
 import { getAddressEncoder, isAddress, type Address } from "@solana/addresses";
-import { array, grants, object, publicKey, readJson, text, writeJson, type Json } from "../src/wire.ts";
+import {
+  array,
+  grants,
+  integer,
+  object,
+  publicKey,
+  readJson,
+  text,
+  writeJson,
+  type Json,
+} from "../src/wire.ts";
 import { DEVNET_GENESIS, MAINNET_GENESIS, type Control } from "../src/control.ts";
 import { tokenCatalog } from "./catalog.ts";
 import type { Live } from "../src/server.ts";
@@ -169,7 +179,7 @@ if (process.env.RPC_URL) {
       const found = [];
       for (const [program, id] of [
         ["spl-token", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
-        ["spl-token-2022", "TokenzQdBNbLqP5VEhdkAS6EHpYxDocnoZPGCbbqDcmM"],
+        ["spl-token-2022", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"],
       ] as const)
         for (const entry of array(
           object(
@@ -199,7 +209,46 @@ if (process.env.RPC_URL) {
       return Response.json({ error: "The wallet's token accounts could not be read." }, { status: 502 });
     }
   };
-  live = { observe, owned };
+  // The wallet as its RPC reports it: SOL and every token account with any delegate. Display only;
+  // permissions shown as verified still come from observing each account through the runtime.
+  const holdings: Live["holdings"] = async (owner) => {
+    try {
+      const lamports = integer(object(await rpc("getBalance", [owner, { commitment: "finalized" }])).value);
+      const tokens = [];
+      for (const [program, id] of [
+        ["spl-token", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+        ["spl-token-2022", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"],
+      ] as const)
+        for (const entry of array(
+          object(
+            await rpc("getTokenAccountsByOwner", [
+              owner,
+              { programId: id },
+              { encoding: "jsonParsed", commitment: "finalized" },
+            ]),
+          ).value,
+        )) {
+          const info = object(object(object(object(object(entry).account).data).parsed).info);
+          const balance = object(info.tokenAmount);
+          tokens.push({
+            program,
+            source: text(object(entry).pubkey),
+            mint: text(info.mint),
+            amount: text(balance.amount),
+            decimals: Number(balance.decimals),
+            delegate: typeof info.delegate === "string" ? info.delegate : null,
+            delegated: info.delegatedAmount ? text(object(info.delegatedAmount).amount) : "0",
+          });
+        }
+      return Response.json(
+        { lamports: String(lamports), tokens },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    } catch {
+      return Response.json({ error: "The wallet could not be read." }, { status: 502 });
+    }
+  };
+  live = { observe, owned, holdings };
   // Public clusters refuse browser-origin RPC, so a local console relays the methods it needs.
   // The hosted bench does the same in deploy/gateway.ts; keep the two lists in step.
   if (process.env.RPC_RELAY === "1") {

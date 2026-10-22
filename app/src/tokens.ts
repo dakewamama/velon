@@ -48,7 +48,7 @@ export function tokenLogo(mint: string): Element {
 export const PROGRAMS: Record<string, string> = {
   "11111111111111111111111111111111": "System Program",
   TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA: "SPL Token",
-  TokenzQdBNbLqP5VEhdkAS6EHpYxDocnoZPGCbbqDcmM: "Token-2022",
+  TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb: "Token-2022",
   ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL: "Associated Token Account",
   SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf: "Squads V4",
   JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4: "Jupiter Aggregator v6",
