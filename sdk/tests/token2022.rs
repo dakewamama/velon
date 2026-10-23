@@ -379,45 +379,68 @@ fn malformed_extension_cannot_be_treated_as_absent() {
 }
 
 #[test]
-fn recognized_but_unreviewed_extensions_are_unsupported() {
+fn reviewed_extensions_compile_and_spending_extensions_stay_unsupported() {
     use spl_token_2022_interface::extension::{
-        immutable_owner::ImmutableOwner, mint_close_authority::MintCloseAuthority,
-        BaseStateWithExtensionsMut, StateWithExtensionsMut,
+        cpi_guard::CpiGuard, immutable_owner::ImmutableOwner,
+        mint_close_authority::MintCloseAuthority, transfer_fee::TransferFeeConfig,
+        BaseStateWithExtensionsMut, Extension, StateWithExtensionsMut,
     };
-    let mut state = fixture();
-    let base = StateWithExtensions::<TokenAccount>::unpack(&state.source.account.data)
-        .unwrap()
-        .base;
-    let size =
-        ExtensionType::try_calculate_account_len::<TokenAccount>(&[ExtensionType::ImmutableOwner])
+    macro_rules! with_extension {
+        ($state:expr, account, $extension:ty) => {{
+            let base = StateWithExtensions::<TokenAccount>::unpack(&$state.source.account.data)
+                .unwrap()
+                .base;
+            let size = ExtensionType::try_calculate_account_len::<TokenAccount>(&[
+                <$extension as Extension>::TYPE,
+            ])
             .unwrap();
-    state.source.account.data = vec![0; size];
-    let mut decoded = StateWithExtensionsMut::<TokenAccount>::unpack_uninitialized(
-        &mut state.source.account.data,
-    )
-    .unwrap();
-    decoded.init_extension::<ImmutableOwner>(false).unwrap();
-    decoded.base = base;
-    decoded.pack_base();
-    decoded.init_account_type().unwrap();
+            $state.source.account.data = vec![0; size];
+            let mut decoded = StateWithExtensionsMut::<TokenAccount>::unpack_uninitialized(
+                &mut $state.source.account.data,
+            )
+            .unwrap();
+            decoded.init_extension::<$extension>(false).unwrap();
+            decoded.base = base;
+            decoded.pack_base();
+            decoded.init_account_type().unwrap();
+        }};
+        ($state:expr, mint, $extension:ty) => {{
+            let base = StateWithExtensions::<Mint>::unpack(&$state.mint.1.data)
+                .unwrap()
+                .base;
+            let size = ExtensionType::try_calculate_account_len::<Mint>(&[
+                <$extension as Extension>::TYPE,
+            ])
+            .unwrap();
+            $state.mint.1.data = vec![0; size];
+            let mut decoded =
+                StateWithExtensionsMut::<Mint>::unpack_uninitialized(&mut $state.mint.1.data)
+                    .unwrap();
+            decoded.init_extension::<$extension>(false).unwrap();
+            decoded.base = base;
+            decoded.pack_base();
+            decoded.init_account_type().unwrap();
+        }};
+    }
+    // Transfer and revoke never read these, so the delegate's budget is exactly as observed.
+    let mut state = fixture();
+    with_extension!(state, account, ImmutableOwner);
+    assert_eq!(
+        sdk::compile_state(&Token2022Adapter, &state, &context()).unwrap(),
+        sdk::compile_state(&Token2022Adapter, &fixture(), &context()).unwrap()
+    );
+    let mut state = fixture();
+    with_extension!(state, mint, MintCloseAuthority);
+    assert!(sdk::compile_state(&Token2022Adapter, &state, &context()).is_ok());
+    // These change what a delegate can move, so they stay unsupported until modelled.
+    let mut state = fixture();
+    with_extension!(state, account, CpiGuard);
     assert_eq!(
         sdk::compile_state(&Token2022Adapter, &state, &context()),
         Err(Error::UnsupportedOperation)
     );
     let mut state = fixture();
-    let base = StateWithExtensions::<Mint>::unpack(&state.mint.1.data)
-        .unwrap()
-        .base;
-    let size =
-        ExtensionType::try_calculate_account_len::<Mint>(&[ExtensionType::MintCloseAuthority])
-            .unwrap();
-    state.mint.1.data = vec![0; size];
-    let mut decoded =
-        StateWithExtensionsMut::<Mint>::unpack_uninitialized(&mut state.mint.1.data).unwrap();
-    decoded.init_extension::<MintCloseAuthority>(false).unwrap();
-    decoded.base = base;
-    decoded.pack_base();
-    decoded.init_account_type().unwrap();
+    with_extension!(state, mint, TransferFeeConfig);
     assert_eq!(
         sdk::compile_state(&Token2022Adapter, &state, &context()),
         Err(Error::UnsupportedOperation)
@@ -463,8 +486,11 @@ fn missing_mismatched_and_unsupported_evidence_fails_closed() {
         sdk::compile_state(&Token2022Adapter, &state, &context()),
         Err(Error::InsufficientEvidence)
     );
+    // Only a token-2022 multisig needs threshold interpretation; other program-held keys sign.
     let mut state = fixture();
     state.source.authorities[0].1.owner = token2022::ID;
+    assert!(sdk::compile_state(&Token2022Adapter, &state, &context()).is_ok());
+    state.source.authorities[0].1.data = vec![0; spl_token_2022_interface::state::Multisig::LEN];
     assert_eq!(
         sdk::compile_state(&Token2022Adapter, &state, &context()),
         Err(Error::UnsupportedOperation)

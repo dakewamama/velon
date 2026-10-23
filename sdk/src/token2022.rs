@@ -5,6 +5,7 @@ use crate::{
 use arm::*;
 use solana_account::Account;
 use solana_instruction::Instruction;
+use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
 use spl_token_2022_interface::{
     extension::{
@@ -12,8 +13,44 @@ use spl_token_2022_interface::{
         StateWithExtensions,
     },
     instruction,
-    state::{Account as TokenAccount, Mint},
+    state::{Account as TokenAccount, Mint, Multisig},
 };
+
+/// Account extensions the transfer and revoke paths never consult (token-2022 11.1.0
+/// `process_transfer`, `process_revoke`). Anything else on the account is unsupported.
+const ACCOUNT_EXTENSIONS: [ExtensionType; 1] = [ExtensionType::ImmutableOwner];
+/// Mint extensions that carry data only, plus the permanent delegate, which is modelled below.
+/// Transfer fees, hooks, pausing, confidential transfers and non-transferability change what a
+/// delegate can move, so they remain unsupported.
+const MINT_EXTENSIONS: [ExtensionType; 8] = [
+    ExtensionType::PermanentDelegate,
+    ExtensionType::MetadataPointer,
+    ExtensionType::TokenMetadata,
+    ExtensionType::GroupPointer,
+    ExtensionType::GroupMemberPointer,
+    ExtensionType::TokenGroup,
+    ExtensionType::TokenGroupMember,
+    ExtensionType::MintCloseAuthority,
+];
+
+/// The program reads a delegate as M-of-N signers only when it owns an account of exactly
+/// multisig size; any other key spends by signing for itself.
+fn check_delegate(state: &AuthorityState, key: Pubkey) -> Result<(), Error> {
+    let mut observations = state
+        .authorities
+        .iter()
+        .filter(|(address, _)| *address == key);
+    let (_, account) = observations.next().ok_or(Error::InsufficientEvidence)?;
+    if observations.next().is_some() {
+        return Err(Error::InvalidState(
+            "duplicate authority observation".into(),
+        ));
+    }
+    if account.owner == spl_token_2022_interface::id() && account.data.len() == Multisig::LEN {
+        return Err(Error::UnsupportedOperation);
+    }
+    Ok(())
+}
 
 pub const PROGRAM_VERSION: &str =
     "sha256:b2a7ce1ea6dfbcbc5ccb0e7f48f7c61dced1a86582d1c7d2e059ac54ed612da4";
@@ -37,7 +74,10 @@ fn decode(state: &State) -> Result<(TokenAccount, Option<Pubkey>), Error> {
     let extensions = account
         .get_extension_types()
         .map_err(|error| Error::InvalidState(error.to_string()))?;
-    if !extensions.is_empty() {
+    if extensions
+        .iter()
+        .any(|extension| !ACCOUNT_EXTENSIONS.contains(extension))
+    {
         return Err(Error::UnsupportedOperation);
     }
     if state.mint.0 != account.base.mint {
@@ -56,14 +96,18 @@ fn decode(state: &State) -> Result<(TokenAccount, Option<Pubkey>), Error> {
         .map_err(|error| Error::InvalidState(error.to_string()))?;
     if extensions
         .iter()
-        .any(|extension| *extension != ExtensionType::PermanentDelegate)
+        .any(|extension| !MINT_EXTENSIONS.contains(extension))
     {
         return Err(Error::UnsupportedOperation);
     }
-    if extensions.len() > 1 {
+    if extensions
+        .iter()
+        .enumerate()
+        .any(|(index, extension)| extensions[..index].contains(extension))
+    {
         return Err(Error::InvalidState("duplicate extension".into()));
     }
-    let permanent = if extensions.is_empty() {
+    let permanent = if !extensions.contains(&ExtensionType::PermanentDelegate) {
         None
     } else {
         let extension = mint
@@ -152,7 +196,7 @@ impl Adapter for Token2022Adapter {
             ("permanent-delegate", permanent),
         ] {
             let Some(principal) = principal else { continue };
-            check_authority(&state.source, principal)?;
+            check_delegate(&state.source, principal)?;
             let cumulative = role == "delegate";
             authorizations.push(Authorization {
                 schema_version: SCHEMA_VERSION.into(),
