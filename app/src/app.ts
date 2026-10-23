@@ -372,6 +372,21 @@ function currentScenario(): Scenario {
   return scenario;
 }
 
+// What the address is on chain: a wallet, an SPL Token account, a Token-2022 account or something else.
+// Undefined when the RPC did not answer.
+async function addressKind(address: string, signal: AbortSignal): Promise<string | undefined> {
+  const response = await call("/api/live/wallet", {
+    method: "POST",
+    headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
+    body: JSON.stringify({ owner: address }),
+    signal,
+  }).catch(() => undefined);
+  // A server without this endpoint reads every address as a token account, as before.
+  if (response?.status === 404) return "token-account";
+  if (!response?.ok) return undefined;
+  return text(object(readJson(await response.text())).kind);
+}
+
 async function scan(historical = false, refresh = false) {
   invalidateReview();
   request?.abort();
@@ -391,6 +406,31 @@ async function scan(historical = false, refresh = false) {
     const scenario = currentScenario();
     const live = scenario.live;
     compareTab(!live);
+    // On a public cluster a pasted wallet is read like a connected one, without signing rights.
+    if (live && control?.network !== "localnet") {
+      const kind = await addressKind(address, signal);
+      const refused: Record<string, string> = {
+        "token-2022-account":
+          "This is a Token-2022 account. Velon lists Token-2022 delegates for a wallet but cannot verify or revoke them yet. Paste the owner's wallet address instead.",
+        other:
+          "This address is owned by a program, not a wallet or an SPL Token account. Paste a wallet address or one of its token accounts.",
+      };
+      if (kind === undefined || refused[kind]) {
+        scanButton.disabled = false;
+        status(
+          kind ? refused[kind]! : "The RPC did not answer. It may be rate limiting; try again in a minute.",
+          true,
+        );
+        return;
+      }
+      if (kind === "wallet") {
+        scanButton.disabled = false;
+        status("Reading the wallet's token accounts...");
+        // A wallet is never re-read as a single token account.
+        await scanWallet(address);
+        return;
+      }
+    }
     if (live && (refresh || !scenario.scope)) {
       status("Observing the finalized token account...");
       const observed = await call("/api/live/spl/observe", {
@@ -761,6 +801,7 @@ function units(amount: bigint, scale: number): string {
 // Display only: the permissions below are the ones Velon observed and can act on.
 // Amounts arrive as decimal strings so u64 values survive JSON.
 async function holdingsPanel(owner: string, signal: AbortSignal): Promise<HTMLElement | undefined> {
+  const yours = owner === connected?.account.address;
   const response = await call("/api/live/wallet", {
     method: "POST",
     headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
@@ -769,6 +810,7 @@ async function holdingsPanel(owner: string, signal: AbortSignal): Promise<HTMLEl
   }).catch(() => undefined);
   if (!response?.ok) return undefined;
   const wallet = object(readJson(await response.text()));
+  if (wallet.kind !== "wallet") return undefined;
   const all = array(wallet.tokens).map(object);
   const shown = all
     .filter((entry) => entry.delegate !== null || text(entry.amount) !== "0")
@@ -783,7 +825,7 @@ async function holdingsPanel(owner: string, signal: AbortSignal): Promise<HTMLEl
   link.href = explorer("address", owner);
   link.target = "_blank";
   link.rel = "noreferrer";
-  head.append(node("h2", "Your wallet"), node("span", short(owner), "mono"), link);
+  head.append(node("h2", yours ? "Your wallet" : "This wallet"), node("span", short(owner), "mono"), link);
   const list = node("ul", "", "holdings-list");
   const row = (logo: Element, name: string, detail: string, amount: string, status: HTMLElement) => {
     const item = node("li", "", "holding");
@@ -792,7 +834,8 @@ async function holdingsPanel(owner: string, signal: AbortSignal): Promise<HTMLEl
     item.append(logo, label, node("span", amount, "holding-amount"), status);
     return item;
   };
-  const safe = () => node("span", "Only you can move it", "holding-status ok");
+  const safe = () =>
+    node("span", yours ? "Only you can move it" : "Only the owner can move it", "holding-status ok");
   list.append(row(tokenLogo(WSOL), "SOL", "Native balance", units(BigInt(text(wallet.lamports)), 9), safe()));
   for (const entry of shown) {
     const mint = text(entry.mint);
@@ -826,9 +869,10 @@ async function holdingsPanel(owner: string, signal: AbortSignal): Promise<HTMLEl
 
 // Every permission across the connected wallet's token accounts.
 // Each account is observed through the runtime; the RPC's index only says where to look.
-async function scanWallet(): Promise<boolean | undefined> {
-  if (!connected) return false;
-  const owner = connected.account.address;
+// Any wallet can be read; only the connected owner can sign a revoke for it.
+async function scanWallet(owner = connected?.account.address): Promise<boolean | undefined> {
+  if (!owner) return false;
+  const yours = owner === connected?.account.address;
   request?.abort();
   request = new AbortController();
   const signal = request.signal;
@@ -859,17 +903,42 @@ async function scanWallet(): Promise<boolean | undefined> {
   const content = document.createDocumentFragment();
   const cards: HTMLElement[] = [];
   let last: ObjectValue | undefined;
+  let unread = 0;
   try {
-    for (const entry of owned) {
-      const source = text(entry.source);
-      const observed = await call("/api/live/spl/observe", {
-        method: "POST",
-        headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
-        body: JSON.stringify({ source }),
-        signal,
-      });
-      const scope = text(object(await result(observed)).scope_id);
-      const view = object(await get(`scopes/${scope}/effective/${source}`, signal));
+    // A few accounts are observed at once; cards keep the order the RPC listed them in.
+    // Public RPCs rate limit, so an account is retried before it is reported as unread.
+    const views: ([ObjectValue, string] | undefined)[] = new Array(owned.length);
+    const observe = async (source: string) => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const observed = await call("/api/live/spl/observe", {
+            method: "POST",
+            headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
+            body: JSON.stringify({ source }),
+            signal,
+          });
+          const scope = text(object(await result(observed)).scope_id);
+          return [object(await get(`scopes/${scope}/effective/${source}`, signal)), scope] as [
+            ObjectValue,
+            string,
+          ];
+        } catch (error) {
+          if (signal.aborted || attempt === 3) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 1500 * 2 ** attempt));
+        }
+      }
+    };
+    let next = 0;
+    const worker = async () => {
+      for (let index = next++; index < owned.length; index = next++)
+        views[index] = await observe(text(owned[index]!.source)).catch(() => {
+          if (signal.aborted) throw signal.reason;
+          return undefined;
+        });
+    };
+    await Promise.all(Array.from({ length: Math.min(3, owned.length) }, worker));
+    unread = views.filter((view) => !view).length;
+    for (const [view, scope] of views.filter((view) => view !== undefined)) {
       last = view;
       for (const item of array(object(view.projection).authorizations ?? []))
         cards.push(
@@ -887,7 +956,7 @@ async function scanWallet(): Promise<boolean | undefined> {
   const holdings = await wallet.catch(() => undefined);
   if (signal.aborted) return false;
   if (holdings) content.append(holdings);
-  content.append(node("h2", "Who can act on your wallet"));
+  content.append(node("h2", yours ? "Who can act on your wallet" : "Who can act on this wallet"));
   if (control?.network === "mainnet")
     content.append(
       node(
@@ -897,6 +966,14 @@ async function scanWallet(): Promise<boolean | undefined> {
       ),
     );
   if (last) content.append(metadata(last));
+  if (unread)
+    content.append(
+      node(
+        "p",
+        `${unread} of ${owned.length} token accounts could not be read; the RPC may be rate limiting. Reload to try them again.`,
+        "notice",
+      ),
+    );
   if (cards.length) content.append(...cards);
   else
     content.append(
@@ -929,7 +1006,12 @@ async function scanWallet(): Promise<boolean | undefined> {
     );
     row.append(
       header,
-      node("h3", `Spend up to ${text(entry.ui)} tokens`),
+      node(
+        "h3",
+        text(entry.amount) === String(UNLIMITED)
+          ? "Spend every token, with no limit"
+          : `Spend up to ${text(entry.ui)} tokens`,
+      ),
       node(
         "p",
         "Velon cannot verify or revoke Token-2022 delegations yet. Revoke this one from your wallet.",
@@ -943,7 +1025,7 @@ async function scanWallet(): Promise<boolean | undefined> {
   compareTab(false);
   results.replaceChildren(content);
   notice.replaceChildren();
-  reload = scanWallet;
+  reload = () => scanWallet(owner);
   guide(cards.length ? 3 : 2);
   return true;
 }
@@ -1682,6 +1764,7 @@ bench.onclick = async () => {
 
 form.onsubmit = (event) => {
   event.preventDefault();
+  closeBrowse();
   setMode("scan", true);
 };
 select.onchange = selectScenario;

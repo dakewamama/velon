@@ -213,6 +213,24 @@ if (process.env.RPC_URL) {
   // permissions shown as verified still come from observing each account through the runtime.
   const holdings: Live["holdings"] = async (owner) => {
     try {
+      const account = object(
+        await rpc("getAccountInfo", [
+          owner,
+          { encoding: "base64", dataSlice: { offset: 0, length: 0 }, commitment: "finalized" },
+        ]),
+      ).value;
+      // What the address itself is decides how the console reads it.
+      const program = account === null ? null : text(object(account).owner);
+      const kind =
+        program === null || program === "11111111111111111111111111111111"
+          ? "wallet"
+          : program === "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+            ? "token-account"
+            : program === "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+              ? "token-2022-account"
+              : "other";
+      if (kind !== "wallet")
+        return Response.json({ kind, program }, { headers: { "Cache-Control": "no-store" } });
       const lamports = integer(object(await rpc("getBalance", [owner, { commitment: "finalized" }])).value);
       const tokens = [];
       for (const [program, id] of [
@@ -241,7 +259,7 @@ if (process.env.RPC_URL) {
           });
         }
       return Response.json(
-        { lamports: String(lamports), tokens },
+        { kind, lamports: String(lamports), tokens },
         { headers: { "Cache-Control": "no-store" } },
       );
     } catch {
