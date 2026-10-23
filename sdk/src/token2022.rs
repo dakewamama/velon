@@ -46,8 +46,8 @@ fn check_delegate(state: &AuthorityState, key: Pubkey) -> Result<(), Error> {
             "duplicate authority observation".into(),
         ));
     }
-    let token_program =
-        account.owner == spl_token_2022_interface::id() || account.owner == spl_token_interface::id();
+    let token_program = account.owner == spl_token_2022_interface::id()
+        || account.owner == spl_token_interface::id();
     if token_program && account.data.len() == Multisig::LEN {
         return Err(Error::UnsupportedOperation);
     }
@@ -57,6 +57,14 @@ fn check_delegate(state: &AuthorityState, key: Pubkey) -> Result<(), Error> {
 pub const PROGRAM_VERSION: &str =
     "sha256:b2a7ce1ea6dfbcbc5ccb0e7f48f7c61dced1a86582d1c7d2e059ac54ed612da4";
 pub const DEPLOYMENT: &str = "fixture:mollusk:token-2022:0.15.1";
+/// Mainnet's Token-2022 at its 427147035 upgrade. The same bytes are the build OtterSec
+/// verifies from solana-program/token-2022@9bc02757 (sha256 7ea94a02… without the
+/// programdata padding). Token-2022 is upgradeable: any later deployment is unsupported until
+/// it is verified and pinned here.
+pub const LIVE_DEPLOYMENT: &str =
+    "solana:loader-v3:DoU57AYuPFu2QU514RktNPG22QhApEjnKxnBcu4BHDTY:427147035";
+pub const LIVE_PROGRAM_VERSION: &str =
+    "sha256:0999dbf708971e723b08d1caafc988826a59c6001ed6dc02260da07defbe1469";
 
 pub struct Token2022Adapter;
 
@@ -153,8 +161,9 @@ impl Adapter for Token2022Adapter {
 
     fn supports(&self, native: &NativeContext) -> bool {
         native.protocol == "token-2022"
-            && native.deployment == DEPLOYMENT
-            && native.program_version == PROGRAM_VERSION
+            && ((native.deployment == DEPLOYMENT && native.program_version == PROGRAM_VERSION)
+                || (native.deployment == LIVE_DEPLOYMENT
+                    && native.program_version == LIVE_PROGRAM_VERSION))
             && native.adapter_version == "0.1"
     }
 

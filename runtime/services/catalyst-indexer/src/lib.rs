@@ -9,7 +9,7 @@ use axum::{
     routing::get,
 };
 use cataloger::{Catalog, ProgramVersion};
-use catalyst_sdk::{self as sdk, Adapter, Context, spl, subscriptions};
+use catalyst_sdk::{self as sdk, Adapter, Context, spl, subscriptions, token2022};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use solana_account::Account;
@@ -55,6 +55,11 @@ pub enum Target {
     SplDelegate {
         source: Pubkey,
     },
+    /// A Token-2022 account's delegate; the mint is read for its extensions.
+    Token2022Delegate {
+        source: Pubkey,
+        mint: Pubkey,
+    },
     Subscription {
         delegation: Pubkey,
         authority: Pubkey,
@@ -68,6 +73,7 @@ impl Target {
     fn key(&self) -> String {
         match self {
             Self::SplDelegate { source } => format!("spl:{source}"),
+            Self::Token2022Delegate { source, .. } => format!("token-2022:{source}"),
             Self::Subscription { delegation, .. } => format!("subscription:{delegation}"),
         }
     }
@@ -196,6 +202,38 @@ fn context(
     })
 }
 
+/// The Token-2022 account, its mint and every key the adapter needs to name, from one batch.
+pub(crate) fn token2022_state(
+    snapshot: &Snapshot,
+    source: Pubkey,
+    mint: Pubkey,
+) -> Result<token2022::State, sdk::Error> {
+    let account = |key: Pubkey| {
+        snapshot
+            .accounts
+            .iter()
+            .find(|(address, _)| *address == key)
+            .map(|(_, account)| account.clone())
+            .ok_or(sdk::Error::InsufficientEvidence)
+    };
+    let mut state = token2022::State {
+        source: spl::AuthorityState {
+            address: source,
+            account: account(source)?,
+            authorities: Vec::new(),
+        },
+        mint: (mint, account(mint)?),
+    };
+    for required in token2022::Token2022Adapter
+        .source_requirements(&state)
+        .accounts
+    {
+        let observed = account(required)?;
+        state.source.authorities.push((required, observed));
+    }
+    Ok(state)
+}
+
 fn spl_state(snapshot: &Snapshot, source: Pubkey) -> Result<spl::State, sdk::Error> {
     let account = |key| {
         snapshot
@@ -255,6 +293,21 @@ fn compile(snapshot: &Snapshot, catalog: &Catalog, id: &str) -> (Vec<ProgramVers
                         return Err(sdk::Error::UnsupportedVersion);
                     }
                     let state = spl_state(snapshot, *source)?;
+                    sdk::compile_state(&adapter, &state, &context)?
+                }
+                Target::Token2022Delegate { source, mint } => {
+                    let adapter = token2022::Token2022Adapter;
+                    let context = context(
+                        adapter.protocol().program_id,
+                        snapshot,
+                        catalog,
+                        id,
+                        &mut versions,
+                    )?;
+                    if !adapter.supports(&context.native) {
+                        return Err(sdk::Error::UnsupportedVersion);
+                    }
+                    let state = token2022_state(snapshot, *source, *mint)?;
                     sdk::compile_state(&adapter, &state, &context)?
                 }
                 Target::Subscription {

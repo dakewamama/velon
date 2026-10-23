@@ -828,6 +828,7 @@ dependencies = [
  "solana-syscalls",
  "solana-transaction",
  "solana-transaction-status-client-types",
+ "spl-token-2022-interface",
  "spl-token-interface",
  "sqlx",
  "tokio",
