@@ -33,6 +33,9 @@ const AUTHORITY: &str = "C6SqwcnpGmWGkM3UuWJ2w58UZvYrgUxQaAFem6wPSBW6";
 const SOURCE: &str = "HwD4QpS4bsutLbWZWhbmFUZfkXC5Au1DbkzYEzjDgps8";
 const PLAN: &str = "3DztDM68WwtEuWfnPeP4CsEijJaX1tp5x9YszSsSguvJ";
 
+// The recorded fixture catalog names the standalone SDK commit its adapters were captured from.
+const FIXTURE_ADAPTER_REVISION: &str = "54ed06aa3a7c8a31268dface42d0bf27ca4adaee";
+
 fn key(value: &str) -> Pubkey {
     value.parse().unwrap()
 }
@@ -171,7 +174,7 @@ async fn native_spl_and_subscription_snapshots_match_independent_goldens() {
         assert_eq!(
             version.adapter.source,
             format!(
-                "https://github.com/dakewamama/catalyst-sdk/blob/{SDK_REVISION}/src/{module}.rs"
+                "https://github.com/dakewamama/catalyst-sdk/blob/{FIXTURE_ADAPTER_REVISION}/src/{module}.rs"
             )
         );
         assert_eq!(version.cluster, CLUSTER);

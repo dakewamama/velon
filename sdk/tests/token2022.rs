@@ -495,6 +495,12 @@ fn missing_mismatched_and_unsupported_evidence_fails_closed() {
         sdk::compile_state(&Token2022Adapter, &state, &context()),
         Err(Error::UnsupportedOperation)
     );
+    // A classic SPL Token multisig is read the same way by Token-2022.
+    state.source.authorities[0].1.owner = spl_token_interface::id();
+    assert_eq!(
+        sdk::compile_state(&Token2022Adapter, &state, &context()),
+        Err(Error::UnsupportedOperation)
+    );
     let mut state = fixture();
     state.source.account.data.clear();
     let mut unknown = context();

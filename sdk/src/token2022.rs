@@ -33,8 +33,8 @@ const MINT_EXTENSIONS: [ExtensionType; 8] = [
     ExtensionType::MintCloseAuthority,
 ];
 
-/// The program reads a delegate as M-of-N signers only when it owns an account of exactly
-/// multisig size; any other key spends by signing for itself.
+/// Token-2022 reads a delegate as M-of-N signers when an account of exactly multisig size is
+/// owned by either token program (11.1.0 `validate_owner`); any other key spends by signing.
 fn check_delegate(state: &AuthorityState, key: Pubkey) -> Result<(), Error> {
     let mut observations = state
         .authorities
@@ -46,7 +46,9 @@ fn check_delegate(state: &AuthorityState, key: Pubkey) -> Result<(), Error> {
             "duplicate authority observation".into(),
         ));
     }
-    if account.owner == spl_token_2022_interface::id() && account.data.len() == Multisig::LEN {
+    let token_program =
+        account.owner == spl_token_2022_interface::id() || account.owner == spl_token_interface::id();
+    if token_program && account.data.len() == Multisig::LEN {
         return Err(Error::UnsupportedOperation);
     }
     Ok(())

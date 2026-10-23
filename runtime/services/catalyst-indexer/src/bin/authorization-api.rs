@@ -6,7 +6,42 @@ use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use std::time::Duration;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> std::process::ExitCode {
+    match run().await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("Error: {}", redact(&error.to_string()));
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+/// A provider URL can carry an API key in its path or query; errors are printed without it.
+fn redact(message: &str) -> String {
+    let mut message = message.to_owned();
+    if let Ok(url) = std::env::var("RPC_URL")
+        && !url.is_empty()
+    {
+        message = message.replace(url.trim_end_matches('/'), "<rpc>");
+    }
+    message
+        .split(' ')
+        .map(|word| match word.find("://") {
+            Some(_) => match word.split_once("://") {
+                Some((scheme, rest)) => {
+                    let host = rest.split(['/', '?', ')']).next().unwrap_or_default();
+                    let tail = if word.ends_with(')') { ")" } else { "" };
+                    format!("{scheme}://{host}/<redacted>{tail}")
+                }
+                None => word.to_owned(),
+            },
+            None => word.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if let [command, program] = args.as_slice()
         && command == "capture"

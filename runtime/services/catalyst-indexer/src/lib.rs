@@ -27,7 +27,9 @@ use std::{
 pub mod features;
 pub mod rpc;
 
-pub const SDK_REVISION: &str = "54ed06aa3a7c8a31268dface42d0bf27ca4adaee";
+/// The SDK is built from this repository, so its revision is the commit the runtime was built
+/// from, marked dirty when the SDK or the permission model had uncommitted changes.
+pub const SDK_REVISION: &str = env!("VELON_REVISION");
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

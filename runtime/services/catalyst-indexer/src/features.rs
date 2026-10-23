@@ -33,7 +33,8 @@ pub struct Features {
 
 impl Features {
     pub fn runtime(&self, observed: u64) -> Result<SVMFeatureSet, Error> {
-        if self.slot < observed || self.active.iter().any(|(_, at)| *at > observed) {
+        // Observation records the observed slot itself; anything else was not produced here.
+        if self.slot != observed || self.active.iter().any(|(_, at)| *at > observed) {
             return Err(Error::InvalidObservation(
                 "feature evidence outside observed bank",
             ));

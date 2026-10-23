@@ -505,7 +505,8 @@ fn execute_revoke(
         .ok_or(AdapterError::InsufficientEvidence)?;
     let mut compute_budget =
         ComputeBudget::new_with_defaults(features.raise_cpi_nesting_limit_to_8);
-    compute_budget.compute_unit_limit = REVOKE_UNIT_LIMIT.into();
+    // The transaction's two compute-budget instructions use 150 units each before Revoke runs.
+    compute_budget.compute_unit_limit = (REVOKE_UNIT_LIMIT - 2 * 150).into();
     let mut mollusk = Mollusk {
         compute_budget,
         ..Default::default()
@@ -526,7 +527,8 @@ fn execute_revoke(
         })
         .collect::<Result<_, _>>()?;
     let result = mollusk.process_instruction_chain(&action.instructions, &accounts);
-    if result.raw_result.is_err() {
+    // Rent-state and other post-execution failures surface only in program_result.
+    if result.raw_result.is_err() || !result.program_result.is_ok() {
         return Err(Error::InvalidObservation("native execution failed"));
     }
     Ok(result.resulting_accounts)
