@@ -134,39 +134,47 @@ creates a throwaway key in the page for visitors with no extension. Verified rev
 are kept in the browser and can be replayed from the journal under Receipts. These
 routes exist only for `LIVE_NETWORK=localnet`.
 
-Setting `MAINNET_RPC_URL` adds a read-only list of the newest token delegations on
-mainnet (`GET /api/mainnet/delegated`): the server reads recent finalized blocks for
-approve instructions and keeps up to five accounts whose delegate is still in force.
-These are shown as the RPC reports them and labelled as not verified; this runtime
-holds no mainnet evidence, so they cannot be observed as permissions or revoked. A
-provider URL with a key belongs in the environment only, never in the repository.
+Setting `MAINNET_RPC_URL` (or `DEVNET_RPC_URL`) adds a list of the newest token
+delegations on that cluster (`GET /api/mainnet/delegated`): the server reads recent
+finalized blocks for approve instructions and keeps up to five accounts whose delegate
+is still in force and whose owner is a wallet. Blocks are read only while someone has
+asked for the list in the last two minutes. On the console's own cluster, choosing a row
+observes the account and opens the verified review; on another cluster the row is
+shown as the RPC reports it, unverified. A provider URL with a key belongs in the
+environment only, never in the repository.
 
 `POST /api/live/spl/observe` accepts `{"source":"<token account>"}` and nothing else.
 The server validates the address, asks the RPC which owner and delegate accounts the
 token account names, and runs Cataloger's `observe` with one `spl_delegate` target and
-those witnesses. Cataloger reads the finalized batch, decodes it and journals the
-record; the browser never decodes account data. Startup resolves the genesis hash
-behind `RPC_URL` and refuses to start unless `LIVE_CATALOG` holds an SPL Token record
-with executable and runtime evidence for that cluster. `LIVE_NETWORK=devnet` must
-match devnet's genesis; mainnet is refused. `PUBLIC_RPC_URL` is deliberately exposed
-to the browser, so never put a private provider credential there.
+those witnesses. Cataloger reads the finalized batch and the cluster's activated feature
+accounts at that slot, decodes them and journals the record; the browser never decodes
+account data. `POST /api/live/wallet` reads a wallet's SOL balance and token accounts
+for display, and classifies any address as a wallet, a token account, a mint or
+something else. Startup resolves the genesis hash behind `RPC_URL`, captures the SPL
+Token program and the cluster's features into a catalog (or uses `LIVE_CATALOG`), and
+refuses to start unless the program is the verified build. The catalog is captured
+again every hour, because a record is valid for one epoch and a feature activation at
+an epoch boundary retires it early. `PUBLIC_RPC_URL` is exposed to the browser, so never
+put a private provider credential there; use `RPC_RELAY=1` with `PUBLIC_RPC_URL` set to
+the app's own `/rpc` instead.
 
 Connect the token-account owner's wallet, observe the account and choose Revoke.
-Revoke asks Cataloger to observe and simulate in one finalized bank, then shows that
-fresh state for review and refuses to open if the permission differs from the one
-scanned. Cataloger answers 409 when no attempt shares a bank; nothing is signed.
+Revoke asks Cataloger to observe the account again, execute the revoke itself against
+that finalized bank and require a provider simulation (from that bank or a later one)
+to reach the same account bytes. It then shows that fresh state for review and refuses
+to open if the permission differs from the one scanned; nothing is signed otherwise.
 After signing, the pinned Catalyst helper submits the exact reviewed bytes and the
 browser polls verification without resending. The success screen needs a finalized
 receipt, a newer observation and the grant's absence from current state.
 
 ### Local validator
 
-Cataloger interprets executables with Agave 3.1.10's loader. Runtime evidence is
-truthful only for a cluster running that revision, so the reproducible live loop
-uses a local validator and says so on every screen:
+The runtime executes programs with the pinned Agave 4.3.2 crates, configured from the
+cluster's own activated features. A local validator from the same release gives a
+complete loop with nothing at stake:
 
 ```sh
-AGAVE_BIN=/path/to/agave-3.1.10/bin CATALOGER_DIR=/absolute/path/to/cataloger bun run local
+AGAVE_BIN=/path/to/agave-4.3.2/bin bun run local
 ```
 
 The script checks the validator's revision, loads the token program and ProgramData
@@ -193,15 +201,23 @@ transaction and the cleared delegate through RPC independently of the page.
 https://velon-eta.vercel.app runs this local-validator setup on a remote sandbox, so
 visitors can grant and revoke on it without installing anything. It is a disposable
 test ledger, labelled as such, not devnet. `deploy/supervisor.py` starts the validator,
-demo and `deploy/gateway.ts`. The gateway allows only the RPC methods the console needs
-and limits grants, revokes and RPC calls per visitor and in total. The static export
-(`HOSTED_RUNTIME=1 npm run export`) serves the pages, and
-`scripts/hosted-proxy.cjs` forwards `/api` and `/rpc` to the gateway with a server-only
-token and the visitor address Vercel observed. No credential reaches the browser.
+demo and `deploy/gateway.ts`, runs the checksummed `authorization-api` named in
+`artifacts.json` (with the commit it was built from) and announces startup only once the
+gateway's `/healthz` answers. With `VELON_NETWORK=mainnet` and a private
+`UPSTREAM_RPC_URL` it starts no validator and serves mainnet instead; the provider URL
+stays in that process tree. Run the supervisor under a restart policy: it exits non-zero
+when any child stops.
 
-Devnet and mainnet currently run newer Agave releases than the pinned loader, so no
-catalog record can carry truthful runtime evidence for them and their observations
-stay incomplete. The control tests under `tests/browser` register an ephemeral
+The gateway allows only the RPC methods the console needs, refuses `getAccountInfo`
+requests for account data and any `/rpc` call without the console's `X-Velon-Action:
+rpc` header, and limits grants, revokes, transactions, observations, wallet reads and
+RPC calls per visitor (IPv6 by /64) and in total. It logs one line per request with a
+hashed visitor id. The static export (`HOSTED_RUNTIME=1 npm run export`) serves the
+pages, and `scripts/hosted-proxy.cjs` forwards `/api` and `/rpc` to the gateway for the
+hosts in `PUBLIC_HOSTS` only, with a server-only token and the visitor address Vercel
+observed. No credential reaches the browser.
+
+The control tests under `tests/browser` register an ephemeral
 wallet and use synthetic RPC responses; they prove browser conformance for failure
 cases that cannot be staged on a chain, not chain execution.
 

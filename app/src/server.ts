@@ -34,6 +34,8 @@ export function createServer(
     port,
     hostname,
     development: false,
+    // Observations and wallet reads can take tens of seconds on a busy provider.
+    idleTimeout: 120,
     maxRequestBodySize: 4096,
     routes: { "/": index, "/app": app },
     async fetch(request) {
@@ -87,7 +89,14 @@ export function createServer(
         return new Response("Method not allowed", { status: 405, headers: { Allow: method } });
       if (scenariosPath) return Response.json(scenarios);
       if (controlPath) return Response.json(control, { headers: { "Cache-Control": "no-store" } });
-      if (relay) return relay(await request.text());
+      // Cross-origin pages cannot send this header or JSON without a preflight, which is never answered.
+      if (relay) {
+        if (request.headers.get("X-Velon-Action") !== "rpc")
+          return new Response("Action header required", { status: 403 });
+        return request.headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase() === "application/json"
+          ? relay(await request.text())
+          : new Response("JSON body required", { status: 415 });
+      }
       if (discover) return discover();
       if (mainnet) return mainnet();
       // Cross-origin browser requests cannot supply this header without a CORS preflight.

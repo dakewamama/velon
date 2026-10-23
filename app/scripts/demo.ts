@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { mkdir, unlink } from "node:fs/promises";
+import { mkdir, rename, unlink } from "node:fs/promises";
 import { getAddressEncoder, isAddress, type Address } from "@solana/addresses";
 import {
   array,
@@ -13,7 +13,7 @@ import {
   type Json,
 } from "../src/wire.ts";
 import { DEVNET_GENESIS, MAINNET_GENESIS, type Control } from "../src/control.ts";
-import { tokenCatalog } from "./catalog.ts";
+import { tokenCatalog, tokenCatalogAsync } from "./catalog.ts";
 import type { Live } from "../src/server.ts";
 
 const root = resolve(import.meta.dir, "..");
@@ -30,12 +30,29 @@ function command(args: string[], env = process.env): string {
 }
 
 // Evidence names the commit it was built from, so the runtime must match that commit exactly.
-const CATALOGER_REVISION = command(["git", "rev-parse", "HEAD"]).trim();
-if (command(["git", "status", "--porcelain", "--", "."]).trim())
+// A host runs a prebuilt, checksummed binary instead and states the commit it was built from.
+const prebuilt = process.env.AUTHZ_BIN;
+if (prebuilt && !/^[0-9a-f]{40}$/.test(process.env.CATALOGER_REVISION ?? ""))
+  throw new Error("AUTHZ_BIN requires CATALOGER_REVISION, the 40-character commit it was built from.");
+const CATALOGER_REVISION = prebuilt
+  ? process.env.CATALOGER_REVISION!
+  : command(["git", "rev-parse", "HEAD"]).trim();
+if (!prebuilt && command(["git", "status", "--porcelain", "--", "."]).trim())
   throw new Error("The runtime has uncommitted changes. Commit them before running the demo.");
 // Release keeps observe, execute and simulate well inside a provider's request timeouts.
-command(["cargo", "build", "--release", "--locked", "-p", "catalyst-indexer", "--bin", "authorization-api"]);
-const binary = `${resolve(cataloger, process.env.CARGO_TARGET_DIR ?? "target")}/release/authorization-api`;
+if (!prebuilt)
+  command([
+    "cargo",
+    "build",
+    "--release",
+    "--locked",
+    "-p",
+    "catalyst-indexer",
+    "--bin",
+    "authorization-api",
+  ]);
+const binary =
+  prebuilt ?? `${resolve(cataloger, process.env.CARGO_TARGET_DIR ?? "target")}/release/authorization-api`;
 const env = {
   ...process.env,
   DATABASE_URL: process.env.DATABASE_URL ?? `sqlite://${dataDir}/observations-${CATALOGER_REVISION}.db`,
@@ -118,6 +135,22 @@ if (process.env.RPC_URL) {
       catalog,
       writeJson(tokenCatalog(binary, cataloger, process.env.RPC_URL, CATALOGER_REVISION), 2),
     );
+    // A record is valid for one epoch, and a feature activating at an epoch boundary retires it
+    // early, so it is captured again every hour.
+    // The file is replaced whole; a failed capture keeps the last good record and is retried.
+    const path = catalog;
+    setInterval(
+      () =>
+        void tokenCatalogAsync(binary, cataloger, process.env.RPC_URL!, CATALOGER_REVISION)
+          .then(async (fresh) => {
+            await Bun.write(`${path}.next`, writeJson(fresh, 2));
+            await rename(`${path}.next`, path);
+          })
+          .catch((error) =>
+            console.error(`Catalog refresh failed: ${error instanceof Error ? error.message : error}`),
+          ),
+      60 * 60 * 1000,
+    ).unref();
   }
   const verified = array(readJson(await Bun.file(catalog).text()))
     .map(object)
@@ -174,36 +207,90 @@ if (process.env.RPC_URL) {
     }
   };
   // A wallet's own token accounts, as the RPC's index reports them; each is then observed natively.
+  type TokenEntry = {
+    program: "spl-token" | "spl-token-2022";
+    source: string;
+    owner: string;
+    mint: string;
+    amount: string;
+    decimals: number;
+    delegate: string | null;
+    delegated: string;
+    ui: string;
+  };
+  // One wallet paste asks for the owner's accounts more than once; a short cache answers them all.
+  const recent = new Map<string, { at: number; read: Promise<{ entries: TokenEntry[]; skipped: number }> }>();
+  const tokenAccounts = (owner: string) => {
+    const now = Date.now();
+    for (const [key, value] of recent) if (now - value.at > 15000) recent.delete(key);
+    const cached = recent.get(owner);
+    if (cached) return cached.read;
+    const read = (async () => {
+      let skipped = 0;
+      const lists = await Promise.all(
+        (
+          [
+            ["spl-token", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+            ["spl-token-2022", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"],
+          ] as const
+        ).map(async ([program, id]) => {
+          const value = array(
+            object(
+              await rpc("getTokenAccountsByOwner", [
+                owner,
+                { programId: id },
+                { encoding: "jsonParsed", commitment: "finalized" },
+              ]),
+            ).value,
+          );
+          return value.flatMap((entry): TokenEntry[] => {
+            // An account the RPC could not parse is counted, not allowed to hide the others.
+            try {
+              const info = object(object(object(object(object(entry).account).data).parsed).info);
+              const balance = object(info.tokenAmount);
+              const delegated = info.delegatedAmount ? object(info.delegatedAmount) : undefined;
+              return [
+                {
+                  program,
+                  source: text(object(entry).pubkey),
+                  owner: text(info.owner),
+                  mint: text(info.mint),
+                  amount: text(balance.amount),
+                  decimals: Number(balance.decimals),
+                  delegate: typeof info.delegate === "string" ? info.delegate : null,
+                  delegated: delegated ? text(delegated.amount) : "0",
+                  ui: delegated ? text(delegated.uiAmountString) : "0",
+                },
+              ];
+            } catch {
+              skipped++;
+              return [];
+            }
+          });
+        }),
+      );
+      return { entries: lists.flat(), skipped };
+    })();
+    recent.set(owner, { at: now, read });
+    read.catch(() => recent.delete(owner));
+    return read;
+  };
+  // A wallet's own token accounts, as the RPC's index reports them; each is then observed natively.
   const owned: Live["owned"] = async (owner) => {
     try {
-      const found = [];
-      for (const [program, id] of [
-        ["spl-token", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
-        ["spl-token-2022", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"],
-      ] as const)
-        for (const entry of array(
-          object(
-            await rpc("getTokenAccountsByOwner", [
-              owner,
-              { programId: id },
-              { encoding: "jsonParsed", commitment: "finalized" },
-            ]),
-          ).value,
-        )) {
-          const info = object(object(object(object(object(entry).account).data).parsed).info);
-          if (typeof info.delegate !== "string") continue;
-          const delegated = object(info.delegatedAmount);
-          found.push({
-            program,
-            source: text(object(entry).pubkey),
-            owner: text(info.owner),
-            delegate: text(info.delegate),
-            mint: text(info.mint),
-            amount: text(delegated.amount),
-            ui: text(delegated.uiAmountString),
-            decimals: Number(delegated.decimals),
-          });
-        }
+      const { entries } = await tokenAccounts(owner);
+      const found = entries
+        .filter((entry) => entry.delegate !== null)
+        .map(({ program, source, owner, delegate, mint, delegated, ui, decimals }) => ({
+          program,
+          source,
+          owner,
+          delegate,
+          mint,
+          amount: delegated,
+          ui,
+          decimals,
+        }));
       return Response.json(found, { headers: { "Cache-Control": "no-store" } });
     } catch {
       return Response.json({ error: "The wallet's token accounts could not be read." }, { status: 502 });
@@ -211,55 +298,59 @@ if (process.env.RPC_URL) {
   };
   // The wallet as its RPC reports it: SOL and every token account with any delegate. Display only;
   // permissions shown as verified still come from observing each account through the runtime.
+  const LISTED = 500;
   const holdings: Live["holdings"] = async (owner) => {
     try {
       const account = object(
-        await rpc("getAccountInfo", [
-          owner,
-          { encoding: "base64", dataSlice: { offset: 0, length: 0 }, commitment: "finalized" },
-        ]),
+        await rpc("getAccountInfo", [owner, { encoding: "jsonParsed", commitment: "finalized" }]),
       ).value;
-      // What the address itself is decides how the console reads it.
+      // What the address itself is decides how the console reads it. Mints and multisigs belong to
+      // the token programs too, so the parsed type tells them apart from token accounts.
       const program = account === null ? null : text(object(account).owner);
+      const data = account === null ? null : object(account).data;
+      const parsed =
+        data !== null && data !== undefined && !Array.isArray(data) && typeof data === "object"
+          ? text(object(object(data).parsed ?? {}).type ?? "")
+          : "";
+      const tokenProgram =
+        program === "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+          ? "token-account"
+          : program === "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+            ? "token-2022-account"
+            : undefined;
       const kind =
         program === null || program === "11111111111111111111111111111111"
           ? "wallet"
-          : program === "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-            ? "token-account"
-            : program === "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
-              ? "token-2022-account"
+          : tokenProgram && parsed === "account"
+            ? tokenProgram
+            : tokenProgram && parsed === "mint"
+              ? "mint"
               : "other";
       if (kind !== "wallet")
         return Response.json({ kind, program }, { headers: { "Cache-Control": "no-store" } });
-      const lamports = integer(object(await rpc("getBalance", [owner, { commitment: "finalized" }])).value);
-      const tokens = [];
-      for (const [program, id] of [
-        ["spl-token", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
-        ["spl-token-2022", "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"],
-      ] as const)
-        for (const entry of array(
-          object(
-            await rpc("getTokenAccountsByOwner", [
-              owner,
-              { programId: id },
-              { encoding: "jsonParsed", commitment: "finalized" },
-            ]),
-          ).value,
-        )) {
-          const info = object(object(object(object(object(entry).account).data).parsed).info);
-          const balance = object(info.tokenAmount);
-          tokens.push({
-            program,
-            source: text(object(entry).pubkey),
-            mint: text(info.mint),
-            amount: text(balance.amount),
-            decimals: Number(balance.decimals),
-            delegate: typeof info.delegate === "string" ? info.delegate : null,
-            delegated: info.delegatedAmount ? text(object(info.delegatedAmount).amount) : "0",
-          });
-        }
+      const [balance, { entries, skipped }] = await Promise.all([
+        rpc("getBalance", [owner, { commitment: "finalized" }]),
+        tokenAccounts(owner),
+      ]);
+      const tokens = entries
+        .slice(0, LISTED)
+        .map(({ program, source, mint, amount, decimals, delegate, delegated }) => ({
+          program,
+          source,
+          mint,
+          amount,
+          decimals,
+          delegate,
+          delegated,
+        }));
       return Response.json(
-        { kind, lamports: String(lamports), tokens },
+        {
+          kind,
+          lamports: String(integer(object(balance).value)),
+          tokens,
+          omitted: entries.length - tokens.length,
+          skipped,
+        },
         { headers: { "Cache-Control": "no-store" } },
       );
     } catch {
@@ -277,7 +368,6 @@ if (process.env.RPC_URL) {
       "getLatestBlockhash",
       "getTokenAccountBalance",
       "getAccountInfo",
-      "getTransaction",
       "sendTransaction",
     ]);
     live.relay = async (body) => {
@@ -287,19 +377,30 @@ if (process.env.RPC_URL) {
       } catch {
         return new Response("Invalid JSON", { status: 400 });
       }
-      const call = input as { jsonrpc?: unknown; method?: unknown } | null;
+      const call = input as { jsonrpc?: unknown; method?: unknown; params?: unknown } | null;
       if (!call || Array.isArray(call) || call.jsonrpc !== "2.0" || !methods.has(String(call.method)))
         return new Response("RPC method refused", { status: 403 });
-      const response = await fetch(process.env.RPC_URL!, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-        signal: AbortSignal.timeout(45000),
-      });
-      return new Response(await response.text(), {
-        status: response.status,
-        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-      });
+      // The console only asks who owns an account, never for its data.
+      if (call.method === "getAccountInfo") {
+        const slice = (Array.isArray(call.params) ? call.params[1] : undefined) as
+          { dataSlice?: { length?: unknown } } | undefined;
+        if (slice?.dataSlice?.length !== 0) return new Response("Account data refused", { status: 403 });
+      }
+      try {
+        const response = await fetch(process.env.RPC_URL!, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+          signal: AbortSignal.timeout(45000),
+        });
+        return new Response(await response.text(), {
+          status: response.status,
+          headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        });
+      } catch {
+        // The provider URL can carry a key, so the failure is reported without it.
+        return new Response("RPC unavailable", { status: 502 });
+      }
     };
   }
   // Enumerating a program's accounts is only reasonable on a ledger we started ourselves.
@@ -538,13 +639,24 @@ function publicFeed(endpoint: string): () => Response {
       })
       .slice(0, 5);
   }
+  // Blocks are only read while someone is looking: each full block costs provider credits.
+  let asked = 0;
+  let running: Promise<void> | undefined;
+  const once = () =>
+    (running ??= refresh()
+      .catch(() => {})
+      .finally(() => (running = undefined)));
   void (async () => {
     for (;;) {
-      await refresh().catch(() => {});
+      if (Date.now() - asked < 120000) await once();
       await Bun.sleep(20000);
     }
   })();
-  return () => Response.json(seen, { headers: { "Cache-Control": "no-store" } });
+  return () => {
+    if (Date.now() - asked >= 120000 && !seen.length) void once();
+    asked = Date.now();
+    return Response.json(seen, { headers: { "Cache-Control": "no-store" } });
+  };
 }
 if (process.env.DEVNET_RPC_URL) live = { ...live, devnet: publicFeed(process.env.DEVNET_RPC_URL) };
 if (process.env.MAINNET_RPC_URL) live = { ...live, mainnet: publicFeed(process.env.MAINNET_RPC_URL) };
@@ -561,6 +673,8 @@ async function shutdown() {
   server?.stop(true);
   runtime.kill("SIGINT");
   await runtime.exited;
+  // Background loops (the approval feeds, catalog refresh) would otherwise keep the process alive.
+  process.exit(0);
 }
 process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
@@ -593,7 +707,9 @@ try {
   console.log(`Catalyst demo: ${server!.url}`);
   const exitCode = await runtime.exited;
   server?.stop(true);
-  process.exitCode = exitCode;
+  // The runtime stopping on its own is a failure; exit so a supervisor sees it and restarts.
+  console.error(`Observation API exited with code ${exitCode}.`);
+  process.exit(exitCode || 1);
 } catch (error) {
   await shutdown();
   throw error;

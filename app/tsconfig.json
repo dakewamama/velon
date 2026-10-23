@@ -13,5 +13,5 @@
     "noUnusedParameters": true,
     "skipLibCheck": true
   },
-  "include": ["src", "scripts", "tests", "playwright.config.ts", "playwright.live.config.ts"]
+  "include": ["src", "scripts", "deploy", "tests", "playwright.config.ts", "playwright.live.config.ts"]
 }

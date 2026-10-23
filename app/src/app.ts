@@ -16,7 +16,7 @@ import {
   getTransactionEncoder,
 } from "@solana/transactions";
 import { avatar, icon, solana, type IconName } from "./icons.ts";
-import { TOKENS, describeDelegate, tokenLogo } from "./tokens.ts";
+import { TOKENS, describeDelegate, rpcHeaders, tokenLogo } from "./tokens.ts";
 import {
   call,
   array,
@@ -374,7 +374,10 @@ function currentScenario(): Scenario {
 
 // What the address is on chain: a wallet, an SPL Token account, a Token-2022 account or something else.
 // Undefined when the RPC did not answer.
-async function addressKind(address: string, signal: AbortSignal): Promise<string | undefined> {
+async function addressKind(
+  address: string,
+  signal: AbortSignal,
+): Promise<{ kind: string; wallet?: ObjectValue } | undefined> {
   const response = await call("/api/live/wallet", {
     method: "POST",
     headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
@@ -382,9 +385,10 @@ async function addressKind(address: string, signal: AbortSignal): Promise<string
     signal,
   }).catch(() => undefined);
   // A server without this endpoint reads every address as a token account, as before.
-  if (response?.status === 404) return "token-account";
+  if (response?.status === 404) return { kind: "token-account" };
   if (!response?.ok) return undefined;
-  return text(object(readJson(await response.text())).kind);
+  const wallet = object(readJson(await response.text()));
+  return { kind: text(wallet.kind), wallet };
 }
 
 async function scan(historical = false, refresh = false) {
@@ -408,8 +412,10 @@ async function scan(historical = false, refresh = false) {
     compareTab(!live);
     // On a public cluster a pasted wallet is read like a connected one, without signing rights.
     if (live && control?.network !== "localnet") {
-      const kind = await addressKind(address, signal);
+      const found = await addressKind(address, signal);
+      const kind = found?.kind;
       const refused: Record<string, string> = {
+        mint: "This is a token mint, not a wallet or a token account. Paste the wallet that holds the token instead.",
         "token-2022-account":
           "This is a Token-2022 account. Velon lists Token-2022 delegates for a wallet but cannot verify or revoke them yet. Paste the owner's wallet address instead.",
         other:
@@ -427,7 +433,7 @@ async function scan(historical = false, refresh = false) {
         scanButton.disabled = false;
         status("Reading the wallet's token accounts...");
         // A wallet is never re-read as a single token account.
-        await scanWallet(address);
+        await scanWallet(address, found!.wallet);
         return;
       }
     }
@@ -788,6 +794,8 @@ const compareTab = (shown: boolean) => (document.querySelector<HTMLElement>("#di
 
 const WSOL = "So11111111111111111111111111111111111111112";
 function units(amount: bigint, scale: number): string {
+  // A nonzero amount never reads as zero.
+  if (amount > 0n && amount * 10_000n < 10n ** BigInt(scale)) return "<0.0001";
   const whole = (amount / 10n ** BigInt(scale)).toLocaleString("en-US");
   const fraction = (amount % 10n ** BigInt(scale))
     .toString()
@@ -800,16 +808,23 @@ function units(amount: bigint, scale: number): string {
 // What the wallet holds, as its RPC reports it, and whether any other key can spend each token.
 // Display only: the permissions below are the ones Velon observed and can act on.
 // Amounts arrive as decimal strings so u64 values survive JSON.
-async function holdingsPanel(owner: string, signal: AbortSignal): Promise<HTMLElement | undefined> {
+async function holdingsPanel(
+  owner: string,
+  signal: AbortSignal,
+  prefetched?: ObjectValue,
+): Promise<HTMLElement | undefined> {
   const yours = owner === connected?.account.address;
-  const response = await call("/api/live/wallet", {
-    method: "POST",
-    headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
-    body: JSON.stringify({ owner }),
-    signal,
-  }).catch(() => undefined);
-  if (!response?.ok) return undefined;
-  const wallet = object(readJson(await response.text()));
+  let wallet = prefetched;
+  if (!wallet) {
+    const response = await call("/api/live/wallet", {
+      method: "POST",
+      headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
+      body: JSON.stringify({ owner }),
+      signal,
+    }).catch(() => undefined);
+    if (!response?.ok) return undefined;
+    wallet = object(readJson(await response.text()));
+  }
   if (wallet.kind !== "wallet") return undefined;
   const all = array(wallet.tokens).map(object);
   const shown = all
@@ -880,6 +895,11 @@ async function holdingsPanel(owner: string, signal: AbortSignal): Promise<HTMLEl
     summary.append(toggle);
     panel.classList.add("folded");
   }
+  const hidden = Number(wallet.omitted ?? 0) + Number(wallet.skipped ?? 0);
+  if (hidden)
+    panel.append(
+      node("p", `${hidden} more token account${hidden === 1 ? "" : "s"} could not be shown.`, "muted"),
+    );
   const empty = all.length - shown.length;
   if (empty)
     panel.append(
@@ -891,13 +911,18 @@ async function holdingsPanel(owner: string, signal: AbortSignal): Promise<HTMLEl
 // Every permission across the connected wallet's token accounts.
 // Each account is observed through the runtime; the RPC's index only says where to look.
 // Any wallet can be read; only the connected owner can sign a revoke for it.
-async function scanWallet(owner = connected?.account.address): Promise<boolean | undefined> {
+async function scanWallet(
+  owner = connected?.account.address,
+  prefetched?: ObjectValue,
+): Promise<boolean | undefined> {
   if (!owner) return false;
   const yours = owner === connected?.account.address;
   request?.abort();
   request = new AbortController();
   const signal = request.signal;
-  const wallet = holdingsPanel(owner, signal);
+  const wallet = holdingsPanel(owner, signal, prefetched);
+  // Display only: a panel that cannot be read must not surface as an unhandled rejection.
+  void wallet.catch(() => undefined);
   // Only a ledger we started can be enumerated; public clusters answer per owner.
   const listed =
     control?.network === "localnet"
@@ -908,7 +933,21 @@ async function scanWallet(owner = connected?.account.address): Promise<boolean |
           body: JSON.stringify({ owner }),
           signal,
         });
-  if (!listed.ok) return false;
+  if (!listed.ok) {
+    const retry = node("button", "Try again", "link-button");
+    retry.type = "button";
+    retry.onclick = () => void scanWallet(owner);
+    const message = node(
+      "p",
+      listed.status === 429
+        ? "Too many requests right now. Wait a minute, then try again. "
+        : "The wallet's token accounts could not be read. ",
+      "error",
+    );
+    message.append(retry);
+    notice.replaceChildren(message);
+    return false;
+  }
   mode = "scan";
   diff.hidden = true;
   receipts.hidden = true;
@@ -1081,7 +1120,7 @@ grantButton.onclick = async () => {
     });
     const account = object(await result(funded));
     const source = toAddress(text(account.source));
-    const rpc = createSolanaRpc(control.rpcUrl);
+    const rpc = createSolanaRpc(control.rpcUrl, { headers: rpcHeaders(control.rpcUrl) });
     for (let attempt = 0; ; attempt++) {
       const held = await rpc
         .getTokenAccountBalance(source, { commitment: "confirmed" })
@@ -1463,7 +1502,7 @@ async function prepare(scanned: ObjectValue, scope: string) {
         if (connected !== session) throw new Error("Wallet changed. Review again.");
         review.close();
         const sent = await signAndSubmitReviewedTransaction(
-          new Proxy(createSolanaRpc(config.rpcUrl), {
+          new Proxy(createSolanaRpc(config.rpcUrl, { headers: rpcHeaders(config.rpcUrl) }), {
             get(rpc, method, receiver) {
               if (method === "sendTransaction") sendRequested = true;
               return Reflect.get(rpc, method, receiver);

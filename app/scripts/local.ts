@@ -60,6 +60,8 @@ const validator = Bun.spawn(
     `${tools}/solana-test-validator`,
     "--reset",
     "--quiet",
+    // A long-running host caps the ledger so the disk does not fill.
+    ...(process.env.LOCAL_LEDGER_LIMIT ? ["--limit-ledger-size", process.env.LOCAL_LEDGER_LIMIT] : []),
     "--ledger",
     `${dir}/ledger`,
     "--rpc-port",
@@ -131,23 +133,27 @@ try {
   const approved = integer(await rpc("getSlot", [{ commitment: "confirmed" }]));
   while (integer(await rpc("getSlot", [{ commitment: "finalized" }])) <= approved) await Bun.sleep(500);
 
-  run(
-    [
-      "cargo",
-      "build",
-      "--quiet",
-      "--release",
-      "--locked",
-      "-p",
-      "catalyst-indexer",
-      "--bin",
-      "authorization-api",
-    ],
-    runtime,
-  );
-  const binary = `${resolve(runtime, process.env.CARGO_TARGET_DIR ?? "target")}/release/authorization-api`;
+  if (!process.env.AUTHZ_BIN)
+    run(
+      [
+        "cargo",
+        "build",
+        "--quiet",
+        "--release",
+        "--locked",
+        "-p",
+        "catalyst-indexer",
+        "--bin",
+        "authorization-api",
+      ],
+      runtime,
+    );
+  const binary =
+    process.env.AUTHZ_BIN ??
+    `${resolve(runtime, process.env.CARGO_TARGET_DIR ?? "target")}/release/authorization-api`;
   // The catalog is the validator's own finalized code and features, read like any cluster.
-  const catalog = tokenCatalog(binary, runtime, url, run(["git", "rev-parse", "HEAD"], runtime));
+  const revision = process.env.CATALOGER_REVISION ?? run(["git", "rev-parse", "HEAD"], runtime);
+  const catalog = tokenCatalog(binary, runtime, url, revision);
   await Bun.write(`${dir}/catalog.json`, writeJson(catalog, 2));
 
   console.log(`Local validator   ${url} (${release})

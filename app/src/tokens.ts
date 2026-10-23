@@ -57,12 +57,29 @@ export const PROGRAMS: Record<string, string> = {
 
 export type Delegate = { title: string; detail: string };
 
+/// The console's own RPC relay only answers requests that carry its header; any other endpoint,
+/// such as a local validator, is called plainly so no CORS preflight is needed.
+export function rpcHeaders(rpcUrl: string): { "X-Velon-Action"?: "rpc" } {
+  return new URL(rpcUrl, location.href).origin === location.origin ? { "X-Velon-Action": "rpc" } : {};
+}
+
 /// What the chain says a delegate key is. Display only; the RPC's answer is not evidence.
-export async function describeDelegate(rpcUrl: string, key: string): Promise<Delegate> {
+const described = new Map<string, Promise<Delegate>>();
+export function describeDelegate(rpcUrl: string, key: string): Promise<Delegate> {
+  // A wallet view can name the same delegate dozens of times; the chain is asked once per key.
+  const known = described.get(key);
+  if (known) return known;
+  const lookup = lookupDelegate(rpcUrl, key);
+  described.set(key, lookup);
+  lookup.catch(() => described.delete(key));
+  return lookup;
+}
+
+async function lookupDelegate(rpcUrl: string, key: string): Promise<Delegate> {
   if (PROGRAMS[key]) return { title: PROGRAMS[key]!, detail: "Program" };
   const response = await fetch(rpcUrl, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...rpcHeaders(rpcUrl) },
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: 1,

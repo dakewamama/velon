@@ -238,12 +238,25 @@ test("the RPC relay is POST only and exists only when configured", async () => {
   const bare = createServer(String(upstream.url), [], 0);
   servers.push(upstream, server, bare);
   const call = '{"jsonrpc":"2.0","id":1,"method":"getGenesisHash"}';
-  const post = { method: "POST", headers: { "Content-Type": "application/json" }, body: call };
+  const post = {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Velon-Action": "rpc" },
+    body: call,
+  };
   expect(await (await fetch(new URL("/rpc", server.url), post)).text()).toBe('{"result":1}');
   expect(bodies).toEqual([call]);
   expect((await fetch(new URL("/rpc", server.url))).status).toBe(405);
   expect((await fetch(new URL("/rpc?x=1", server.url), post)).status).toBe(404);
   expect((await fetch(new URL("/rpc", bare.url), post)).status).toBe(404);
+  const plain = {
+    method: "POST",
+    headers: { "Content-Type": "text/plain", "X-Velon-Action": "rpc" },
+    body: call,
+  };
+  expect((await fetch(new URL("/rpc", server.url), plain)).status).toBe(415);
+  const unmarked = { method: "POST", headers: { "Content-Type": "application/json" }, body: call };
+  expect((await fetch(new URL("/rpc", server.url), unmarked)).status).toBe(403);
+  expect(bodies).toEqual([call]);
 });
 
 test("the wallet endpoint takes one owner address and an observe header", async () => {

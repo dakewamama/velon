@@ -4,11 +4,9 @@ module.exports = async (request, response) => {
   response.setHeader("Cache-Control", "no-store");
   const host = request.headers.host;
   const path = new URL(request.url, "http://localhost").searchParams.get("path");
-  if (
-    !/^[a-z0-9-]+\.vercel\.app$/.test(host || "") ||
-    !path ||
-    !(path === "rpc" || /^api\/[a-zA-Z0-9/_-]+$/.test(path))
-  ) {
+  // Only the production hosts may reach the sandbox; previews sharing the token are refused.
+  const hosts = (process.env.PUBLIC_HOSTS || "velon-eta.vercel.app").split(",").map((name) => name.trim());
+  if (!hosts.includes(host || "") || !path || !(path === "rpc" || /^api\/[a-zA-Z0-9/_-]+$/.test(path))) {
     response.statusCode = 400;
     return response.end("Invalid request");
   }

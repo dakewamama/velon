@@ -10,9 +10,12 @@ for artifact in manifest['artifacts']:
 origin=os.environ.get('PUBLIC_DEMO_ORIGIN','https://velon-eta.vercel.app')
 network=os.environ.get('VELON_NETWORK','localnet')
 if network not in ('localnet','mainnet'):raise SystemExit('VELON_NETWORK must be localnet or mainnet')
-env=dict(os.environ,PATH=str(root/'bin')+':'+os.environ['PATH'],CATALOGER_DIR=str(root/'cataloger'),PUBLIC_RPC_URL=origin+'/rpc',PUBLIC_DEMO_ORIGIN=origin,LIVE_NETWORK=network,PORT='3400',RUNTIME_PORT='3401',MALLOC_ARENA_MAX='2',SOLANA_RAYON_THREADS='2',RAYON_NUM_THREADS='2',RUST_LOG='warn')
+# The launchers run the checksummed binary and name the commit it was built from.
+revision=manifest.get('revision','')
+if len(revision)!=40:raise SystemExit('artifacts.json must name the 40-character revision the binary was built from')
+env=dict(os.environ,PATH=str(root/'bin')+':'+os.environ['PATH'],CATALOGER_DIR=str(root/'cataloger'),AUTHZ_BIN=str(root/'bin/authorization-api'),CATALOGER_REVISION=revision,VELON_REVISION=revision,PUBLIC_RPC_URL=origin+'/rpc',PUBLIC_DEMO_ORIGIN=origin,LIVE_NETWORK=network,PORT='3400',RUNTIME_PORT='3401',MALLOC_ARENA_MAX='2',SOLANA_RAYON_THREADS='2',RAYON_NUM_THREADS='2',RUST_LOG='warn')
 if network=='localnet':
- env.update(AGAVE_BIN=str(root/'bin'),LOCAL_RPC_PORT='19099',RPC_URL='http://127.0.0.1:19099',LIVE_CATALOG=str(app/'.data/local/catalog.json'),LIVE_TEST_BENCH='1')
+ env.update(AGAVE_BIN=str(root/'bin'),LOCAL_RPC_PORT='19099',LOCAL_LEDGER_LIMIT='100000',RPC_URL='http://127.0.0.1:19099',LIVE_CATALOG=str(app/'.data/local/catalog.json'),LIVE_TEST_BENCH='1')
 else:
  # The provider URL may carry a key; it stays in this process tree and never reaches a browser.
  upstream=os.environ.get('UPSTREAM_RPC_URL','')
@@ -35,7 +38,7 @@ def bench():
   launch([str(root/'bin/solana-test-validator'),'--quiet','--ledger',str(app/'.data/local/ledger'),'--rpc-port','19099','--faucet-port','20099','--limit-ledger-size','100000'],'validator.log')
  else:
   if (app/'.data/local/ledger').exists():raise RuntimeError('Incomplete bootstrap: preserve ledger for investigation')
-  launch(['bun','scripts/host-local.ts'],'validator.log')
+  launch(['bun','scripts/local.ts'],'validator.log')
  for _ in range(300):
   if children[0].poll() is not None:raise RuntimeError('Validator exited')
   if catalog.exists():
@@ -48,8 +51,17 @@ def bench():
 try:
  if network=='localnet':bench()
  # Mainnet needs no validator; the demo captures the cluster's own code and features at launch.
- launch(['bun','scripts/host-demo.ts','--production'],'app.log')
- launch(['bun',str(root/'gateway.ts')],'gateway.log')
+ launch(['bun','scripts/demo.ts','--production'],'app.log')
+ launch(['bun',str(app/'deploy/gateway.ts')],'gateway.log')
+ # Started means the gateway answers its health check: app up and cluster reachable.
+ for _ in range(600):
+  if any(p.poll() is not None for p in children):raise RuntimeError('Demo process exited during startup')
+  try:
+   with urllib.request.urlopen('http://127.0.0.1:3402/healthz',timeout=3) as r:
+    if r.status==200:break
+  except Exception:pass
+  time.sleep(1)
+ else:raise RuntimeError('Demo did not become healthy')
  print('Started verified '+network+' demo',flush=True)
  while True:
   if any(p.poll() is not None for p in children):raise RuntimeError('Demo process exited')

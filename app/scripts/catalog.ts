@@ -20,7 +20,28 @@ export function tokenCatalog(binary: string, cwd: string, rpcUrl: string, revisi
     stderr: "inherit",
   });
   if (result.exitCode !== 0) throw new Error("Capturing the token program failed.");
-  const raw = result.stdout.toString();
+  return record(result.stdout.toString(), rpcUrl, revision);
+}
+
+/// The same capture without blocking the server, for refreshing a running catalog.
+export async function tokenCatalogAsync(
+  binary: string,
+  cwd: string,
+  rpcUrl: string,
+  revision: string,
+): Promise<Json[]> {
+  const child = Bun.spawn([binary, "capture", TOKEN_PROGRAM], {
+    cwd,
+    env: { ...process.env, RPC_URL: rpcUrl },
+    stdout: "pipe",
+    stderr: "inherit",
+  });
+  const raw = await new Response(child.stdout).text();
+  if ((await child.exited) !== 0) throw new Error("Capturing the token program failed.");
+  return record(raw, rpcUrl, revision);
+}
+
+function record(raw: string, rpcUrl: string, revision: string): Json[] {
   const capture = object(readJson(raw));
   if (text(capture.version) !== `sha256:${PROGRAM_HASH}`)
     throw new Error(`This cluster runs SPL Token ${text(capture.version)}, not the verified build.`);
