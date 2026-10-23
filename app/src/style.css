@@ -2934,3 +2934,129 @@ dialog .action-button {
     justify-self: start;
   }
 }
+
+/* Wallet view: one row per approval. Token, what it allows, who holds it, and the action. */
+.approvals-summary {
+  margin: 0 0 4px;
+  color: var(--on-forest-2);
+  font-size: 15px;
+}
+.console #results:has(.permission.compact) {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+.console .permission.compact {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.9fr) minmax(0, 1.3fr) minmax(0, 1.3fr) auto;
+  align-items: center;
+  gap: 8px 20px;
+  padding: 14px 20px;
+  border-radius: 16px;
+  animation: none;
+}
+.permission.compact > .permission-header {
+  display: contents;
+}
+.permission.compact .permission-header > :is(.badge, .availability) {
+  display: none;
+}
+.permission.compact .token {
+  grid-column: 1;
+  grid-row: 1;
+  font-weight: 600;
+}
+.permission.compact > h3 {
+  grid-column: 2;
+  grid-row: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.permission.compact > .delegate {
+  grid-column: 3;
+  grid-row: 1;
+  margin: 0;
+  padding: 0;
+  background: none;
+}
+.permission.compact > .permission-actions {
+  grid-column: 4;
+  grid-row: 1;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  flex-wrap: nowrap;
+}
+.permission.compact .action-button {
+  padding: 8px 16px;
+  font-size: 14px;
+}
+.permission.compact .permission-actions .link-button {
+  font-size: 14px;
+}
+/* The explanation, amounts and addresses wait until the row is opened. */
+.permission.compact > :is(.explain, .remaining, dl, .notice) {
+  display: none;
+  grid-column: 1 / -1;
+}
+.permission.compact:has(#detail) > :is(.explain, .remaining, dl) {
+  display: block;
+}
+.permission.compact:has(#detail) > dl {
+  display: grid;
+}
+.permission.compact > #detail {
+  grid-column: 1 / -1;
+}
+.permission.compact:has(.remaining.unlimited) > h3 {
+  color: var(--warn);
+}
+.holdings.folded .holdings-list,
+.holdings.folded > .muted {
+  display: none;
+}
+.holdings.folded.unfolded .holdings-list {
+  display: block;
+}
+.holdings.folded.unfolded > .muted {
+  display: block;
+}
+.holdings-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 12px 0 0;
+  color: var(--body);
+  font-size: 15px;
+}
+.holdings-summary .link-button {
+  margin-left: auto;
+  font-size: 14px;
+}
+@media (max-width: 760px) {
+  .console .permission.compact {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 14px 16px;
+  }
+  .permission.compact .token {
+    grid-column: 1;
+  }
+  .permission.compact > h3 {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .permission.compact > .delegate {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+  .permission.compact > .permission-actions {
+    grid-column: 1 / -1;
+    grid-row: 4;
+    justify-content: space-between;
+  }
+}
+/* With a wallet's approvals listed, the picture shrinks so the list starts on the first screen. */
+.console:has(.permission.compact) .stage:not(:has(.try:not([hidden]))) #orbit {
+  max-height: 22vh;
+}

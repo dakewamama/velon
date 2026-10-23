@@ -859,6 +859,27 @@ async function holdingsPanel(owner: string, signal: AbortSignal): Promise<HTMLEl
     );
   }
   panel.append(head, list);
+  // A wallet with many tokens folds to one line; the approvals below are what needs attention.
+  if (shown.length > 4) {
+    const delegated = shown.filter((entry) => entry.delegate !== null).length;
+    const sol = units(BigInt(text(wallet.lamports)), 9);
+    const summary = node(
+      "p",
+      `${sol} SOL · ${shown.length} tokens${delegated ? ` · ${delegated} with a delegate` : ""}`,
+      "holdings-summary",
+    );
+    const toggle = node("button", "Show tokens", "link-button");
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.onclick = () => {
+      const open = panel.classList.toggle("unfolded");
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.textContent = open ? "Hide tokens" : "Show tokens";
+    };
+    head.after(summary);
+    summary.append(toggle);
+    panel.classList.add("folded");
+  }
   const empty = all.length - shown.length;
   if (empty)
     panel.append(
@@ -966,6 +987,19 @@ async function scanWallet(owner = connected?.account.address): Promise<boolean |
       ),
     );
   if (last) content.append(metadata(last));
+  // In a wallet, each permission is one row; its explanation and evidence open under Details.
+  for (const row of cards) row.classList.add("compact");
+  if (cards.length) {
+    const unlimited = cards.filter((row) => row.dataset.amount === "∞").length;
+    content.append(
+      node(
+        "p",
+        `${cards.length} approval${cards.length === 1 ? "" : "s"} on this wallet${unlimited ? ` · ${unlimited} unlimited` : ""}`,
+        "approvals-summary",
+      ),
+    );
+    cards.sort((a, b) => Number(b.dataset.amount === "∞") - Number(a.dataset.amount === "∞"));
+  }
   if (unread)
     content.append(
       node(
