@@ -235,6 +235,10 @@ function summary(permissions: { grant: ObjectValue }[], view: ObjectValue): HTML
   return block;
 }
 
+// Revokes the visitor asked to review in a row. Each still gets its own review and signature.
+let queue: (() => void)[] = [];
+const revocable = new WeakMap<HTMLElement, () => void>();
+
 function card(grant: ObjectValue, view: ObjectValue, availability: string, scope?: string): HTMLElement {
   const row = node("article", "", "permission");
   row.dataset.id = text(grant.id);
@@ -316,7 +320,12 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string, scope
     object(grant.subject).value === connected.account.address
   ) {
     const revoke = labelled(node("button", "Revoke", "action-button"), "revoke");
-    revoke.onclick = () => void prepare(grant, scope);
+    const start = () => void prepare(grant, scope);
+    revoke.onclick = () => {
+      queue = [];
+      start();
+    };
+    revocable.set(row, start);
     actions.prepend(revoke);
   } else if (scope && grant.capability === "spend") {
     // Only the token account's owner can sign a revoke; that is the chain's rule, not a setting.
@@ -989,12 +998,21 @@ async function scanWallet(
       }
     };
     let next = 0;
+    let done = 0;
+    const progress = () =>
+      status(
+        `Checking ${done} of ${owned.length} token account${owned.length === 1 ? "" : "s"} against the chain…`,
+      );
+    if (owned.length) progress();
     const worker = async () => {
-      for (let index = next++; index < owned.length; index = next++)
+      for (let index = next++; index < owned.length; index = next++) {
         views[index] = await observe(text(owned[index]!.source)).catch(() => {
           if (signal.aborted) throw signal.reason;
           return undefined;
         });
+        done++;
+        if (!signal.aborted) progress();
+      }
     };
     await Promise.all(Array.from({ length: Math.min(3, owned.length) }, worker));
     unread = views.filter((view) => !view).length;
@@ -1038,6 +1056,17 @@ async function scanWallet(
       ),
     );
     cards.sort((a, b) => Number(b.dataset.amount === "∞") - Number(a.dataset.amount === "∞"));
+    const batch = cards.filter((row) => row.dataset.amount === "∞" && revocable.has(row));
+    if (batch.length > 1) {
+      const all = labelled(node("button", `Review all ${batch.length} unlimited`, "action-button"), "revoke");
+      all.type = "button";
+      all.onclick = () => {
+        const [first, ...rest] = batch.map((row) => revocable.get(row)!);
+        queue = rest;
+        first!();
+      };
+      content.append(all);
+    }
   }
   if (unread)
     content.append(
@@ -1577,6 +1606,16 @@ async function prepare(scanned: ObjectValue, scope: string) {
             field("Finalized slot", String(checked.slot)),
             field("Verification ID", checked.id),
           );
+          // The next queued revoke opens only when the visitor asks for it.
+          if (queue.length) {
+            const next = labelled(
+              node("button", `Review next · ${queue.length} left`, "action-button"),
+              "revoke",
+            );
+            next.type = "button";
+            next.onclick = () => queue.shift()?.();
+            actionResult.append(next);
+          }
           return;
         }
         throw new Error(
@@ -1600,6 +1639,14 @@ async function prepare(scanned: ObjectValue, scope: string) {
   }
 }
 review.addEventListener("cancel", invalidateReview);
+
+// Mainnet and devnet consoles are for real wallets: a lookup first, no recorded fixtures.
+function publicMode() {
+  if (!control || control.testBench) return;
+  lookup.hidden = false;
+  document.querySelector<HTMLElement>("#recorded")!.hidden = true;
+  document.body.classList.add("public");
+}
 
 // The first screen explains the three ideas the rest of the console relies on.
 function lesson() {
@@ -1840,6 +1887,15 @@ form.onsubmit = (event) => {
   closeBrowse();
   setMode("scan", true);
 };
+// On a public cluster the first thing a visitor can do is look up any wallet.
+const lookup = document.querySelector<HTMLFormElement>("#lookup")!;
+const lookupInput = document.querySelector<HTMLInputElement>("#lookup-address")!;
+lookup.onsubmit = (event) => {
+  event.preventDefault();
+  const address = lookupInput.value.trim();
+  if (!isAddress(address)) return status("Enter a valid Solana address.", true);
+  openLive(address);
+};
 select.onchange = selectScenario;
 document.querySelector<HTMLButtonElement>("#scan-tab")!.onclick = () => setMode("scan");
 document.querySelector<HTMLButtonElement>("#diff-tab")!.onclick = () => setMode("diff");
@@ -1891,6 +1947,7 @@ try {
   const live = scenarios.findIndex((scenario) => scenario.live);
   if (live >= 0 && isAddress(linked)) {
     document.body.classList.add("is-live");
+    publicMode();
     select.value = String(live);
     selectScenario();
     input.value = linked;
@@ -1898,6 +1955,7 @@ try {
   } else if (live >= 0) {
     select.value = String(live);
     document.body.classList.add("is-live");
+    publicMode();
     lesson();
     draw();
   } else {

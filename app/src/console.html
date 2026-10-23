@@ -63,7 +63,7 @@
           </p>
           <div id="mainnet-feed" class="feed"></div>
         </section>
-        <details class="search-panel">
+        <details class="search-panel" id="recorded">
           <summary>Recorded examples</summary>
           <p class="muted">Captured from real program runs, including subscriptions.</p>
           <div class="source-row">
@@ -93,6 +93,19 @@
         </details>
       </aside>
       <div class="workspace">
+        <form class="lookup" id="lookup" role="search" hidden>
+          <label for="lookup-address">Check any wallet</label>
+          <div class="lookup-row">
+            <input
+              id="lookup-address"
+              name="lookup"
+              placeholder="Paste a Solana wallet or token account address"
+              autocomplete="off"
+              spellcheck="false"
+              required
+            /><button type="submit">Check</button>
+          </div>
+        </form>
         <section class="stage" id="stage" aria-label="Your wallet and what can act on it">
           <svg id="orbit" viewBox="0 0 1000 380" role="img" aria-label="Permissions around the wallet"></svg>
           <div class="try" id="try" hidden>

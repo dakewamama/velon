@@ -3060,3 +3060,60 @@ dialog .action-button {
 .console:has(.permission.compact) .stage:not(:has(.try:not([hidden]))) #orbit {
   max-height: 22vh;
 }
+
+/* The wallet lookup leads the public console. */
+.lookup {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.lookup label {
+  margin: 0;
+  color: var(--on-forest-2);
+}
+.lookup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.console .lookup input {
+  height: 52px;
+  padding: 0 18px;
+  border: 1px solid var(--forest-line-strong);
+  border-radius: 999px;
+  background: var(--forest-900);
+  color: var(--on-forest);
+  font-size: 15px;
+}
+.console .lookup input:focus {
+  border-color: var(--mint);
+  background: var(--forest-900);
+}
+.console .lookup input::placeholder {
+  color: var(--on-forest-3);
+}
+.lookup button {
+  height: 52px;
+  padding: 0 26px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--mint);
+  color: var(--ink);
+  font-weight: 600;
+}
+.lookup button:hover {
+  background: #5cebb8;
+}
+#results > .action-button {
+  justify-self: start;
+  margin: 4px 0 8px;
+}
+#action-result .action-button {
+  margin-top: 20px;
+  background: var(--mint);
+  color: var(--ink);
+}
+/* With nothing loaded yet, a public console leads with the lookup and the connect panel. */
+.console.public:not(:has(#results .permission, #results .holdings, #action-result:not([hidden]))) .stage {
+  display: none;
+}
