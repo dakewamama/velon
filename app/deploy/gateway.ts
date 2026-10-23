@@ -52,7 +52,8 @@ function kind(method: string, path: string, rpc: boolean): Kind | undefined {
   if (/\/actions\/revoke\//.test(path)) return "revoke";
   // Each observation runs the runtime and reads the cluster; each wallet read lists its accounts.
   if (path === "/api/live/spl/observe") return "observe";
-  if (path === "/api/live/spl/owned" || path === "/api/live/wallet") return "read";
+  if (path === "/api/live/spl/owned" || path === "/api/live/wallet" || path === "/api/live/tokens")
+    return "read";
   return undefined;
 }
 

@@ -36,9 +36,53 @@ export const TOKENS: Record<string, Token> = {
   },
 };
 
+/// Names and logos as each token's creator published them. Anything not in TOKENS is unverified.
+export type Named = { name: string; symbol: string; image: string | null };
+const named = new Map<string, Named | null>();
+
+export async function nameTokens(mints: string[], signal?: AbortSignal): Promise<void> {
+  const missing = [...new Set(mints)].filter((mint) => !TOKENS[mint] && !named.has(mint));
+  for (let start = 0; start < missing.length; start += 80) {
+    const chunk = missing.slice(start, start + 80);
+    const response = await fetch("/api/live/tokens", {
+      method: "POST",
+      headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
+      body: JSON.stringify({ mints: chunk }),
+      signal,
+    });
+    if (!response.ok) return;
+    const found = (await response.json()) as Record<string, Named | null>;
+    for (const mint of chunk) named.set(mint, found[mint] ?? null);
+  }
+}
+
+/// What to call a token: its listed symbol, else the symbol its creator chose, else its address.
+export function tokenName(mint: string): { symbol?: string; name?: string; verified: boolean } {
+  const known = TOKENS[mint];
+  if (known) return { symbol: known.symbol, name: known.name, verified: true };
+  const found = named.get(mint);
+  return { symbol: found?.symbol || undefined, name: found?.name || undefined, verified: false };
+}
+
 export function tokenLogo(mint: string): Element {
   const known = TOKENS[mint];
   if (known) return known.logo();
+  const link = named.get(mint)?.image;
+  if (link) {
+    const element = document.createElement("img");
+    element.src = link;
+    element.alt = "";
+    element.className = "token-logo";
+    element.referrerPolicy = "no-referrer";
+    element.loading = "lazy";
+    // A broken or slow logo falls back to the mint's own mark.
+    element.onerror = () => {
+      const mark = avatar(mint);
+      mark.classList.add("token-logo");
+      element.replaceWith(mark);
+    };
+    return element;
+  }
   const mark = avatar(mint);
   mark.classList.add("token-logo");
   return mark;

@@ -287,3 +287,24 @@ test("the wallet endpoint takes one owner address and an observe header", async 
   expect(unmarked.status).toBe(403);
   expect((await fetch(new URL("/api/live/wallet", server.url))).status).toBe(405);
 });
+
+test("token names are looked up for at most 80 valid mints with the observe header", async () => {
+  const upstream = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("{}") });
+  const asked: string[][] = [];
+  const metadata = async (mints: string[]) => (asked.push(mints), Response.json({}));
+  const server = createServer(String(upstream.url), [], 0, "127.0.0.1", null, { metadata });
+  servers.push(upstream, server);
+  const mint = "So11111111111111111111111111111111111111112";
+  const post = (body: unknown, action = "observe") =>
+    fetch(new URL("/api/live/tokens", server.url), {
+      method: "POST",
+      headers: { "X-Velon-Action": action, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  expect((await post({ mints: [mint, mint] })).status).toBe(200);
+  expect(asked).toEqual([[mint]]);
+  expect((await post({ mints: ["invalid"] })).status).toBe(400);
+  expect((await post({ mints: [] })).status).toBe(400);
+  expect((await post({ mints: Array(81).fill(mint) })).status).toBe(400);
+  expect((await post({ mints: [mint] }, "revoke")).status).toBe(403);
+});

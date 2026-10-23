@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { mkdir, rename, unlink } from "node:fs/promises";
-import { getAddressEncoder, isAddress, type Address } from "@solana/addresses";
+import { getAddressEncoder, getProgramDerivedAddress, isAddress, type Address } from "@solana/addresses";
 import {
   array,
   grants,
@@ -373,7 +373,113 @@ if (process.env.RPC_URL) {
       return Response.json({ error: "The wallet could not be read." }, { status: 502 });
     }
   };
-  live = { observe, owned, holdings };
+  // Token names and logos, as their creators published them: Metaplex metadata for SPL Token mints,
+  // the metadata extension for Token-2022 mints. Display only, never evidence.
+  type Named = { name: string; symbol: string; image: string | null };
+  const named = new Map<string, { at: number; value: Named | null }>();
+  const METAPLEX = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s";
+  const encoder = getAddressEncoder();
+  const clean = (value: string, limit: number) =>
+    value
+      .replace(/\0/g, "")
+      .replace(/[\u0000-\u001f\u007f]/g, "")
+      .trim()
+      .slice(0, limit);
+  // A Borsh string: little-endian u32 length, then UTF-8 bytes.
+  const borsh = (bytes: Uint8Array, offset: number): [string, number] => {
+    const length = new DataView(bytes.buffer, bytes.byteOffset).getUint32(offset, true);
+    if (length > 256 || offset + 4 + length > bytes.length) throw new Error("bad string");
+    return [new TextDecoder().decode(bytes.subarray(offset + 4, offset + 4 + length)), offset + 4 + length];
+  };
+  // Logos live off chain. Only public https hosts are fetched, small and quickly, once per hour.
+  const image = async (uri: string): Promise<string | null> => {
+    try {
+      const url = new URL(uri);
+      if (
+        url.protocol !== "https:" ||
+        /^(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.|\[)/.test(url.hostname)
+      )
+        return null;
+      const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(3000) });
+      const body = await response.text();
+      if (!response.ok || body.length > 65536) return null;
+      const link = (JSON.parse(body) as { image?: unknown }).image;
+      return typeof link === "string" && link.startsWith("https://") && link.length < 512 ? link : null;
+    } catch {
+      return null;
+    }
+  };
+  const metadata: Live["metadata"] = async (mints) => {
+    const now = Date.now();
+    if (named.size > 5000) named.clear();
+    const wanted = mints.filter((mint) => {
+      const cached = named.get(mint);
+      return !cached || now - cached.at > 3_600_000;
+    });
+    try {
+      if (wanted.length) {
+        const pdas = await Promise.all(
+          wanted.map(
+            async (mint) =>
+              (
+                await getProgramDerivedAddress({
+                  programAddress: METAPLEX as Address,
+                  seeds: ["metadata", encoder.encode(METAPLEX as Address), encoder.encode(mint as Address)],
+                })
+              )[0],
+          ),
+        );
+        const [metaplex, parsed] = await Promise.all([
+          rpc("getMultipleAccounts", [pdas, { encoding: "base64", commitment: "finalized" }]),
+          rpc("getMultipleAccounts", [wanted, { encoding: "jsonParsed", commitment: "finalized" }]),
+        ]);
+        await Promise.all(
+          wanted.map(async (mint, index) => {
+            let found: { name: string; symbol: string; uri: string } | undefined;
+            const account = array(object(metaplex).value)[index];
+            if (account) {
+              try {
+                const data = Uint8Array.from(atob(text(array(object(account).data)[0])), (c) =>
+                  c.charCodeAt(0),
+                );
+                const [name, afterName] = borsh(data, 65);
+                const [symbol, afterSymbol] = borsh(data, afterName);
+                const [uri] = borsh(data, afterSymbol);
+                found = { name, symbol, uri };
+              } catch {
+                /* Not Metaplex metadata; the mint may still carry its own. */
+              }
+            }
+            const mintAccount = array(object(parsed).value)[index];
+            if (!found && mintAccount) {
+              const info = object(object(object(object(mintAccount).data).parsed ?? {}).info ?? {});
+              for (const extension of array(info.extensions ?? [])) {
+                const entry = object(extension);
+                if (entry.extension !== "tokenMetadata") continue;
+                const state = object(entry.state);
+                found = { name: text(state.name), symbol: text(state.symbol), uri: text(state.uri) };
+              }
+            }
+            named.set(mint, {
+              at: now,
+              value: found
+                ? {
+                    name: clean(found.name, 48),
+                    symbol: clean(found.symbol, 12),
+                    image: found.uri ? await image(clean(found.uri, 512)) : null,
+                  }
+                : null,
+            });
+          }),
+        );
+      }
+      const result = Object.fromEntries(mints.map((mint) => [mint, named.get(mint)?.value ?? null]));
+      return Response.json(result, { headers: { "Cache-Control": "no-store" } });
+    } catch {
+      return Response.json({ error: "Token names could not be read." }, { status: 502 });
+    }
+  };
+  live = { observe, owned, holdings, metadata };
   // Public clusters refuse browser-origin RPC, so a local console relays the methods it needs.
   // The hosted bench does the same in deploy/gateway.ts; keep the two lists in step.
   if (process.env.RPC_RELAY === "1") {

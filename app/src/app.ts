@@ -16,7 +16,7 @@ import {
   getTransactionEncoder,
 } from "@solana/transactions";
 import { avatar, icon, solana, type IconName } from "./icons.ts";
-import { TOKENS, describeDelegate, rpcHeaders, tokenLogo } from "./tokens.ts";
+import { TOKENS, describeDelegate, nameTokens, rpcHeaders, tokenLogo, tokenName } from "./tokens.ts";
 import {
   call,
   array,
@@ -265,9 +265,12 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string, scope
   const mint = mintOf(grant);
   const asset = node("span", "", "token");
   if (mint) {
-    const known = TOKENS[mint];
-    asset.append(tokenLogo(mint), node("span", known?.symbol ?? `Token ${short(mint)}`));
-    asset.title = known ? `${known.name}: ${mint}` : `Token mint ${mint}`;
+    const label = tokenName(mint);
+    asset.append(tokenLogo(mint), node("span", label.symbol ?? label.name ?? `Token ${short(mint)}`));
+    // A creator can name a token anything, including a link; only listed tokens are verified.
+    if (!label.verified && (label.symbol || label.name))
+      asset.append(node("span", "unverified", "unverified"));
+    asset.title = `${label.name ?? "Token"}${label.verified ? "" : " (name set by its creator, not verified)"}: ${mint}`;
   }
   header.prepend(asset);
   header.append(node("span", KINDS[kind] ?? kind, "badge"), state);
@@ -488,6 +491,11 @@ async function scan(historical = false, refresh = false) {
             availability: text(object(entry).availability),
           },
     );
+    if (live)
+      await nameTokens(
+        permissions.flatMap(({ grant }) => mintOf(grant) ?? []),
+        signal,
+      ).catch(() => undefined);
     const content = document.createDocumentFragment();
     const heading = node("div", "", "section-heading");
     heading.append(node("h2", historical ? "Who could act on it earlier" : "Who can act on this account"));
@@ -870,10 +878,14 @@ async function holdingsPanel(
   };
   const safe = () =>
     node("span", yours ? "Only you can move it" : "Only the owner can move it", "holding-status ok");
+  // Names are display only; a lookup that fails leaves the addresses in place.
+  await nameTokens(
+    shown.map((entry) => text(entry.mint)),
+    signal,
+  ).catch(() => undefined);
   list.append(row(tokenLogo(WSOL), "SOL", "Native balance", units(BigInt(text(wallet.lamports)), 9), safe()));
   for (const entry of shown) {
     const mint = text(entry.mint);
-    const known = TOKENS[mint];
     const scale = Number(entry.decimals);
     let status = safe();
     if (entry.delegate !== null) {
@@ -881,11 +893,12 @@ async function holdingsPanel(
       const limit = delegated === UNLIMITED ? "with no limit" : `up to ${units(delegated, scale)}`;
       status = node("span", `${short(text(entry.delegate))} can spend ${limit}`, "holding-status risk");
     }
-    const detail = `${known?.name ?? "Unlisted token"}${entry.program === "spl-token-2022" ? " · Token-2022" : ""}`;
+    const label = tokenName(mint);
+    const detail = `${label.name ?? "Unlisted token"}${label.verified || !label.name ? "" : " · unverified"}${entry.program === "spl-token-2022" ? " · Token-2022" : ""}`;
     list.append(
       row(
         tokenLogo(mint),
-        known?.symbol ?? `Token ${short(mint)}`,
+        label.symbol ?? label.name ?? `Token ${short(mint)}`,
         detail,
         units(BigInt(text(entry.amount)), scale),
         status,
@@ -1033,6 +1046,10 @@ async function scanWallet(
       if (projection && projection.status !== "compiled")
         unsupported.push([owned[index]!, text(projection.reason ?? projection.status)]);
     });
+    await nameTokens(
+      owned.map((entry) => text(entry.mint)),
+      signal,
+    ).catch(() => undefined);
     for (const [view, scope] of views.filter((view) => view !== undefined)) {
       last = view;
       for (const item of array(object(view.projection).authorizations ?? []))
