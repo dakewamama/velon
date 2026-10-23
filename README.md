@@ -24,13 +24,13 @@ permission and revoke it on a hosted test validator, or browse recorded native e
 
 ## What works today
 
-| Area                               | Status                                                               |
-| ---------------------------------- | -------------------------------------------------------------------- |
-| SPL Token delegate: observe        | Mainnet, devnet and a local validator; program-held delegates too    |
-| SPL Token delegate: revoke + proof | Mainnet, devnet and a local validator, with real wallet signing      |
-| Token-2022 delegates               | Listed for the connected wallet, not verified or revocable yet       |
-| Solana Subscriptions               | Read-only, from accounts captured by executed native tests           |
-| Squads V4 token spending limits    | Adapter in the SDK, tested by running the mainnet program locally    |
+| Area                               | Status                                                                                               |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| SPL Token delegate: observe        | Mainnet, devnet and a local validator; program-held delegates too                                    |
+| SPL Token delegate: revoke + proof | Mainnet, devnet and a local validator, with real wallet signing                                      |
+| Token-2022 delegates               | Revoke + proof on mainnet against the verified build; extensions that change spending stay read only |
+| Solana Subscriptions               | Read-only, from accounts captured by executed native tests                                           |
+| Squads V4 token spending limits    | Adapter in the SDK, tested by running the mainnet program locally                                    |
 
 ## How the pieces fit
 
@@ -49,12 +49,12 @@ flowchart LR
   app --> wallet([Your wallet])
 ```
 
-| Folder     | What it is                                                                                                                             | Language         |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| `arm/`     | The permission model. A protocol-neutral way to say "this key can do this, to that, within these limits". No RPC, no program IDs.        | Rust             |
+| Folder     | What it is                                                                                                                                      | Language         |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `arm/`     | The permission model. A protocol-neutral way to say "this key can do this, to that, within these limits". No RPC, no program IDs.               | Rust             |
 | `sdk/`     | Adapters that turn native accounts into that model (SPL Token, Subscriptions, Squads V4) and the browser helper that signs only reviewed bytes. | Rust, TypeScript |
-| `runtime/` | The service that observes finalized state, checks that the deployed program is the one it understands, simulates revokes and verifies results. | Rust             |
-| `app/`     | The product page and the console people use.                                                                                           | TypeScript, Bun  |
+| `runtime/` | The service that observes finalized state, checks that the deployed program is the one it understands, simulates revokes and verifies results.  | Rust             |
+| `app/`     | The product page and the console people use.                                                                                                    | TypeScript, Bun  |
 
 Each folder has its own README with the details. This repository combines four
 repositories with their history: `catalyst-demo` (app), `cataloger` (runtime),
@@ -124,13 +124,13 @@ installing anything, or connect Phantom or Solflare.
 
 ## Tests
 
-| Folder     | Command                                               | What runs                                           |
-| ---------- | ----------------------------------------------------- | --------------------------------------------------- |
-| `app/`     | `npm test`, `npm run test:e2e`                        | 22 unit tests, 48 browser tests on desktop, tablet and phone |
-| `app/`     | `npx playwright test -c playwright.live.config.ts`    | 6 tests against a real local validator, including a full revoke |
-| `runtime/` | `cargo test --locked`                                 | 108 tests                                           |
-| `sdk/`     | `cargo test --locked`, `bun test`                     | 89 Rust tests, 48 TypeScript tests                  |
-| `arm/`     | `cargo test --locked`                                 | Model and evaluation tests                          |
+| Folder     | Command                                            | What runs                                                       |
+| ---------- | -------------------------------------------------- | --------------------------------------------------------------- |
+| `app/`     | `npm test`, `npm run test:e2e`                     | 22 unit tests, 48 browser tests on desktop, tablet and phone    |
+| `app/`     | `npx playwright test -c playwright.live.config.ts` | 6 tests against a real local validator, including a full revoke |
+| `runtime/` | `cargo test --locked`                              | 108 tests                                                       |
+| `sdk/`     | `cargo test --locked`, `bun test`                  | 89 Rust tests, 48 TypeScript tests                              |
+| `arm/`     | `cargo test --locked`                              | Model and evaluation tests                                      |
 
 The browser tests in `app/tests/browser` use a controlled RPC so failures are
 repeatable. Nothing from them is shown in the product or presented as chain evidence.

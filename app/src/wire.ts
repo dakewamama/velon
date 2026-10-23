@@ -226,7 +226,11 @@ export function meaning(grant: ObjectValue, viewer?: string): string {
   }
 }
 
-const SYSTEMS: Record<string, string> = { "spl-token": "SPL Token", subscriptions: "Subscriptions" };
+const SYSTEMS: Record<string, string> = {
+  "spl-token": "SPL Token",
+  "token-2022": "Token-2022",
+  subscriptions: "Subscriptions",
+};
 
 export function system(grant: ObjectValue): string {
   const protocol = text(object(grant.native_context).protocol);

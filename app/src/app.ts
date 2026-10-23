@@ -235,6 +235,16 @@ function summary(permissions: { grant: ObjectValue }[], view: ObjectValue): HTML
   return block;
 }
 
+// Why an observed approval is shown without a revoke. Velon never offers what it cannot prove.
+const UNVERIFIED: Record<string, string> = {
+  UnsupportedVersion:
+    "This token program's current build is not one Velon has verified, so it will not prepare a revoke for it. The approval is shown as the RPC reports it.",
+  UnsupportedOperation:
+    "This approval uses a feature Velon cannot model exactly yet, such as a token extension that changes how spending works or a multisig delegate. It is shown as the RPC reports it.",
+  default:
+    "Velon could not verify this approval, so it is shown as the RPC reports it and cannot be revoked here.",
+};
+
 // Revokes the visitor asked to review in a row. Each still gets its own review and signature.
 let queue: (() => void)[] = [];
 const revocable = new WeakMap<HTMLElement, () => void>();
@@ -312,7 +322,7 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string, scope
     connected &&
     object(view.observation).origin === "finalized" &&
     grant.observability === "exact" &&
-    object(grant.native_context).protocol === "spl-token" &&
+    ["spl-token", "token-2022"].includes(text(object(grant.native_context).protocol)) &&
     grant.capability === "spend" &&
     object(grant.authority_kind).kind === "direct" &&
     object(grant.lifecycle).kind === "active" &&
@@ -967,8 +977,10 @@ async function scanWallet(
   for (const entry of reported)
     if (typeof entry.decimals === "number") decimals.set(text(entry.source), entry.decimals);
   // Token-2022 delegations are real, but this runtime cannot verify or revoke them yet.
-  const owned = reported.filter((entry) => entry.program !== "spl-token-2022");
-  const unsupported = reported.filter((entry) => entry.program === "spl-token-2022");
+  // Every delegated account, SPL Token or Token-2022, is observed through the runtime.
+  const owned = reported;
+  // Accounts the runtime observed but could not model exactly, with the reason it gave.
+  const unsupported: [ObjectValue, string][] = [];
   const content = document.createDocumentFragment();
   const cards: HTMLElement[] = [];
   let last: ObjectValue | undefined;
@@ -1016,6 +1028,11 @@ async function scanWallet(
     };
     await Promise.all(Array.from({ length: Math.min(3, owned.length) }, worker));
     unread = views.filter((view) => !view).length;
+    views.forEach((view, index) => {
+      const projection = view ? object(view[0].projection) : undefined;
+      if (projection && projection.status !== "compiled")
+        unsupported.push([owned[index]!, text(projection.reason ?? projection.status)]);
+    });
     for (const [view, scope] of views.filter((view) => view !== undefined)) {
       last = view;
       for (const item of array(object(view.projection).authorizations ?? []))
@@ -1087,11 +1104,11 @@ async function scanWallet(
         "empty",
       ),
     );
-  for (const entry of unsupported) {
+  for (const [entry, reason] of unsupported) {
     const row = node("article", "", "permission reported");
     const header = node("div", "", "permission-header");
     header.append(
-      node("span", "Token-2022", "badge"),
+      node("span", entry.program === "spl-token-2022" ? "Token-2022" : "SPL Token", "badge"),
       node("span", "Reported, not verified", "availability"),
     );
     const link = labelled(node("a", "Open on Solana Explorer", "link-button"), "external");
@@ -1114,11 +1131,7 @@ async function scanWallet(
           ? "Spend every token, with no limit"
           : `Spend up to ${text(entry.ui)} tokens`,
       ),
-      node(
-        "p",
-        "Velon cannot verify or revoke Token-2022 delegations yet. Revoke this one from your wallet.",
-        "explain",
-      ),
+      node("p", UNVERIFIED[reason] ?? UNVERIFIED.default!, "explain"),
       facts,
       actions,
     );
@@ -1356,7 +1369,7 @@ function draw() {
           : SPOTS[index]!;
     const bend = x < 500 ? x + 170 : x - 170;
     const path = `M${x} ${y}C${bend} ${y} ${bend} 190 500 190`;
-    const kind = item.dataset.system === "spl-token" ? "spl" : "sub";
+    const kind = ["spl-token", "token-2022"].includes(item.dataset.system ?? "") ? "spl" : "sub";
     const target = item.dataset.id === stage.dataset.target ? " target" : "";
     parts.push(
       `<g class="branch ${kind}${target}" data-index="${index}" tabindex="0" role="button">` +

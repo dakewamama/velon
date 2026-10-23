@@ -173,18 +173,34 @@ if (process.env.RPC_URL) {
       );
       const witnesses: string[] = [];
       const data = info.value === null ? null : object(info.value).data;
-      if (data !== null && !Array.isArray(data) && object(data).program === "spl-token") {
-        const token = object(object(object(data).parsed).info);
+      const program = data !== null && !Array.isArray(data) ? object(data).program : undefined;
+      let target: Json = { kind: "spl_delegate", source: bytes(source) };
+      if (program === "spl-token" || program === "spl-token-2022") {
+        const token = object(object(object(data!).parsed).info);
         for (const key of [token.owner, token.delegate])
           if (typeof key === "string" && isAddress(key)) witnesses.push(key);
+        if (program === "spl-token-2022" && typeof token.mint === "string" && isAddress(token.mint)) {
+          target = { kind: "token2022_delegate", source: bytes(source), mint: bytes(token.mint) };
+          // A mint's permanent delegate can spend from every account, so it is observed too.
+          const mint = object(
+            await rpc("getAccountInfo", [token.mint, { encoding: "jsonParsed", commitment: "finalized" }]),
+          );
+          const parsed = mint.value === null ? undefined : object(object(mint.value).data).parsed;
+          for (const extension of parsed ? array(object(object(parsed).info).extensions ?? []) : []) {
+            const entry = object(extension);
+            const delegate =
+              entry.extension === "permanentDelegate" ? object(entry.state).delegate : undefined;
+            if (typeof delegate === "string" && isAddress(delegate)) witnesses.push(delegate);
+          }
+        }
       }
       const scope = `${dataDir}/scope-${crypto.randomUUID()}.json`;
       await Bun.write(
         scope,
         JSON.stringify({
           cluster,
-          accounts: witnesses.map(bytes),
-          targets: [{ kind: "spl_delegate", source: bytes(source) }],
+          accounts: [...new Set(witnesses)].map(bytes),
+          targets: [target],
           min_context_slot: null,
         }),
       );
