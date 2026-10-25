@@ -27,6 +27,8 @@ bun serve.ts 4321      # serves this folder on http://127.0.0.1:4321
 | `og/og.html` | Source for `og.png` (1200 × 630). Render it at that viewport to regenerate. |
 | `DESIGN.md` | Concept, type, colour, grid and motion decisions |
 
-## Before deploying
+## Deploying
 
-`og:image` is a relative path. Set it to the absolute URL of `og.png` on the final domain so link previews work.
+The site is served at https://velonsecure.xyz. `og:image`, `og:url` and the canonical link
+point there; change them together if the domain changes. Deploy only the static files:
+`index.html`, `styles.css`, `main.js`, `og.png`, the favicons, `fonts/` and `shots/`.
