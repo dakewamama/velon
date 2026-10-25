@@ -6,7 +6,7 @@ When you approve an app to spend your tokens, that approval stays on chain after
 close the tab. Velon reads those permissions from native account state, explains them
 in plain words, lets you revoke one, and then checks the chain again to prove it is gone.
 
-**Live preview:** https://velon-eta.vercel.app (recorded evidence, read-only, no login)
+**Live preview:** https://velonsecure.xyz (recorded evidence, read-only, no login)
 
 ## What it does
 
