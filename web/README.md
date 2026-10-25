@@ -30,5 +30,8 @@ bun serve.ts 4321      # serves this folder on http://127.0.0.1:4321
 ## Deploying
 
 The site is served at https://velonsecure.xyz. `og:image`, `og:url` and the canonical link
-point there; change them together if the domain changes. Deploy only the static files:
+point there; change them together if the domain changes. Only the static files are deployed:
 `index.html`, `styles.css`, `main.js`, `og.png`, the favicons, `fonts/` and `shots/`.
+`.vercelignore` keeps the sources and tooling out, and `vercel.json` sets the security
+headers and sends `www` to the bare domain. Run `bun run build` first, then
+`vercel deploy --prod` from this folder.

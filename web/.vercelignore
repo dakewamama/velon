@@ -1,0 +1,11 @@
+# Only the static site is deployed; sources and tooling stay out.
+.env*
+.vercel
+.gitignore
+.vercelignore
+DESIGN.md
+README.md
+package.json
+serve.ts
+src
+og
