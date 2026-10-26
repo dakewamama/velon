@@ -4,10 +4,17 @@
 set -euo pipefail
 out=${1:?usage: build.sh <dir>}
 repo=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
-revision=$(git -C "$repo" rev-parse HEAD)
 test -z "$(git -C "$repo" status --porcelain -- runtime sdk arm app)" || { echo "commit first" >&2; exit 1; }
 binary=$repo/runtime/target/release/authorization-api
-grep -qaF "$revision" "$binary" || { echo "rebuild the runtime at $revision" >&2; exit 1; }
+# The binary names the commit it was built from; any commit whose runtime, sdk and arm
+# match HEAD's is the same build, so app-only commits need no rebuild.
+revision=
+for commit in $(git -C "$repo" rev-list HEAD -n 50); do
+  grep -qaF "$commit" "$binary" || continue
+  git -C "$repo" diff --quiet "$commit" HEAD -- runtime sdk arm && revision=$commit
+  break
+done
+test -n "$revision" || { echo "rebuild the runtime at HEAD" >&2; exit 1; }
 rm -rf "$out" && mkdir -p "$out/bin"
 git -C "$repo" archive HEAD app runtime | tar -x -C "$out"
 mv "$out/runtime" "$out/cataloger"
