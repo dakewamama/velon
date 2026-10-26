@@ -19,11 +19,16 @@ module.exports = async (request, response) => {
     return response.end("Origin refused");
   }
   try {
-    const base = new URL(process.env.DAYTONA_PREVIEW_URL);
+    // A Daytona preview or any private HTTPS host that takes a bearer token.
+    const base = new URL(process.env.UPSTREAM_URL || process.env.DAYTONA_PREVIEW_URL);
     if (base.protocol !== "https:" || base.username || base.password) throw new Error("Invalid upstream");
     const headers = {
-      "X-Daytona-Preview-Token": process.env.DAYTONA_PREVIEW_TOKEN,
-      "X-Daytona-Skip-Preview-Warning": "true",
+      ...(process.env.UPSTREAM_URL
+        ? { Authorization: `Bearer ${process.env.UPSTREAM_TOKEN}` }
+        : {
+            "X-Daytona-Preview-Token": process.env.DAYTONA_PREVIEW_TOKEN,
+            "X-Daytona-Skip-Preview-Warning": "true",
+          }),
       // Vercel sets x-real-ip itself; the gateway limits each visitor by it.
       "X-Velon-Client": String(request.headers["x-real-ip"] || "unknown"),
     };
