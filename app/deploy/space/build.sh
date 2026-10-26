@@ -13,7 +13,7 @@ git -C "$repo" archive HEAD app runtime | tar -x -C "$out"
 mv "$out/runtime" "$out/cataloger"
 cp "$repo/app/deploy/supervisor.py" "$repo/app/deploy/space/Dockerfile" "$out/"
 cp "$binary" "$out/bin/"
-(cd "$repo/app" && npm ci --omit=dev --ignore-scripts --prefix "$out/app" >/dev/null)
+(cd "$out/app" && npm ci --omit=dev --ignore-scripts >/dev/null && bun run build >/dev/null)
 python3 - "$out" "$revision" <<'PY'
 import hashlib, json, pathlib, sys
 out, revision = pathlib.Path(sys.argv[1]), sys.argv[2]
