@@ -1,11 +1,18 @@
-export {};
-// Public edge of the hosted test bench. Only the Vercel proxy holds the preview token that
-// reaches this port, so X-Velon-Client is the visitor address that proxy observed.
+import { timingSafeEqual } from "node:crypto";
+// Public edge of the hosted console. Only the Vercel proxy holds the token that reaches this
+// port (a Daytona preview token, or GATEWAY_TOKEN on a host that serves the port publicly), so
+// X-Velon-Client is the visitor address that proxy observed.
 const origin = process.env.PUBLIC_DEMO_ORIGIN;
 if (!origin || new URL(origin).protocol !== "https:") throw new Error("PUBLIC_DEMO_ORIGIN must be HTTPS.");
 const port = Number(process.env.GATEWAY_PORT ?? 3402);
 const appUrl = process.env.GATEWAY_APP ?? "http://127.0.0.1:3400";
 const rpcUrl = process.env.RPC_URL ?? "http://127.0.0.1:19099";
+const token = process.env.GATEWAY_TOKEN ? Buffer.from(`Bearer ${process.env.GATEWAY_TOKEN}`) : undefined;
+function authorized(request: Request) {
+  if (!token) return true;
+  const given = Buffer.from(request.headers.get("Authorization") ?? "");
+  return given.length === token.length && timingSafeEqual(given, token);
+}
 
 // What the console needs from the validator, nothing that funds or enumerates.
 const methods = new Set([
@@ -103,6 +110,7 @@ Bun.serve({
     if (active >= 8) return new Response("Demo busy; retry shortly", { status: 429, headers });
     const client = visitor(request.headers.get("X-Velon-Client") || "unknown");
     if (url.pathname === "/healthz") return health(headers);
+    if (!authorized(request)) return new Response("Unauthorized", { status: 401, headers });
     const limited = kind(request.method, url.pathname, rpc);
     if (limited && !allow(limited, client))
       return new Response("Too many requests; retry in a minute", { status: 429, headers });
