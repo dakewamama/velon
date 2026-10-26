@@ -6,8 +6,9 @@ When you approve an app to spend your tokens, that approval stays on chain after
 close the tab. Velon reads those permissions from native account state, explains them
 in plain words, lets you revoke one, and then checks the chain again to prove it is gone.
 
-**Try it:** https://velon-eta.vercel.app. No login or wallet needed: grant yourself a test
-permission and revoke it on a hosted test validator, or browse recorded native evidence.
+**Site:** https://velonsecure.xyz. **Console:** https://console.velonsecure.xyz. Paste any
+address or connect a wallet to see its approvals. The hosted test bench, where you grant
+yourself a test permission and revoke it on a test validator, stays at https://velon-eta.vercel.app.
 
 ## What it does
 
