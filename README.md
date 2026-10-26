@@ -7,8 +7,7 @@ close the tab. Velon reads those permissions from native account state, explains
 in plain words, lets you revoke one, and then checks the chain again to prove it is gone.
 
 **Site:** https://velonsecure.xyz. **Console:** https://console.velonsecure.xyz. Paste any
-address or connect a wallet to see its approvals. The hosted test bench, where you grant
-yourself a test permission and revoke it on a test validator, stays at https://velon-eta.vercel.app.
+address or connect a wallet to see its approvals on mainnet.
 
 ## What it does
 

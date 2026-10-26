@@ -198,8 +198,8 @@ transaction and the cleared delegate through RPC independently of the page.
 
 ### Hosted test bench
 
-https://velon-eta.vercel.app runs this local-validator setup on a remote sandbox, so
-visitors can grant and revoke on it without installing anything. It is a disposable
+The hosted test bench (retired; its old address now redirects to the console) ran this
+local-validator setup on a remote sandbox, so visitors can grant and revoke on it without installing anything. It is a disposable
 test ledger, labelled as such, not devnet. `deploy/supervisor.py` starts the validator,
 demo and `deploy/gateway.ts`, runs the checksummed `authorization-api` named in
 `artifacts.json` (with the commit it was built from) and announces startup only once the
