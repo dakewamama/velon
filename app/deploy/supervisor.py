@@ -69,6 +69,11 @@ try:
   if any(p.poll() is not None for p in children):raise RuntimeError('Demo process exited')
   time.sleep(3)
 except KeyboardInterrupt:pass
+except Exception:
+ # Hosts often show only the supervisor's own output, so the children's last lines go there too.
+ for name in ('validator.log','app.log','gateway.log'):
+  if (logs/name).exists():print('--- '+name+'\n'+''.join((logs/name).read_text(errors='replace').splitlines(True)[-30:]),flush=True)
+ raise
 finally:
  for p in children:
   if p.poll() is None:os.killpg(p.pid,signal.SIGINT)
