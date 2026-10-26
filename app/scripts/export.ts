@@ -50,12 +50,17 @@ try {
     if (!response.ok) throw new Error(`${path}: ${response.status}`);
     return response;
   };
-  const media = /["(]\.\/([\w.-]+\.(?:png|svg|webp|jpg))[")]/g;
+  const media = /["(]\.\/([\w.-]+\.(?:png|svg|webp|jpg|woff2))[")]/g;
   const images = new Set<string>();
-  for (const [path, file] of [
-    ["/", "index.html"],
-    ["/app", "app.html"],
-  ] as const) {
+  // CONSOLE_ROOT=1 publishes only the console, at the root of its own host.
+  const pages =
+    process.env.CONSOLE_ROOT === "1"
+      ? ([["/app", "index.html"]] as const)
+      : ([
+          ["/", "index.html"],
+          ["/app", "app.html"],
+        ] as const);
+  for (const [path, file] of pages) {
     const html = await (await get(path)).text();
     await Bun.write(`${out}/${file}`, html);
     for (const [, asset] of html.matchAll(/(?:src|href)="\.\/([^"]+\.(?:js|css))"/g)) {
@@ -65,7 +70,7 @@ try {
     }
     for (const [, image] of html.matchAll(media)) images.add(image!);
   }
-  // Token marks are bundled as hashed files that the HTML and scripts point to.
+  // Token marks and fonts are bundled as hashed files that the HTML, scripts and styles point to.
   for (const image of images)
     await Bun.write(`${out}/${image}`, await (await get(`/${image}`)).arrayBuffer());
   // Bodies are kept as the runtime's raw text so native u64 values survive untouched.
@@ -105,8 +110,28 @@ module.exports = (request, response) => {
 };
 `,
   );
-  const hosting = { cleanUrls: true, rewrites: [{ source: "/api/(.*)", destination: "/api/data?path=$1" }] };
+  const hosting: Record<string, unknown> = {
+    cleanUrls: true,
+    rewrites: [{ source: "/api/(.*)", destination: "/api/data?path=$1" }],
+  };
   if (process.env.HOSTED_RUNTIME === "1") {
+    // Token logos come from their issuers' https hosts; everything else is this origin.
+    hosting.headers = [
+      {
+        source: "/(.*)",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value:
+              "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests",
+          },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
+          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+        ],
+      },
+    ];
     await copyFile(`${root}/scripts/hosted-proxy.cjs`, `${out}/api/live.js`);
     hosting.rewrites = [
       { source: "/rpc", destination: "/api/live?path=rpc" },
