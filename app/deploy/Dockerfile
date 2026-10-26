@@ -13,11 +13,14 @@ RUN curl -fsSL -o /tmp/bun.zip https://github.com/oven-sh/bun/releases/download/
   && echo "9fd36f87e4b90b07632b987a2e4ec81ca15a62c81bf983190cea6d715be2ad74  /tmp/bun-linux-x64/bun" | sha256sum -c - \
   && install -D /tmp/bun-linux-x64/bun /opt/velon/bin/bun
 ENV PATH=/opt/velon/bin:$PATH
+# The commit being built: passed explicitly, or the one Render checked out.
 ARG VELON_REVISION
+ARG RENDER_GIT_COMMIT
+ENV VELON_REVISION=${VELON_REVISION:-$RENDER_GIT_COMMIT}
 RUN test "${#VELON_REVISION}" -eq 40
 WORKDIR /src
 COPY . .
-RUN cd runtime && VELON_REVISION=$VELON_REVISION cargo build --release --locked --bin authorization-api \
+RUN cd runtime && cargo build --release --locked --bin authorization-api \
   && install -D target/release/authorization-api /opt/velon/bin/authorization-api
 # The lockfile names a GitHub dependency over SSH; the image fetches it over HTTPS.
 RUN git config --global url."https://github.com/".insteadOf ssh://git@github.com/ \
