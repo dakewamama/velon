@@ -3132,3 +3132,82 @@ dialog .action-button {
   object-fit: cover;
   background: var(--wash);
 }
+
+/* Accounts listed while the chain is read; each is marked as its batch returns. */
+.checking {
+  display: grid;
+  gap: 0;
+  margin: 0 0 24px;
+  padding: 6px 20px;
+  list-style: none;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+.checking li {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  color: var(--ink);
+  font-size: 0.9rem;
+  border-bottom: 1px solid var(--line);
+}
+.checking li:last-child {
+  border-bottom: 0;
+}
+.checking-token {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.checking-who,
+.checking-amount {
+  color: var(--muted);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.8rem;
+}
+.checking-state {
+  min-width: 7.5em;
+  padding: 2px 10px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.checking .pending .checking-state {
+  animation: checking 1.4s ease-in-out infinite;
+}
+.checking .verified .checking-state {
+  color: var(--accent);
+  background: var(--accent-wash);
+  border-color: transparent;
+}
+.checking .reported .checking-state,
+.checking .unread .checking-state {
+  color: var(--warn);
+  background: var(--warn-wash);
+  border-color: transparent;
+}
+@keyframes checking {
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .checking .pending .checking-state {
+    animation: none;
+  }
+}
+@media (max-width: 560px) {
+  .checking li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .checking-who,
+  .checking-amount {
+    display: none;
+  }
+}

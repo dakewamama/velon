@@ -1048,6 +1048,49 @@ async function scanWallet(
   const cards: HTMLElement[] = [];
   let last: ObjectValue | undefined;
   let unread = 0;
+  // While the chain is read, every account is listed at once and marked as its batch returns.
+  const checking = node("ol", "", "checking");
+  const rows = owned.map((entry) => {
+    const row = node("li", "", "pending");
+    const delegate = text(entry.delegate);
+    row.append(
+      node("span", "", "checking-token"),
+      node("span", `${delegate.slice(0, 4)}…${delegate.slice(-4)}`, "checking-who"),
+      node("span", text(entry.amount) === String(UNLIMITED) ? "unlimited" : "limited", "checking-amount"),
+      node("span", "Checking…", "checking-state"),
+    );
+    checking.append(row);
+    return row;
+  });
+  const label = () =>
+    owned.forEach((entry, index) => {
+      const mint = text(entry.mint);
+      const token = tokenName(mint);
+      rows[index]!.querySelector(".checking-token")!.textContent =
+        token.symbol ?? token.name ?? `${mint.slice(0, 4)}…${mint.slice(-4)}`;
+    });
+  label();
+  const heading = node("p", "", "approvals-summary");
+  if (owned.length) results.replaceChildren(heading, checking);
+  const mark = (index: number, view: [ObjectValue, string] | undefined) => {
+    const projection = view ? object(view[0].projection) : undefined;
+    const [state, kind] = !projection
+      ? ["Couldn't read", "unread"]
+      : projection.status !== "compiled"
+        ? ["Read-only", "reported"]
+        : array(projection.authorizations ?? []).length
+          ? ["Verified", "verified"]
+          : ["No permission", "clear"];
+    rows[index]!.className = kind;
+    rows[index]!.querySelector(".checking-state")!.textContent = state;
+  };
+  // Names arrive while the accounts are checked; the list is relabelled when they do.
+  const naming = nameTokens(
+    owned.map((entry) => text(entry.mint)),
+    signal,
+  )
+    .then(label)
+    .catch(() => undefined);
   try {
     // A few accounts are observed at once; cards keep the order the RPC listed them in.
     // Public RPCs rate limit, so an account is retried before it is reported as unread.
@@ -1089,10 +1132,14 @@ async function scanWallet(
     }
     let next = 0;
     let done = 0;
-    const progress = () =>
+    const progress = () => {
       status(
         `Checking ${done} of ${owned.length} token account${owned.length === 1 ? "" : "s"} against the chain…`,
       );
+      const verified = checking.querySelectorAll(".verified").length;
+      const reported = checking.querySelectorAll(".reported").length;
+      heading.textContent = `Checked ${done} of ${owned.length}${verified ? ` · ${verified} verified` : ""}${reported ? ` · ${reported} read-only` : ""}`;
+    };
     if (owned.length) progress();
     const worker = async () => {
       for (let batch = next++; batch < batches.length; batch = next++) {
@@ -1101,7 +1148,10 @@ async function scanWallet(
           if (signal.aborted) throw signal.reason;
           return undefined;
         });
-        indexes.forEach((index, offset) => (views[index] = results?.[offset]));
+        indexes.forEach((index, offset) => {
+          views[index] = results?.[offset];
+          mark(index, views[index]);
+        });
         done += indexes.length;
         if (!signal.aborted) progress();
       }
@@ -1113,10 +1163,7 @@ async function scanWallet(
       if (projection && projection.status !== "compiled")
         unsupported.push([owned[index]!, text(projection.reason ?? projection.status)]);
     });
-    await nameTokens(
-      owned.map((entry) => text(entry.mint)),
-      signal,
-    ).catch(() => undefined);
+    await naming;
     for (const [view, scope] of views.filter((view) => view !== undefined)) {
       last = view;
       for (const item of array(object(view.projection).authorizations ?? []))
