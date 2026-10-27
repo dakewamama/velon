@@ -31,7 +31,7 @@ const limits = {
   revoke: { each: 12, all: 120 },
   send: { each: 6, all: 60 },
   observe: { each: 60, all: 600 },
-  read: { each: 20, all: 200 },
+  read: { each: 60, all: 300 },
   rpc: { each: 240, all: 2400 },
 } as const;
 type Kind = keyof typeof limits;
