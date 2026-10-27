@@ -32,7 +32,7 @@ use solana_rpc_client_api::{
     request::RpcRequest,
     response::{Response, RpcSimulateTransactionResult},
 };
-use solana_sdk_ids::{bpf_loader_upgradeable, sysvar};
+use solana_sdk_ids::{bpf_loader_upgradeable, system_program, sysvar};
 use solana_svm_feature_set::SVMFeatureSet;
 use solana_transaction::Transaction;
 use solana_transaction_status_client_types::{
@@ -394,14 +394,29 @@ pub async fn simulate_revoke(
             let expected = revoked(source_data(snapshot, source)?, token)?;
             source_data(&after, source)? == expected.as_slice() && simulated[0].1.data == expected
         }
-        Token::Subscription { .. } => {
-            // The provider's later bank must match every account but the fee payer's exactly.
+        Token::Subscription { delegation, .. } => {
+            // The provider's later bank must match every account but the fee payer's exactly,
+            // and the delegation must no longer exist.
             let expected = closed(snapshot, &action)?;
-            executed == expected
+            let agrees = |key: &Pubkey, expected: &Account, actual: &Account| {
+                if *key == delegation {
+                    is_closed(actual)
+                } else {
+                    expected == actual
+                }
+            };
+            expected.len() == executed.len()
+                && expected.iter().zip(&executed).all(
+                    |((key, account), (executed_key, executed))| {
+                        key == executed_key && agrees(key, account, executed)
+                    },
+                )
                 && expected
                     .iter()
                     .zip(&simulated)
-                    .all(|((key, account), (_, simulated))| *key == payer || account == simulated)
+                    .all(|((key, account), (_, simulated))| {
+                        *key == payer || agrees(key, account, simulated)
+                    })
         }
     };
     if !agrees {
@@ -711,9 +726,7 @@ impl Token {
             Self::Spl | Self::Token2022 { .. } => {
                 source_data(after, source)? == revoked(source_data(before, source)?, self)?
             }
-            Self::Subscription { delegation, .. } => {
-                *account(after, delegation)? == Account::default()
-            }
+            Self::Subscription { delegation, .. } => is_closed(account(after, delegation)?),
         };
         if !cleared {
             return Err(AdapterError::DiffMismatch.into());
@@ -762,6 +775,15 @@ fn closed(snapshot: &Snapshot, action: &sdk::Action) -> Result<Vec<(Pubkey, Acco
         accounts.push((key, account));
     }
     Ok(accounts)
+}
+
+/// A closed account no longer exists: no lamports, no data, owned by the system program and not
+/// executable. Its rent epoch is not account state; providers report the exempt sentinel for it.
+fn is_closed(account: &Account) -> bool {
+    account.lamports == 0
+        && account.data.is_empty()
+        && account.owner == system_program::id()
+        && !account.executable
 }
 
 fn account(snapshot: &Snapshot, key: Pubkey) -> Result<&Account, Error> {

@@ -355,6 +355,15 @@ async fn a_provider_that_disagrees_with_the_closed_delegation_is_refused() {
         lamports: 1,
         ..Account::default()
     };
+    // Zero lamports but still owned by the program, or still holding data, is not closed.
+    let owned = Account {
+        owner: subscriptions::DelegationAdapter.protocol().program_id,
+        ..Account::default()
+    };
+    let leftover = Account {
+        data: vec![0],
+        ..Account::default()
+    };
     let mut plan_changed = simulation(&observed, None);
     let mut changed = find(&observed, plan);
     *changed.data.last_mut().unwrap() ^= 1;
@@ -362,6 +371,8 @@ async fn a_provider_that_disagrees_with_the_closed_delegation_is_refused() {
     for reply in [
         simulation(&observed, Some(&kept)),
         simulation(&observed, Some(&emptied)),
+        simulation(&observed, Some(&owned)),
+        simulation(&observed, Some(&leftover)),
         plan_changed,
     ] {
         let journal = Journal::open("sqlite::memory:").await.unwrap();
@@ -490,5 +501,31 @@ async fn verification_requires_the_delegators_signature() {
     assert!(matches!(
         result,
         Err(Error::InvalidObservation("invalid transaction signature"))
+    ));
+}
+
+#[tokio::test]
+async fn a_provider_reporting_the_closed_delegation_with_the_rent_sentinel_agrees() {
+    // Devnet returns a closed account as zero lamports, no data, system-owned, with the
+    // exempt rent epoch u64::MAX; that is the same nonexistent account.
+    let observed = snapshot(CANCELLED);
+    let (delegation, _) = targets(&observed);
+    let journal = Journal::open("sqlite::memory:").await.unwrap();
+    let record = journal.ingest(observed.clone(), &catalog()).await.unwrap();
+    let reported = Account {
+        rent_epoch: u64::MAX,
+        ..Account::default()
+    };
+    let simulated = rpc::simulate_revoke(
+        &client(simulation(&observed, Some(&reported))),
+        &journal,
+        &record.id,
+        delegation,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        simulated.changes.as_slice(),
+        [AuthorizationChange::Removed { .. }]
     ));
 }
