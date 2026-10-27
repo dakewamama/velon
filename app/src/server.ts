@@ -3,8 +3,11 @@ import app from "./console.html";
 import { isAddress } from "@solana/addresses";
 import type { Control } from "./control.ts";
 
+// Accounts one observation may cover; the console sends a wallet's accounts in batches this size.
+export const observeBatch = 25;
+
 export type Live = {
-  observe?: (source: string) => Promise<Response>;
+  observe?: (sources: string[]) => Promise<Response>;
   /// Recent mainnet delegations as its RPC reports them; read only and unverified.
   mainnet?: () => Response;
   devnet?: () => Response;
@@ -137,19 +140,35 @@ export function createServer(
         return new Response("JSON body required", { status: 415 });
       if (observePath || fund || owned || holdings) {
         // Only a validated address leaves this handler; the launcher builds everything else.
-        const key = fund || owned || holdings ? "owner" : "source";
+        // An observation names one account, or a batch of a wallet's accounts observed together.
+        const keys = fund || owned || holdings ? ["owner"] : ["source", "sources"];
         let address: unknown;
+        let key: string | undefined;
         try {
           const input: unknown = JSON.parse(await request.text());
-          if (input && typeof input === "object" && Object.keys(input).join() === key)
-            address = (input as Record<string, unknown>)[key];
+          const given = input && typeof input === "object" ? Object.keys(input) : [];
+          if (given.length === 1 && keys.includes(given[0]!)) {
+            key = given[0];
+            address = (input as Record<string, unknown>)[key!];
+          }
         } catch {
           /* Malformed JSON is rejected below. */
+        }
+        if (key === "sources") {
+          const sources = Array.isArray(address) ? address : [];
+          if (
+            !sources.length ||
+            sources.length > observeBatch ||
+            new Set(sources).size !== sources.length ||
+            !sources.every((source) => typeof source === "string" && isAddress(source))
+          )
+            return new Response(`Between 1 and ${observeBatch} distinct addresses required`, { status: 400 });
+          return observe!(sources as string[]);
         }
         if (typeof address !== "string" || !isAddress(address))
           return new Response("Address required", { status: 400 });
         if (holdings) return holdings(address);
-        return fund ? fund(address) : owned ? owned(address) : observe!(address);
+        return fund ? fund(address) : owned ? owned(address) : observe!([address]);
       }
       const body = action ? await request.arrayBuffer() : undefined;
       if (simulate && body!.byteLength)

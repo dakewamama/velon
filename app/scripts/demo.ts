@@ -165,27 +165,41 @@ if (process.env.RPC_URL) {
     throw new Error(`LIVE_CATALOG has no SPL Token deployment with runtime evidence for cluster ${cluster}.`);
   control = { rpcUrl: rpcUrl.href, network, cluster };
   const bytes = (address: string) => Array.from(getAddressEncoder().encode(address as Address));
-  const observe: Live["observe"] = async (source) => {
+  // A batch of accounts is one observation: the runtime starts and checks the program once.
+  const observe: Live["observe"] = async (sources) => {
     try {
       // Discovery only names witness accounts; Cataloger reads and decodes the finalized batch itself.
-      const info = object(
-        await rpc("getAccountInfo", [source, { encoding: "jsonParsed", commitment: "finalized" }]),
-      );
+      const parsedAccounts = async (keys: string[]) =>
+        array(
+          object(
+            await rpc("getMultipleAccounts", [keys, { encoding: "jsonParsed", commitment: "finalized" }]),
+          ).value,
+        );
+      const infos = await parsedAccounts(sources);
       const witnesses: string[] = [];
-      const data = info.value === null ? null : object(info.value).data;
-      const program = data !== null && !Array.isArray(data) ? object(data).program : undefined;
-      let target: Json = { kind: "spl_delegate", source: bytes(source) };
-      if (program === "spl-token" || program === "spl-token-2022") {
-        const token = object(object(object(data!).parsed).info);
-        for (const key of [token.owner, token.delegate])
-          if (typeof key === "string" && isAddress(key)) witnesses.push(key);
-        if (program === "spl-token-2022" && typeof token.mint === "string" && isAddress(token.mint)) {
-          target = { kind: "token2022_delegate", source: bytes(source), mint: bytes(token.mint) };
-          // A mint's permanent delegate can spend from every account, so it is observed too.
-          const mint = object(
-            await rpc("getAccountInfo", [token.mint, { encoding: "jsonParsed", commitment: "finalized" }]),
-          );
-          const parsed = mint.value === null ? undefined : object(object(mint.value).data).parsed;
+      const targets: Json[] = [];
+      const mints = new Set<string>();
+      sources.forEach((source, index) => {
+        const info = infos[index] ?? null;
+        const data = info === null ? null : object(info).data;
+        const program = data !== null && !Array.isArray(data) ? object(data).program : undefined;
+        let target: Json = { kind: "spl_delegate", source: bytes(source) };
+        if (program === "spl-token" || program === "spl-token-2022") {
+          const token = object(object(object(data!).parsed).info);
+          for (const key of [token.owner, token.delegate])
+            if (typeof key === "string" && isAddress(key)) witnesses.push(key);
+          if (program === "spl-token-2022" && typeof token.mint === "string" && isAddress(token.mint)) {
+            target = { kind: "token2022_delegate", source: bytes(source), mint: bytes(token.mint) };
+            mints.add(token.mint);
+          }
+        }
+        targets.push(target);
+      });
+      // A mint's permanent delegate can spend from every account, so it is observed too.
+      if (mints.size) {
+        const keys = [...mints];
+        for (const mint of await parsedAccounts(keys)) {
+          const parsed = mint === null ? undefined : object(object(mint).data).parsed;
           for (const extension of parsed ? array(object(object(parsed).info).extensions ?? []) : []) {
             const entry = object(extension);
             const delegate =
@@ -200,7 +214,7 @@ if (process.env.RPC_URL) {
         JSON.stringify({
           cluster,
           accounts: [...new Set(witnesses)].map(bytes),
-          targets: [target],
+          targets,
           min_context_slot: null,
         }),
       );

@@ -1002,26 +1002,36 @@ async function scanWallet(
     // A few accounts are observed at once; cards keep the order the RPC listed them in.
     // Public RPCs rate limit, so an account is retried before it is reported as unread.
     const views: ([ObjectValue, string] | undefined)[] = new Array(owned.length);
-    const observe = async (source: string) => {
+    // Accounts are observed in batches: the runtime starts and checks the program once per batch.
+    const observe = async (sources: string[]) => {
       for (let attempt = 0; ; attempt++) {
         try {
           const observed = await call("/api/live/spl/observe", {
             method: "POST",
             headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
-            body: JSON.stringify({ source }),
+            body: JSON.stringify({ sources }),
             signal,
           });
           const scope = text(object(await result(observed)).scope_id);
-          return [object(await get(`scopes/${scope}/effective/${source}`, signal)), scope] as [
-            ObjectValue,
-            string,
-          ];
+          if (sources.length > 1) batchScopes.add(scope);
+          return await Promise.all(
+            sources.map(
+              async (source) =>
+                [object(await get(`scopes/${scope}/effective/${source}`, signal)), scope] as [
+                  ObjectValue,
+                  string,
+                ],
+            ),
+          );
         } catch (error) {
           if (signal.aborted || attempt === 3) throw error;
           await new Promise((resolve) => setTimeout(resolve, 1500 * 2 ** attempt));
         }
       }
     };
+    const batches: number[][] = [];
+    for (let index = 0; index < owned.length; index += observeBatch)
+      batches.push(owned.slice(index, index + observeBatch).map((_, offset) => index + offset));
     let next = 0;
     let done = 0;
     const progress = () =>
@@ -1030,16 +1040,18 @@ async function scanWallet(
       );
     if (owned.length) progress();
     const worker = async () => {
-      for (let index = next++; index < owned.length; index = next++) {
-        views[index] = await observe(text(owned[index]!.source)).catch(() => {
+      for (let batch = next++; batch < batches.length; batch = next++) {
+        const indexes = batches[batch]!;
+        const results = await observe(indexes.map((index) => text(owned[index]!.source))).catch(() => {
           if (signal.aborted) throw signal.reason;
           return undefined;
         });
-        done++;
+        indexes.forEach((index, offset) => (views[index] = results?.[offset]));
+        done += indexes.length;
         if (!signal.aborted) progress();
       }
     };
-    await Promise.all(Array.from({ length: Math.min(3, owned.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(2, batches.length) }, worker));
     unread = views.filter((view) => !view).length;
     views.forEach((view, index) => {
       const projection = view ? object(view[0].projection) : undefined;
@@ -1416,14 +1428,24 @@ function draw() {
 }
 new MutationObserver(draw).observe(results, { childList: true });
 const browse = document.querySelector<HTMLButtonElement>("#browse")!;
-browse.onclick = () => {
-  const open = document.body.classList.toggle("browsing");
+const rail = document.querySelector<HTMLElement>(".rail-panel")!;
+// On a live console the list is a drawer; while it is closed it is off screen, so it is
+// also taken out of the tab order and away from the pointer.
+function setBrowse(open: boolean) {
+  document.body.classList.toggle("browsing", open);
   browse.setAttribute("aria-expanded", String(open));
-};
+  rail.inert = document.body.classList.contains("is-live") && !open;
+}
+browse.onclick = () => setBrowse(!document.body.classList.contains("browsing"));
+addEventListener("keydown", (event: KeyboardEvent) => {
+  if (event.key === "Escape" && document.body.classList.contains("browsing")) {
+    setBrowse(false);
+    browse.focus();
+  }
+});
 // Choosing an account closes the list so the result is not covered.
 function closeBrowse() {
-  document.body.classList.remove("browsing");
-  browse.setAttribute("aria-expanded", "false");
+  setBrowse(false);
 }
 
 // Marks how far the visitor is in the three-step guide.
@@ -1474,6 +1496,12 @@ function setAction(state: ActionState, message: string) {
     .forEach((button) => (button.disabled = busy));
 }
 
+// Scopes that cover a batch of accounts. A revoke is reviewed against one account's own
+// observation, so preparing one from a batch observes that account again first.
+const batchScopes = new Set<string>();
+// The most accounts the server accepts in one observation (observeBatch in server.ts).
+const observeBatch = 25;
+
 async function prepare(scanned: ObjectValue, scope: string) {
   if (
     !control ||
@@ -1492,6 +1520,15 @@ async function prepare(scanned: ObjectValue, scope: string) {
   sendRequested = false;
   try {
     setAction("PREPARING", "Observing the current finalized state...");
+    if (batchScopes.has(scope)) {
+      const observed = await call("/api/live/spl/observe", {
+        method: "POST",
+        headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
+        body: JSON.stringify({ source }),
+        signal,
+      });
+      scope = text(object(await result(observed)).scope_id);
+    }
     const response = await action(`scopes/${scope}/actions/revoke/${source}`, signal);
     if (response.status === 409)
       throw new Error("The finalized state moved during simulation. Nothing was signed; try again.");
@@ -1977,6 +2014,7 @@ try {
   const live = scenarios.findIndex((scenario) => scenario.live);
   if (live >= 0 && isAddress(linked)) {
     document.body.classList.add("is-live");
+    setBrowse(false);
     publicMode();
     select.value = String(live);
     selectScenario();
@@ -1985,6 +2023,7 @@ try {
   } else if (live >= 0) {
     select.value = String(live);
     document.body.classList.add("is-live");
+    setBrowse(false);
     publicMode();
     lesson();
     draw();

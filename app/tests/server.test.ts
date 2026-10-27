@@ -132,12 +132,12 @@ test("action allowlist rejects invalid requests before contacting the runtime", 
 });
 
 test("live observation passes one validated address and nothing else to the collector", async () => {
-  const received: string[] = [];
+  const received: string[][] = [];
   const upstream = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("unexpected") });
   let approvals = 0;
   const server = createServer(String(upstream.url), [], 0, "127.0.0.1", null, {
-    observe: async (source) => {
-      received.push(source);
+    observe: async (sources) => {
+      received.push(sources);
       return new Response(null, { status: 204 });
     },
     discover: async () => new Response("[]"),
@@ -153,6 +153,9 @@ test("live observation passes one validated address and nothing else to the coll
   const post = (body: string, init: RequestInit = {}, target = server) =>
     fetch(new URL("/api/live/spl/observe", target.url), { method: "POST", headers, body, ...init });
   expect((await post(JSON.stringify({ source }))).status).toBe(204);
+  // A wallet's accounts can be observed together, each one validated.
+  const other = "SysvarC1ock11111111111111111111111111111111";
+  expect((await post(JSON.stringify({ sources: [source, other] }))).status).toBe(204);
   for (const body of [
     "",
     "not json",
@@ -164,6 +167,12 @@ test("live observation passes one validated address and nothing else to the coll
     JSON.stringify({ source: [source] }),
     JSON.stringify({ source, accounts: [source] }),
     JSON.stringify({ source, cluster: "other" }),
+    JSON.stringify({ sources: [] }),
+    JSON.stringify({ sources: source }),
+    JSON.stringify({ sources: [source, source] }),
+    JSON.stringify({ sources: [source, "../../etc/passwd"] }),
+    JSON.stringify({ sources: Array.from({ length: 26 }, (_, index) => `${"1".repeat(31)}${index}`) }),
+    JSON.stringify({ sources: [source], source }),
   ])
     expect((await post(body)).status).toBe(400);
   expect(
@@ -177,7 +186,7 @@ test("live observation passes one validated address and nothing else to the coll
   ).toBe(403);
   expect((await fetch(new URL("/api/live/spl/observe", server.url))).status).toBe(405);
   expect((await post(JSON.stringify({ source }), {}, disabled)).status).toBe(404);
-  expect(received).toEqual([source]);
+  expect(received).toEqual([[source], [source, other]]);
   // Discovery and the test bench exist only where the launcher wires them.
   const route = (path: string, init?: RequestInit, target = server) => fetch(new URL(path, target.url), init);
   expect(await (await route("/api/live/spl/delegated")).text()).toBe("[]");
