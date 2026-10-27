@@ -1029,9 +1029,14 @@ async function scanWallet(
         }
       }
     };
+    // A batch holds one token program's accounts: a program Velon cannot verify makes the whole
+    // observation read-only, so it must not take the other program's accounts with it.
     const batches: number[][] = [];
-    for (let index = 0; index < owned.length; index += observeBatch)
-      batches.push(owned.slice(index, index + observeBatch).map((_, offset) => index + offset));
+    for (const program of new Set(owned.map((entry) => String(entry.program)))) {
+      const indexes = [...owned.keys()].filter((index) => String(owned[index]!.program) === program);
+      for (let start = 0; start < indexes.length; start += observeBatch)
+        batches.push(indexes.slice(start, start + observeBatch));
+    }
     let next = 0;
     let done = 0;
     const progress = () =>
