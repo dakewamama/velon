@@ -11,6 +11,11 @@ export const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 // https://verify.osec.io/status/TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb
 const TOKEN_2022_HASH = "0999dbf708971e723b08d1caafc988826a59c6001ed6dc02260da07defbe1469";
 const TOKEN_2022_SOURCE = "9bc02757f600ffe754746708a8a072bcd49d1260";
+export const SUBSCRIPTIONS_PROGRAM = "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44";
+// Devnet's Subscriptions at its 506642674 deployment, hashed over the whole padded payload.
+// The foundation's verify run built this source; trimmed of trailing zeros, its bytes hash to e705f5a3.
+const SUBSCRIPTIONS_HASH = "2675ad1d2b5068d47fc5d169156cf4859a9c21c0406ce63e3828e3b7320fddbf";
+const SUBSCRIPTIONS_SOURCE = "56de552a26a0f0af437c0ce5191b3309741cc596";
 // One mainnet epoch. Features can change at the next boundary, so each launch captures again.
 const VALIDITY = 432_000;
 
@@ -24,7 +29,9 @@ type Program = {
   protocol: string;
   schema: { uri: string; revision: string };
   adapter: string;
-  // SPL Token is required; Token-2022 is recorded only where the cluster runs the verified build.
+  adapterVersion: string;
+  buildToolchain: string;
+  // SPL Token is required; the others are recorded only where the cluster runs the verified build.
   required: boolean;
 };
 const PROGRAMS: Program[] = [
@@ -36,6 +43,8 @@ const PROGRAMS: Program[] = [
     protocol: "spl-token",
     schema: { uri: "https://docs.rs/spl-token-interface/3.0.0", revision: "3.0.0" },
     adapter: "spl.rs",
+    adapterVersion: "0.1",
+    buildToolchain: `solana-verify; https://verify.osec.io/status/${TOKEN_PROGRAM}`,
     required: true,
   },
   {
@@ -46,6 +55,21 @@ const PROGRAMS: Program[] = [
     protocol: "token-2022",
     schema: { uri: "https://docs.rs/spl-token-2022-interface/3.1.2", revision: "3.1.2" },
     adapter: "token2022.rs",
+    adapterVersion: "0.1",
+    buildToolchain: `solana-verify; https://verify.osec.io/status/${TOKEN_2022_PROGRAM}`,
+    required: false,
+  },
+  {
+    id: SUBSCRIPTIONS_PROGRAM,
+    name: "Solana Subscriptions",
+    hash: SUBSCRIPTIONS_HASH,
+    source: `solana-foundation/subscriptions@${SUBSCRIPTIONS_SOURCE}`,
+    protocol: "subscriptions",
+    schema: { uri: "https://docs.rs/subscriptions/0.5.0", revision: "0.5.0" },
+    adapter: "subscriptions.rs",
+    adapterVersion: "0.3",
+    buildToolchain:
+      "solana-verify 0.5.2; Agave 3.1.10; platform-tools v1.52; https://github.com/solana-foundation/subscriptions/actions/runs/37008589067",
     required: false,
   },
 ];
@@ -117,7 +141,7 @@ function record(program: Program, raw: string, capture: ObjectValue, rpcUrl: str
     schema: program.schema,
     adapter: {
       protocol: program.protocol,
-      version: "0.1",
+      version: program.adapterVersion,
       source: `https://github.com/dakewamama/velon/blob/${revision}/sdk/src/${program.adapter}`,
     },
     provenance: {
@@ -129,7 +153,7 @@ function record(program: Program, raw: string, capture: ObjectValue, rpcUrl: str
       programdata_address: programdata,
       observed_slot: observed,
       source_revision: program.source,
-      build_toolchain: `solana-verify; https://verify.osec.io/status/${program.id}`,
+      build_toolchain: program.buildToolchain,
       identity: capture.identity!,
       runtime: capture.runtime!,
     },

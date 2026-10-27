@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { generateKeyPairSync } from "node:crypto";
-import { getAddressDecoder } from "@solana/addresses";
+import { readFileSync } from "node:fs";
+import { getAddressDecoder, getAddressEncoder, type Address } from "@solana/addresses";
 import {
   getCompiledTransactionMessageDecoder,
   getCompiledTransactionMessageEncoder,
@@ -14,22 +15,60 @@ import {
 import fixture from "../fixtures/spl-control.json" with { type: "json" };
 import { DEVNET_GENESIS } from "../../src/control.ts";
 
-async function browserProvider(page: Page, mode = "success") {
+const SUBSCRIPTIONS = "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44";
+// Technical and derived grants compiled by the SDK from the Mollusk-executed recurring subscription
+// (sdk/tests/fixtures/subscriptions-recurring.json). Node's JSON.rawJSON, not yet in TypeScript's
+// lib, keeps u64 amounts above 2^53 exact.
+const json = JSON as JSON & { rawJSON(text: string): unknown };
+const [technical, derived] = JSON.parse(
+  readFileSync(
+    new URL("../../../sdk/tests/fixtures/subscriptions-recurring-arm.json", import.meta.url),
+    "utf8",
+  ),
+  (_key, value, context?: { source: string }) =>
+    typeof value === "number" && !Number.isSafeInteger(value) ? json.rawJSON(context!.source) : value,
+);
+// The delegation is named in the derived grant id `<program>:<delegation>:<init id>:spend`.
+const delegation = derived.id.split(":")[1] as string;
+const ended = derived.lifecycle.valid_until as number;
+const bytes = (address: string) => Array.from(getAddressEncoder().encode(address as Address));
+
+// `subscription` swaps the SPL grant for the subscription pair. "ended" observes at the cancel
+// time, "active" is a controlled edit with no cancel time; the signing message is a controlled
+// RevokeDelegation with the native account order, not a captured transaction.
+async function browserProvider(page: Page, mode = "success", subscription?: "ended" | "active") {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const rawPublic = new Uint8Array(publicKey.export({ format: "der", type: "spki" }).subarray(-32));
   const owner = getAddressDecoder().decode(rawPublic);
-  const grant = structuredClone(fixture.grant);
-  grant.subject.value = owner;
+  const spl = structuredClone(fixture.grant);
+  spl.subject.value = owner;
+  const parent = { ...technical, subject: { kind: "identity", value: owner } };
+  const grant: typeof spl = subscription
+    ? {
+        ...derived,
+        subject: { kind: "identity", value: owner },
+        lifecycle: subscription === "ended" ? derived.lifecycle : { ...derived.lifecycle, valid_until: null },
+      }
+    : spl;
+  const key = subscription ? delegation : fixture.signing.source;
   const decoder = getTransactionDecoder();
   const original = decoder.decode(new Uint8Array(Buffer.from(fixture.signing.signing_transaction, "base64")));
   const message = getCompiledTransactionMessageDecoder().decode(original.messageBytes);
   if (message.version !== "legacy") throw new Error("Expected native legacy revoke fixture");
   const signing = Buffer.from(
     getTransactionEncoder().encode({
-      messageBytes: getCompiledTransactionMessageEncoder().encode({
-        ...message,
-        staticAccounts: [owner, ...message.staticAccounts.slice(1)],
-      }) as TransactionMessageBytes,
+      messageBytes: getCompiledTransactionMessageEncoder().encode(
+        subscription
+          ? {
+              ...message,
+              header: { numSignerAccounts: 1, numReadonlySignerAccounts: 0, numReadonlyNonSignerAccounts: 2 },
+              staticAccounts: [owner, delegation, grant.principal.value, SUBSCRIPTIONS] as Address[],
+              instructions: [
+                { programAddressIndex: 3, accountIndices: [0, 1, 2], data: new Uint8Array([3]) },
+              ],
+            }
+          : { ...message, staticAccounts: [owner, ...message.staticAccounts.slice(1)] },
+      ) as TransactionMessageBytes,
       signatures: { [owner]: null },
     }),
   ).toString("base64");
@@ -43,10 +82,18 @@ async function browserProvider(page: Page, mode = "success") {
   let signed = "";
   let stale = false;
   let changed = false;
-  const observation = { origin: "finalized", cluster: DEVNET_GENESIS, bank: "browser-test", slot: 10 };
+  const observation = {
+    origin: "finalized",
+    cluster: DEVNET_GENESIS,
+    bank: "browser-test",
+    slot: 10,
+    ...(subscription && { unix_timestamp: ended }),
+  };
   const afterObservation = { ...observation, slot: 12 };
   const coverage = { complete: false, accounts: [], targets: [] };
   const current = () => (changed ? { ...grant, usage: { ...grant.usage, remaining: 24 } } : grant);
+  // The SPL approval to the subscription authority outlives the closed delegation.
+  const kept = subscription ? [parent] : [];
   const view = () => ({
     state_version: finalized ? afterId : beforeId,
     observation: finalized ? afterObservation : observation,
@@ -56,13 +103,30 @@ async function browserProvider(page: Page, mode = "success") {
     arm_schema_version: "0.1",
     projection: {
       status: "compiled",
-      authorizations: finalized ? [] : [{ authorization: current(), availability: "active" }],
+      authorizations: [...kept, ...(finalized ? [] : [current()])].map((authorization) => ({
+        authorization,
+        availability: "active",
+      })),
     },
   });
   const record = () => ({
     id: finalized ? afterId : stale ? "d".repeat(64) : beforeId,
-    snapshot: { observation: finalized ? afterObservation : observation },
-    projection: { status: "compiled", authorizations: finalized ? [] : [grant] },
+    snapshot: {
+      observation: finalized ? afterObservation : observation,
+      targets: subscription
+        ? [
+            {
+              kind: "subscription",
+              delegation: bytes(delegation),
+              authority: bytes(parent.principal.value),
+              source: bytes(grant.resource.id),
+              mint: bytes(grant.constraints.value.asset.id),
+              plan: null,
+            },
+          ]
+        : [],
+    },
+    projection: { status: "compiled", authorizations: [...kept, ...(finalized ? [] : [grant])] },
   });
   await page.addInitScript(
     ({ owner, pubkey, secret, mode }) => {
@@ -134,7 +198,9 @@ async function browserProvider(page: Page, mode = "success") {
           scope: "",
           live: true,
           snapshots: [],
-          examples: [{ label: "Source account", address: fixture.signing.source }],
+          examples: [
+            { label: "Source account", address: subscription ? delegation : fixture.signing.source },
+          ],
         },
       ],
     }),
@@ -142,12 +208,20 @@ async function browserProvider(page: Page, mode = "success") {
   await page.route("**/api/live/spl/observe", (route) => {
     observes++;
     expect(route.request().headers()["x-velon-action"]).toBe("observe");
-    expect(route.request().postDataJSON()).toEqual({ source: fixture.signing.source });
+    expect(route.request().postDataJSON()).toEqual({
+      source: subscription ? delegation : fixture.signing.source,
+    });
     return route.fulfill({ json: { scope_id: scope, record: record() } });
   });
   await page.route(`**/api/scopes/${scope}/effective/*`, (route) => route.fulfill({ json: view() }));
   await page.route(`**/api/scopes/${scope}`, (route) => route.fulfill({ json: record() }));
-  await page.route(`**/api/scopes/${scope}/actions/revoke/${fixture.signing.source}`, (route) => {
+  // A pasted Subscriptions account is read as owned by the program, then observed.
+  await page.route("**/api/live/wallet", (route) =>
+    subscription && route.request().postDataJSON().owner === delegation
+      ? route.fulfill({ json: { kind: "other", program: SUBSCRIPTIONS } })
+      : route.fallback(),
+  );
+  await page.route(`**/api/scopes/${scope}/actions/revoke/${key}`, (route) => {
     stale = mode === "stale";
     changed = mode === "changed";
     const refused = { unsupported: 422, moved: 409 }[mode];
@@ -164,7 +238,11 @@ async function browserProvider(page: Page, mode = "success") {
             state_version: beforeId,
             arm_schema_version: "0.1",
             observation,
-            changes: [{ kind: "removed", authorization: current() }],
+            changes: [
+              mode === "cancelled"
+                ? { kind: "changed", before: current(), after: current() }
+                : { kind: "removed", authorization: current() },
+            ],
             signing_transaction: signing,
             response: {
               context: { slot: 10 },
@@ -208,6 +286,9 @@ async function browserProvider(page: Page, mode = "success") {
   });
   await page.route("**/api/snapshots/*/actions/revoke/*/verify", (route) => {
     polls++;
+    expect(new URL(route.request().url()).pathname).toBe(
+      `/api/snapshots/${beforeId}/actions/revoke/${key}/verify`,
+    );
     expect(route.request().postDataJSON()).toEqual({ signed_transaction: signed });
     if (polls === 1 || mode === "pending")
       return route.fulfill({ status: 404, json: { error: "not finalized" } });
@@ -215,7 +296,7 @@ async function browserProvider(page: Page, mode = "success") {
       return route.fulfill({ status: 409, json: { error: "Native state changed" } });
     finalized = true;
     const after = record();
-    if (mode === "reapproved") after.projection.authorizations = [grant];
+    if (mode === "reapproved") after.projection.authorizations = [...kept, grant];
     return route.fulfill({
       json: {
         verification_id: "c".repeat(64),
@@ -301,3 +382,43 @@ for (const [mode, reason] of [
     expect(provider.counts().sends).toBe(0);
   });
 }
+
+const card = (page: Page, id: string) => page.locator(`#results article[data-id="${id}"]`);
+
+test("an ended subscription is revoked by its delegation and the token approval remains", async ({
+  page,
+}) => {
+  const provider = await browserProvider(page, "success", "ended");
+  await connectAndReview(page);
+  await expect(card(page, technical.id).getByRole("button", { name: "Revoke", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toContainText(
+    "Subscription delegation closed, rent returned to you; the token approval to the subscription authority remains",
+  );
+  await page.getByRole("button", { name: "Confirm in wallet" }).click();
+  await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toBeVisible();
+  await expect(card(page, derived.id)).toHaveCount(0);
+  await expect(card(page, technical.id)).toHaveCount(1);
+  expect(provider.counts()).toEqual({ sends: 1, polls: 2, observes: 1 });
+});
+
+test("an active subscription and its technical approval offer no revoke", async ({ page }) => {
+  await browserProvider(page, "success", "active");
+  await page.goto("/app");
+  await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+  await expect(card(page, derived.id)).toBeVisible();
+  await expect(card(page, technical.id)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Revoke", exact: true })).toHaveCount(0);
+});
+
+test("a subscription simulation that changes the grant instead of removing it is refused", async ({
+  page,
+}) => {
+  const provider = await browserProvider(page, "cancelled", "ended");
+  await connectAndReview(page);
+  await expect(page.getByRole("heading", { name: "Not submitted", exact: true })).toBeVisible();
+  await expect(page.locator("#action-result")).toContainText(
+    "Simulation does not match the permission under review.",
+  );
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  expect(provider.counts().sends).toBe(0);
+});

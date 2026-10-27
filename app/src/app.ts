@@ -28,6 +28,7 @@ import {
   mintOf,
   permissionLabel,
   principalLabel,
+  publicKey,
   readJson,
   KINDS,
   meaning,
@@ -319,16 +320,18 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string, scope
   button.onclick = () => toggleDetail(row, button, grant);
   actions.append(button);
   row.append(facts, actions);
+  const protocol = text(object(grant.native_context).protocol);
   if (
     control &&
     scope &&
     connected &&
     object(view.observation).origin === "finalized" &&
     grant.observability === "exact" &&
-    ["spl-token", "token-2022"].includes(text(object(grant.native_context).protocol)) &&
     grant.capability === "spend" &&
-    object(grant.authority_kind).kind === "direct" &&
-    object(grant.lifecycle).kind === "active" &&
+    ((["spl-token", "token-2022"].includes(protocol) &&
+      object(grant.authority_kind).kind === "direct" &&
+      object(grant.lifecycle).kind === "active") ||
+      (protocol === "subscriptions" && ended(grant, view) && revokeKey(grant) !== undefined)) &&
     object(grant.subject).kind === "identity" &&
     object(grant.subject).value === connected.account.address
   ) {
@@ -352,6 +355,39 @@ function card(grant: ObjectValue, view: ObjectValue, availability: string, scope
       actions.append(node("span", `Only wallet ${short(owner)} can revoke this.`, "muted"));
   }
   return row;
+}
+
+const SUBSCRIPTIONS = "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44";
+
+// A subscription grant whose cancellation has taken effect at this observation. Only then does the
+// program close its delegation; an active subscription can only be cancelled, and the technical
+// approval it rests on is direct and never closed here.
+function ended(grant: ObjectValue, view: ObjectValue): boolean {
+  const lifecycle = object(grant.lifecycle);
+  const now = object(view.observation).unix_timestamp;
+  return (
+    object(grant.authority_kind).kind === "derived" &&
+    lifecycle.kind === "active" &&
+    lifecycle.valid_until != null &&
+    now != null &&
+    integer(lifecycle.valid_until) <= integer(now)
+  );
+}
+
+// The account a revoke is keyed by: the token account for SPL, and for Subscriptions the
+// delegation named in the grant id `<program>:<delegation>:<init id>:spend`, never the shared
+// token account.
+function revokeKey(grant: ObjectValue): string | undefined {
+  if (text(object(grant.native_context).protocol) !== "subscriptions") return text(object(grant.resource).id);
+  const [program, delegation, init, capability, ...rest] = text(grant.id).split(":");
+  return program === SUBSCRIPTIONS &&
+    delegation !== undefined &&
+    isAddress(delegation) &&
+    /^-?\d+$/.test(init ?? "") &&
+    capability === "spend" &&
+    rest.length === 0
+    ? delegation
+    : undefined;
 }
 
 // Who holds the permission, named from what the chain says the key is.
@@ -413,6 +449,9 @@ async function addressKind(
   return { kind: text(wallet.kind), wallet };
 }
 
+// A pasted subscription delegation's grants are read through the token account it draws from.
+const drawsFrom = new Map<string, string>();
+
 async function scan(historical = false, refresh = false) {
   invalidateReview();
   request?.abort();
@@ -432,6 +471,7 @@ async function scan(historical = false, refresh = false) {
     const scenario = currentScenario();
     const live = scenario.live;
     compareTab(!live);
+    let subscription = false;
     // On a public cluster a pasted wallet is read like a connected one, without signing rights.
     if (live && control?.network !== "localnet") {
       const found = await addressKind(address, signal);
@@ -443,7 +483,9 @@ async function scan(historical = false, refresh = false) {
         other:
           "This address is owned by a program, not a wallet or an SPL Token account. Paste a wallet address or one of its token accounts.",
       };
-      if (kind === undefined || refused[kind]) {
+      // A Subscriptions account is observed; the runtime reads it only as a subscription delegation.
+      subscription = kind === "other" && found!.wallet!.program === SUBSCRIPTIONS;
+      if (kind === undefined || (refused[kind] && !subscription)) {
         scanButton.disabled = false;
         status(
           kind ? refused[kind]! : "The RPC did not answer. It may be rate limiting; try again in a minute.",
@@ -467,7 +509,15 @@ async function scan(historical = false, refresh = false) {
         body: JSON.stringify({ source: address }),
         signal,
       });
-      scenario.scope = text(object(await result(observed)).scope_id);
+      const observation = object(await result(observed));
+      scenario.scope = text(observation.scope_id);
+      if (subscription) {
+        const target = array(object(object(observation.record).snapshot).targets)
+          .map(object)
+          .find((target) => target.kind === "subscription" && publicKey(target.delegation) === address);
+        if (!target) throw new Error("This Subscriptions account is not a subscription delegation.");
+        drawsFrom.set(address, publicKey(target.source));
+      }
     }
     badge(live ? network().label : "Recorded native evidence", live);
     document.querySelector(".scope-note")!.textContent = live
@@ -475,7 +525,7 @@ async function scan(historical = false, refresh = false) {
       : "Read from accounts captured in executed native tests. Coverage is partial.";
     const path = historical
       ? `snapshots/${scenario.snapshots[0]!.id}/authorizations/${address}`
-      : `scopes/${scenario.scope}/effective/${address}`;
+      : `scopes/${scenario.scope}/effective/${drawsFrom.get(address) ?? address}`;
     const view = object(await get(path, signal));
     if (view.arm_schema_version !== "0.1")
       throw new Error("Unsupported ARM schema. Permission interpretation is unavailable.");
@@ -1520,21 +1570,24 @@ async function prepare(scanned: ObjectValue, scope: string) {
   const session = connected;
   const config = control;
   const source = text(object(scanned.resource).id);
+  const subscription = text(object(scanned.native_context).protocol) === "subscriptions";
+  const key = revokeKey(scanned);
   stage.dataset.target = text(scanned.id);
   draw();
   sendRequested = false;
   try {
     setAction("PREPARING", "Observing the current finalized state...");
+    if (!key) throw new Error("This permission has no account Velon can revoke it by.");
     if (batchScopes.has(scope)) {
       const observed = await call("/api/live/spl/observe", {
         method: "POST",
         headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
-        body: JSON.stringify({ source }),
+        body: JSON.stringify({ source: key }),
         signal,
       });
       scope = text(object(await result(observed)).scope_id);
     }
-    const response = await action(`scopes/${scope}/actions/revoke/${source}`, signal);
+    const response = await action(`scopes/${scope}/actions/revoke/${key}`, signal);
     if (response.status === 409)
       throw new Error("The finalized state moved during simulation. Nothing was signed; try again.");
     const simulated = await result(response);
@@ -1547,7 +1600,7 @@ async function prepare(scanned: ObjectValue, scope: string) {
     if (!grant || writeJson(semantic(grant)) !== writeJson(semantic(scanned)))
       throw new Error("This permission changed after the scan. Scan and review again.");
     const stateVersion = text(view.state_version);
-    const path = `snapshots/${stateVersion}/actions/revoke/${source}/verify`;
+    const path = `snapshots/${stateVersion}/actions/revoke/${key}/verify`;
     const prepared = reviewRevoke(simulated, view, grant, session.account.address, config);
     setAction("SIMULATED", "Review what your wallet will sign.");
     const title = node("h2", "You are removing");
@@ -1577,7 +1630,12 @@ async function prepare(scanned: ObjectValue, scope: string) {
       field("Limit", allowance(source, integer(object(grant.usage).remaining), mintOf(grant))),
       field("Native system", system(grant)),
       field("Network", network().label),
-      field("Executed by Velon", "Delegate and allowance cleared, nothing else changed"),
+      field(
+        "Executed by Velon",
+        subscription
+          ? "Subscription delegation closed, rent returned to you; the token approval to the subscription authority remains"
+          : "Delegate and allowance cleared, nothing else changed",
+      ),
       field("Deployment", "Verified"),
     );
     const confirm = node("button", "Confirm in wallet", "action-button");
@@ -1667,7 +1725,7 @@ async function prepare(scanned: ObjectValue, scope: string) {
             id: checked.id,
             signature: sent.signature,
             slot: String(checked.slot),
-            source,
+            source: key,
             network: config.network,
             at: new Date().toISOString(),
           });

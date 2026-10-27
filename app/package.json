@@ -13,7 +13,8 @@
     "test:live": "playwright test --config playwright.live.config.ts",
     "export": "bun run build && bun scripts/export.ts",
     "local": "bun scripts/local.ts",
-    "local:reset": "bun scripts/reset.ts"
+    "local:reset": "bun scripts/reset.ts",
+    "devnet:subscription": "bun scripts/devnet-subscription.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "5.3.0",

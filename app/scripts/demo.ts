@@ -1,6 +1,12 @@
 import { resolve } from "node:path";
 import { mkdir, rename, unlink } from "node:fs/promises";
-import { getAddressEncoder, getProgramDerivedAddress, isAddress, type Address } from "@solana/addresses";
+import {
+  getAddressDecoder,
+  getAddressEncoder,
+  getProgramDerivedAddress,
+  isAddress,
+  type Address,
+} from "@solana/addresses";
 import {
   array,
   grants,
@@ -13,7 +19,7 @@ import {
   type Json,
 } from "../src/wire.ts";
 import { DEVNET_GENESIS, MAINNET_GENESIS, type Control } from "../src/control.ts";
-import { tokenCatalog, tokenCatalogAsync } from "./catalog.ts";
+import { SUBSCRIPTIONS_PROGRAM, TOKEN_PROGRAM, tokenCatalog, tokenCatalogAsync } from "./catalog.ts";
 import type { Live } from "../src/server.ts";
 
 const root = resolve(import.meta.dir, "..");
@@ -164,7 +170,19 @@ if (process.env.RPC_URL) {
   if (!verified)
     throw new Error(`LIVE_CATALOG has no SPL Token deployment with runtime evidence for cluster ${cluster}.`);
   control = { rpcUrl: rpcUrl.href, network, cluster };
-  const bytes = (address: string) => Array.from(getAddressEncoder().encode(address as Address));
+  const encoder = getAddressEncoder();
+  const decoder = getAddressDecoder();
+  const bytes = (address: string) => Array.from(encoder.encode(address as Address));
+  const ASSOCIATED_TOKEN = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+  const NONE = "11111111111111111111111111111111";
+  // Subscriptions accounts have no RPC parser, so jsonParsed returns their bytes in base64.
+  const subscriptionData = (info: Json | undefined) => {
+    if (info == null) return undefined;
+    const { owner, data } = object(info);
+    return owner === SUBSCRIPTIONS_PROGRAM && Array.isArray(data) && data[1] === "base64"
+      ? Uint8Array.from(atob(text(data[0])), (c) => c.charCodeAt(0))
+      : undefined;
+  };
   // A batch of accounts is one observation: the runtime starts and checks the program once.
   const observe: Live["observe"] = async (sources) => {
     try {
@@ -179,11 +197,60 @@ if (process.env.RPC_URL) {
       const witnesses: string[] = [];
       const targets: Json[] = [];
       const mints = new Set<string>();
+      // A SubscriptionDelegation is discriminator 4, version 1 and bump, then delegator, plan and payer.
+      const delegations = new Map<string, { delegator: Address; plan: Address; payer: Address }>();
+      sources.forEach((source, index) => {
+        const data = subscriptionData(infos[index]);
+        if (data?.length === 155 && data[0] === 4 && data[1] === 1)
+          delegations.set(source, {
+            delegator: decoder.decode(data, 3),
+            plan: decoder.decode(data, 35),
+            payer: decoder.decode(data, 67),
+          });
+      });
+      // Its plan names the mint, the merchant and the pullers. Anything else stays a plain target,
+      // which the runtime refuses rather than guesses.
+      const subscriptions = new Map<string, Json>();
+      if (delegations.size) {
+        const plans = [...new Set([...delegations.values()].map(({ plan }) => plan))];
+        const accounts = await parsedAccounts(plans);
+        for (const [delegation, { delegator, plan, payer }] of delegations) {
+          const data = subscriptionData(accounts[plans.indexOf(plan)]);
+          // A Plan is discriminator 1, owner, bump, status, then plan_id, mint, terms, end,
+          // four destinations and four pullers.
+          if (data?.length !== 491 || data[0] !== 1) continue;
+          const mint = decoder.decode(data, 43);
+          const pullers = [0, 1, 2, 3].map((index) => decoder.decode(data, 235 + index * 32));
+          const [[authority], [source]] = await Promise.all([
+            getProgramDerivedAddress({
+              programAddress: SUBSCRIPTIONS_PROGRAM as Address,
+              seeds: ["SubscriptionAuthority", encoder.encode(delegator), encoder.encode(mint)],
+            }),
+            getProgramDerivedAddress({
+              programAddress: ASSOCIATED_TOKEN as Address,
+              seeds: [
+                encoder.encode(delegator),
+                encoder.encode(TOKEN_PROGRAM as Address),
+                encoder.encode(mint),
+              ],
+            }),
+          ]);
+          subscriptions.set(delegation, {
+            kind: "subscription",
+            delegation: bytes(delegation),
+            authority: bytes(authority),
+            source: bytes(source),
+            mint: bytes(mint),
+            plan: bytes(plan),
+          });
+          witnesses.push(delegator, payer, decoder.decode(data, 1), ...pullers.filter((key) => key !== NONE));
+        }
+      }
       sources.forEach((source, index) => {
         const info = infos[index] ?? null;
         const data = info === null ? null : object(info).data;
         const program = data !== null && !Array.isArray(data) ? object(data).program : undefined;
-        let target: Json = { kind: "spl_delegate", source: bytes(source) };
+        let target: Json = subscriptions.get(source) ?? { kind: "spl_delegate", source: bytes(source) };
         if (program === "spl-token" || program === "spl-token-2022") {
           const token = object(object(object(data!).parsed).info);
           for (const key of [token.owner, token.delegate])
@@ -392,7 +459,6 @@ if (process.env.RPC_URL) {
   type Named = { name: string; symbol: string; image: string | null };
   const named = new Map<string, { at: number; value: Named | null }>();
   const METAPLEX = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s";
-  const encoder = getAddressEncoder();
   const clean = (value: string, limit: number) =>
     value
       .replace(/\0/g, "")
@@ -649,7 +715,7 @@ if (process.env.RPC_URL) {
     }
   }
   const example = process.env.LIVE_SOURCE;
-  if (example && !isAddress(example)) throw new Error("LIVE_SOURCE must be a token account address.");
+  if (example && !isAddress(example)) throw new Error("LIVE_SOURCE must be an account address.");
   scenarios.push({
     name: {
       mainnet: "Mainnet SPL token account",
