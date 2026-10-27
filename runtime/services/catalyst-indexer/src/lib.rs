@@ -263,18 +263,94 @@ fn spl_state(snapshot: &Snapshot, source: Pubkey) -> Result<spl::State, sdk::Err
     Ok(state)
 }
 
-fn compile(snapshot: &Snapshot, catalog: &Catalog, id: &str) -> (Vec<ProgramVersion>, Projection) {
-    let accounts: BTreeMap<_, _> = snapshot
-        .accounts
+/// The Subscriptions context and the SPL Token context its grants spend through. Both deployments
+/// must resolve, verify and be supported; an unsupported version of either takes precedence.
+pub(crate) fn subscription_contexts(
+    snapshot: &Snapshot,
+    catalog: &Catalog,
+    id: &str,
+    versions: &mut Vec<ProgramVersion>,
+) -> Result<(Context, Context), sdk::Error> {
+    let adapter = subscriptions::DelegationAdapter;
+    let grant_context = context(
+        adapter.protocol().program_id,
+        snapshot,
+        catalog,
+        id,
+        versions,
+    );
+    let token_adapter = spl::DelegateAdapter;
+    let token_context = context(
+        token_adapter.protocol().program_id,
+        snapshot,
+        catalog,
+        id,
+        versions,
+    );
+    if [&grant_context, &token_context]
         .iter()
-        .map(|(key, value)| (*key, value))
-        .collect();
+        .any(|result| matches!(result, Err(sdk::Error::UnsupportedVersion)))
+    {
+        return Err(sdk::Error::UnsupportedVersion);
+    }
+    let grant_context = grant_context?;
+    let token_context = token_context?;
+    if !adapter.supports(&grant_context.native) {
+        return Err(sdk::Error::UnsupportedVersion);
+    }
+    if !token_adapter.supports(&token_context.native) {
+        return Err(sdk::Error::UnsupportedVersion);
+    }
+    Ok((grant_context, token_context))
+}
+
+/// The grant, its authority, the token account it spends, the mint and every key the adapter
+/// needs to name, from one batch.
+pub(crate) fn subscription_state(
+    snapshot: &Snapshot,
+    delegation: Pubkey,
+    authority: Pubkey,
+    source: Pubkey,
+    mint: Pubkey,
+    plan: Option<Pubkey>,
+    token_program_version: String,
+) -> Result<subscriptions::DelegationState, sdk::Error> {
     let account = |key: Pubkey| {
-        accounts
-            .get(&key)
-            .map(|value| (*value).clone())
+        snapshot
+            .accounts
+            .iter()
+            .find(|(address, _)| *address == key)
+            .map(|(_, account)| account.clone())
             .ok_or(sdk::Error::InsufficientEvidence)
     };
+    let mut state = subscriptions::DelegationState {
+        delegation: (delegation, account(delegation)?),
+        authority: (authority, account(authority)?),
+        source: spl::AuthorityState {
+            address: source,
+            account: account(source)?,
+            authorities: Vec::new(),
+        },
+        mint: (mint, account(mint)?),
+        plan: plan
+            .map(|key| account(key).map(|value| (key, value)))
+            .transpose()?,
+        token_program_version,
+        unix_timestamp: Some(snapshot.observation.unix_timestamp),
+    };
+    for required in subscriptions::DelegationAdapter
+        .source_requirements(&state)
+        .accounts
+    {
+        state
+            .source
+            .authorities
+            .push((required, account(required)?));
+    }
+    Ok(state)
+}
+
+fn compile(snapshot: &Snapshot, catalog: &Catalog, id: &str) -> (Vec<ProgramVersion>, Projection) {
     let mut versions = Vec::new();
     let result = (|| {
         let mut authorizations = BTreeMap::new();
@@ -317,58 +393,18 @@ fn compile(snapshot: &Snapshot, catalog: &Catalog, id: &str) -> (Vec<ProgramVers
                     mint,
                     plan,
                 } => {
-                    let adapter = subscriptions::DelegationAdapter;
-                    let grant_context = context(
-                        adapter.protocol().program_id,
+                    let (grant_context, token_context) =
+                        subscription_contexts(snapshot, catalog, id, &mut versions)?;
+                    let state = subscription_state(
                         snapshot,
-                        catalog,
-                        id,
-                        &mut versions,
-                    );
-                    let token_adapter = spl::DelegateAdapter;
-                    let token_context = context(
-                        token_adapter.protocol().program_id,
-                        snapshot,
-                        catalog,
-                        id,
-                        &mut versions,
-                    );
-                    if [&grant_context, &token_context]
-                        .iter()
-                        .any(|result| matches!(result, Err(sdk::Error::UnsupportedVersion)))
-                    {
-                        return Err(sdk::Error::UnsupportedVersion);
-                    }
-                    let grant_context = grant_context?;
-                    let token_context = token_context?;
-                    if !adapter.supports(&grant_context.native) {
-                        return Err(sdk::Error::UnsupportedVersion);
-                    }
-                    if !token_adapter.supports(&token_context.native) {
-                        return Err(sdk::Error::UnsupportedVersion);
-                    }
-                    let mut state = subscriptions::DelegationState {
-                        delegation: (*delegation, account(*delegation)?),
-                        authority: (*authority, account(*authority)?),
-                        source: spl::AuthorityState {
-                            address: *source,
-                            account: account(*source)?,
-                            authorities: Vec::new(),
-                        },
-                        mint: (*mint, account(*mint)?),
-                        plan: plan
-                            .map(|key| account(key).map(|value| (key, value)))
-                            .transpose()?,
-                        token_program_version: token_context.native.program_version,
-                        unix_timestamp: Some(snapshot.observation.unix_timestamp),
-                    };
-                    for required in adapter.source_requirements(&state).accounts {
-                        state
-                            .source
-                            .authorities
-                            .push((required, account(required)?));
-                    }
-                    sdk::compile_state(&adapter, &state, &grant_context)?
+                        *delegation,
+                        *authority,
+                        *source,
+                        *mint,
+                        *plan,
+                        token_context.native.program_version,
+                    )?;
+                    sdk::compile_state(&subscriptions::DelegationAdapter, &state, &grant_context)?
                 }
             };
             for authorization in compiled {

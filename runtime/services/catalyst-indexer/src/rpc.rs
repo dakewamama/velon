@@ -1,5 +1,5 @@
 use crate::{Coverage, Error, Journal, Observation, Origin, Record, Snapshot, Target};
-use arm::AuthorizationChange;
+use arm::{AuthorityKind, AuthorizationChange};
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -8,7 +8,9 @@ use axum::{
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 use cataloger::{Catalog, ProgramVersion};
-use catalyst_sdk::{self as sdk, Adapter, Error as AdapterError, spl, subscriptions, token2022};
+use catalyst_sdk::{
+    self as sdk, ActionKind, Adapter, Error as AdapterError, spl, subscriptions, token2022,
+};
 use mollusk_svm::{Mollusk, program::ProgramCache};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -314,14 +316,14 @@ pub async fn simulate_revoke(
     {
         return Err(Error::Conflict);
     }
-    let context = token.context(&record, snapshot)?;
-    let action = token.action(snapshot, &context, source)?;
-    let before = source_data(snapshot, source)?.to_vec();
-    let owner = owner_of(&before)?;
-    let transaction = revoke_transaction(&action, owner);
-    let keys = [source, owner, sysvar::clock::id()];
+    let (context, token_version) = token.context(snapshot, &record.versions, &record.id)?;
+    let action = token.action(snapshot, (&context, &token_version), source)?;
+    let payer = token.payer(snapshot, source, &action)?;
+    let transaction = revoke_transaction(&action, payer);
+    let mut keys = execution_keys(&action);
     // Revoke runs in the observed bank itself, so no provider bank has to coincide with it.
-    let executed = execute_revoke(snapshot, &action, &keys[..2], token.program())?;
+    let executed = execute_revoke(snapshot, &action, &keys, token.program())?;
+    keys.push(sysvar::clock::id());
     let config = RpcSimulateTransactionConfig {
         sig_verify: false,
         replace_recent_blockhash: true,
@@ -367,7 +369,8 @@ pub async fn simulate_revoke(
                 }
                 account
             }
-            None if key == source => {
+            // A closed delegation is absent; a token account never is.
+            None if key == source && !matches!(token, Token::Subscription { .. }) => {
                 return Err(Error::InvalidObservation("missing simulated source"));
             }
             None => Account::default(),
@@ -377,17 +380,31 @@ pub async fn simulate_revoke(
     clock(&simulated, response.context.slot)
         .map_err(|_| Error::InvalidObservation("simulation/context slot mismatch"))?;
     let mut after = snapshot.clone();
-    for (key, account) in executed {
+    for (key, account) in &executed {
         let entry = after
             .accounts
             .iter_mut()
-            .find(|(address, _)| *address == key)
+            .find(|(address, _)| address == key)
             .ok_or(AdapterError::InsufficientEvidence)?;
-        entry.1 = account;
+        entry.1 = account.clone();
     }
-    // The delegate projection omits owner authority; require Revoke's full token-data change.
-    let expected = revoked(&before, token)?;
-    if source_data(&after, source)? != expected.as_slice() || simulated[0].1.data != expected {
+    let agrees = match token {
+        Token::Spl | Token::Token2022 { .. } => {
+            // The delegate projection omits owner authority; require Revoke's full token-data change.
+            let expected = revoked(source_data(snapshot, source)?, token)?;
+            source_data(&after, source)? == expected.as_slice() && simulated[0].1.data == expected
+        }
+        Token::Subscription { .. } => {
+            // The provider's later bank must match every account but the fee payer's exactly.
+            let expected = closed(snapshot, &action)?;
+            executed == expected
+                && expected
+                    .iter()
+                    .zip(&simulated)
+                    .all(|((key, account), (_, simulated))| *key == payer || account == simulated)
+        }
+    };
+    if !agrees {
         return Err(AdapterError::DiffMismatch.into());
     }
     let simulation_id = format!(
@@ -408,7 +425,12 @@ pub async fn simulate_revoke(
         "{}:execution:{}",
         snapshot.observation.cluster, snapshot.observation.slot
     );
-    let changes = token.changes(&action, (snapshot, &context), (&after, &observed), source)?;
+    let changes = token.changes(
+        &action,
+        (snapshot, &context, &token_version),
+        (&after, &observed, &token_version),
+        source,
+    )?;
     let replacement = response
         .value
         .replacement_blockhash
@@ -458,25 +480,29 @@ pub async fn simulate_revoke(
     })
 }
 
-/// The token program a revocable target belongs to. A Token-2022 account's first 165 bytes use
+/// The program a revocable target belongs to. A Token-2022 account's first 165 bytes use
 /// SPL Token's account layout, so the base fields read and change the same way for both.
+/// A subscription grant is keyed by its delegation account, which RevokeDelegation closes.
 #[derive(Clone, Copy)]
 enum Token {
     Spl,
-    Token2022 { mint: Pubkey },
+    Token2022 {
+        mint: Pubkey,
+    },
+    Subscription {
+        delegation: Pubkey,
+        authority: Pubkey,
+        source: Pubkey,
+        mint: Pubkey,
+        plan: Option<Pubkey>,
+    },
 }
 
 impl Token {
     /// The snapshot's single revocable target, which must name `source`.
     fn of(targets: &[Target], source: Pubkey) -> Result<Self, Error> {
-        match targets {
-            [Target::SplDelegate { source: target }] if *target == source => Ok(Self::Spl),
-            [
-                Target::Token2022Delegate {
-                    source: target,
-                    mint,
-                },
-            ] if *target == source => Ok(Self::Token2022 { mint: *mint }),
+        match Self::source(targets)? {
+            (key, token) if key == source => Ok(token),
             _ => Err(AdapterError::UnsupportedOperation.into()),
         }
     }
@@ -487,6 +513,24 @@ impl Token {
             [Target::Token2022Delegate { source, mint }] => {
                 Ok((*source, Self::Token2022 { mint: *mint }))
             }
+            [
+                Target::Subscription {
+                    delegation,
+                    authority,
+                    source,
+                    mint,
+                    plan,
+                },
+            ] => Ok((
+                *delegation,
+                Self::Subscription {
+                    delegation: *delegation,
+                    authority: *authority,
+                    source: *source,
+                    mint: *mint,
+                    plan: *plan,
+                },
+            )),
             _ => Err(AdapterError::UnsupportedOperation.into()),
         }
     }
@@ -495,25 +539,35 @@ impl Token {
         match self {
             Self::Spl => spl::DelegateAdapter.protocol().program_id,
             Self::Token2022 { .. } => token2022::Token2022Adapter.protocol().program_id,
+            Self::Subscription { .. } => subscriptions::DelegationAdapter.protocol().program_id,
         }
     }
 
-    fn context(self, record: &Record, snapshot: &Snapshot) -> Result<sdk::Context, Error> {
-        let catalog = Catalog::new(record.versions.clone()).map_err(|_| Error::ReplayMismatch)?;
-        Ok(crate::context(
-            self.program(),
-            snapshot,
-            &catalog,
-            &record.id,
-            &mut Vec::new(),
-        )?)
+    /// The target program's context and the version of the token program it spends through,
+    /// both resolved from the reviewed catalog. A subscription verifies both deployments.
+    fn context(
+        self,
+        snapshot: &Snapshot,
+        versions: &[ProgramVersion],
+        id: &str,
+    ) -> Result<(sdk::Context, String), Error> {
+        let catalog = Catalog::new(versions.to_vec()).map_err(|_| Error::ReplayMismatch)?;
+        if let Self::Subscription { .. } = self {
+            let (context, token) =
+                crate::subscription_contexts(snapshot, &catalog, id, &mut Vec::new())?;
+            return Ok((context, token.native.program_version));
+        }
+        let context = crate::context(self.program(), snapshot, &catalog, id, &mut Vec::new())?;
+        let version = context.native.program_version.clone();
+        Ok((context, version))
     }
 
-    /// The owner-signed Revoke of the account's delegate.
+    /// The owner-signed Revoke of the account's delegate, or the delegator-signed
+    /// RevokeDelegation of an ended subscription.
     fn action(
         self,
         snapshot: &Snapshot,
-        context: &sdk::Context,
+        (context, token_version): (&sdk::Context, &str),
         source: Pubkey,
     ) -> Result<sdk::Action, Error> {
         match self {
@@ -539,6 +593,73 @@ impl Token {
                 // Actions list the owner's revoke first, then the delegate's own.
                 Ok(sdk::actions(&adapter, &authorization, &state, context)?.remove(0))
             }
+            Self::Subscription { delegation, .. } => {
+                let adapter = subscriptions::DelegationAdapter;
+                let state = self.state(snapshot, token_version)?;
+                let authorization = sdk::compile_state(&adapter, &state, context)?
+                    .into_iter()
+                    .find(|authorization| {
+                        matches!(authorization.authority_kind, AuthorityKind::Derived { .. })
+                    })
+                    .ok_or(Error::NotFound)?;
+                // An active or not yet ended subscription can only be cancelled, which keeps
+                // the grant; only an ended one closes.
+                let action = sdk::actions(&adapter, &authorization, &state, context)?
+                    .into_iter()
+                    .find(|action| action.kind == ActionKind::Revoke)
+                    .ok_or(AdapterError::UnsupportedOperation)?;
+                match action.instructions.as_slice() {
+                    [instruction]
+                        if instruction.program_id == self.program()
+                            && instruction.data == [REVOKE_DELEGATION]
+                            && instruction.accounts.len() >= 2
+                            && instruction.accounts[0].is_signer
+                            && instruction.accounts[1].pubkey == delegation =>
+                    {
+                        Ok(action)
+                    }
+                    _ => Err(AdapterError::DiffMismatch.into()),
+                }
+            }
+        }
+    }
+
+    fn state(
+        self,
+        snapshot: &Snapshot,
+        token_version: &str,
+    ) -> Result<subscriptions::DelegationState, Error> {
+        let Self::Subscription {
+            delegation,
+            authority,
+            source,
+            mint,
+            plan,
+        } = self
+        else {
+            return Err(AdapterError::UnsupportedOperation.into());
+        };
+        Ok(crate::subscription_state(
+            snapshot,
+            delegation,
+            authority,
+            source,
+            mint,
+            plan,
+            token_version.into(),
+        )?)
+    }
+
+    /// The transaction's fee payer and only signer: the token account's owner, or the delegator.
+    fn payer(
+        self,
+        snapshot: &Snapshot,
+        source: Pubkey,
+        action: &sdk::Action,
+    ) -> Result<Pubkey, Error> {
+        match self {
+            Self::Spl | Self::Token2022 { .. } => owner_of(source_data(snapshot, source)?),
+            Self::Subscription { .. } => Ok(action.instructions[0].accounts[0].pubkey),
         }
     }
 
@@ -546,8 +667,8 @@ impl Token {
     fn changes(
         self,
         action: &sdk::Action,
-        before: (&Snapshot, &sdk::Context),
-        after: (&Snapshot, &sdk::Context),
+        before: (&Snapshot, &sdk::Context, &str),
+        after: (&Snapshot, &sdk::Context, &str),
         source: Pubkey,
     ) -> Result<Vec<AuthorizationChange>, Error> {
         Ok(match self {
@@ -567,18 +688,93 @@ impl Token {
                 &crate::token2022_state(after.0, source, mint)?,
                 after.1,
             )?,
+            Self::Subscription { .. } => sdk::verify_transaction_diff(
+                &subscriptions::DelegationAdapter,
+                &action.instructions,
+                &self.state(before.0, before.2)?,
+                before.1,
+                &self.state(after.0, after.2)?,
+                after.1,
+            )?,
         })
+    }
+
+    /// The state Revoke must leave: SPL Token and Token-2022 clear the account's delegate, while
+    /// RevokeDelegation closes the delegation account.
+    fn check_revoked(
+        self,
+        before: &Snapshot,
+        after: &Snapshot,
+        source: Pubkey,
+    ) -> Result<(), Error> {
+        let cleared = match self {
+            Self::Spl | Self::Token2022 { .. } => {
+                source_data(after, source)? == revoked(source_data(before, source)?, self)?
+            }
+            Self::Subscription { delegation, .. } => {
+                *account(after, delegation)? == Account::default()
+            }
+        };
+        if !cleared {
+            return Err(AdapterError::DiffMismatch.into());
+        }
+        Ok(())
     }
 }
 
-fn source_data(snapshot: &Snapshot, source: Pubkey) -> Result<&[u8], Error> {
+/// RevokeDelegation's discriminator in the pinned Subscriptions program.
+const REVOKE_DELEGATION: u8 = 3;
+
+/// The accounts the reviewed instruction names, in order. Revoke reads nothing else.
+fn execution_keys(action: &sdk::Action) -> Vec<Pubkey> {
+    action
+        .instructions
+        .iter()
+        .flat_map(|instruction| instruction.accounts.iter().map(|meta| meta.pubkey))
+        .collect()
+}
+
+/// The accounts after RevokeDelegation: the delegation closed and its lamports credited to the
+/// rent recipient, the sponsoring payer if named and otherwise the delegator. Nothing else
+/// changes.
+fn closed(snapshot: &Snapshot, action: &sdk::Action) -> Result<Vec<(Pubkey, Account)>, Error> {
+    let [instruction] = action.instructions.as_slice() else {
+        return Err(AdapterError::DiffMismatch.into());
+    };
+    let delegation = instruction.accounts[1].pubkey;
+    let recipient = instruction.accounts[2..]
+        .iter()
+        .find(|meta| meta.is_writable)
+        .unwrap_or(&instruction.accounts[0])
+        .pubkey;
+    let rent = account(snapshot, delegation)?.lamports;
+    let mut accounts = Vec::new();
+    for key in execution_keys(action) {
+        let mut account = account(snapshot, key)?.clone();
+        if key == delegation {
+            account = Account::default();
+        } else if key == recipient {
+            account.lamports = account
+                .lamports
+                .checked_add(rent)
+                .ok_or(AdapterError::InvalidState("rent recipient lamports".into()))?;
+        }
+        accounts.push((key, account));
+    }
+    Ok(accounts)
+}
+
+fn account(snapshot: &Snapshot, key: Pubkey) -> Result<&Account, Error> {
     Ok(&snapshot
         .accounts
         .iter()
-        .find(|(key, _)| *key == source)
+        .find(|(address, _)| *address == key)
         .ok_or(AdapterError::InsufficientEvidence)?
-        .1
-        .data)
+        .1)
+}
+
+fn source_data(snapshot: &Snapshot, source: Pubkey) -> Result<&[u8], Error> {
+    Ok(&account(snapshot, source)?.data)
 }
 
 fn owner_of(data: &[u8]) -> Result<Pubkey, Error> {
@@ -796,14 +992,14 @@ fn checked_revoke(
     signed
         .verify()
         .map_err(|_| Error::InvalidObservation("invalid transaction signature"))?;
-    let context = token.context(record, snapshot)?;
-    let action = token.action(snapshot, &context, source)?;
-    let owner = owner_of(source_data(snapshot, source)?)?;
+    let (context, token_version) = token.context(snapshot, &record.versions, &record.id)?;
+    let action = token.action(snapshot, (&context, &token_version), source)?;
+    let payer = token.payer(snapshot, source, &action)?;
     // Earlier receipts contain only Revoke; both historical formats remain exact.
     let mut expected = if signed.message.instructions.len() == 1 {
-        Transaction::new_with_payer(&action.instructions, Some(&owner))
+        Transaction::new_with_payer(&action.instructions, Some(&payer))
     } else {
-        revoke_transaction(&action, owner)
+        revoke_transaction(&action, payer)
     };
     expected.message.recent_blockhash = signed.message.recent_blockhash;
     if signed.message != expected.message {
@@ -854,23 +1050,14 @@ fn revoke_changes(
         return Err(Error::InvalidObservation("revoke observation mismatch"));
     }
     let (source, token) = Token::source(&snapshot.targets)?;
-    let context = token.context(record, snapshot)?;
+    let (context, token_version) = token.context(snapshot, &record.versions, &record.id)?;
     // The later observation is checked against the catalog the revoke was reviewed with.
-    let catalog = Catalog::new(record.versions.clone()).map_err(|_| Error::ReplayMismatch)?;
-    let after_context = crate::context(
-        token.program(),
-        after,
-        &catalog,
-        &observation.id,
-        &mut Vec::new(),
-    )?;
-    if source_data(after, source)? != revoked(source_data(snapshot, source)?, token)?.as_slice() {
-        return Err(AdapterError::DiffMismatch.into());
-    }
+    let (after_context, after_version) = token.context(after, &record.versions, &observation.id)?;
+    token.check_revoked(snapshot, after, source)?;
     token.changes(
         action,
-        (snapshot, &context),
-        (after, &after_context),
+        (snapshot, &context, &token_version),
+        (after, &after_context, &after_version),
         source,
     )
 }
@@ -994,7 +1181,7 @@ async fn current_revoke(
     let source = source.parse().map_err(|_| {
         (
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Invalid token account address"})),
+            Json(serde_json::json!({"error": "Invalid account address"})),
         )
     })?;
     simulate_current_revoke(&client, &journal, &scope_id, source)
@@ -1017,7 +1204,7 @@ async fn verify(
     let source = source.parse().map_err(|_| {
         (
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Invalid token account address"})),
+            Json(serde_json::json!({"error": "Invalid account address"})),
         )
     })?;
     verify_revoke(&client, &journal, &id, source, &request.signed_transaction)
@@ -1033,7 +1220,7 @@ async fn revoke(
     let source = source.parse().map_err(|_| {
         (
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Invalid token account address"})),
+            Json(serde_json::json!({"error": "Invalid account address"})),
         )
     })?;
     simulate_revoke(&client, &journal, &id, source)
