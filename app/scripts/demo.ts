@@ -285,14 +285,17 @@ if (process.env.RPC_URL) {
           min_context_slot: null,
         }),
       );
-      // A node occasionally answers with mismatched bank data; the collector refuses it, so ask again.
+      // A load-balanced provider occasionally answers from mismatched banks; the collector refuses
+      // that, so ask again after a short pause. Each answer is still checked exactly.
       let record: string | undefined;
       try {
-        for (let attempt = 0; record === undefined; attempt++)
+        for (let attempt = 0; record === undefined; attempt++) {
+          if (attempt) await Bun.sleep(300 * attempt);
           record = await run([binary, "observe", catalog, scope]).catch((error) => {
-            if (attempt === 2) throw error;
+            if (attempt === 5) throw error;
             return undefined;
           });
+        }
       } finally {
         await unlink(scope);
       }
