@@ -1107,15 +1107,26 @@ async function scanWallet(
           });
           const scope = text(object(await result(observed)).scope_id);
           if (sources.length > 1) batchScopes.add(scope);
-          return await Promise.all(
-            sources.map(
-              async (source) =>
-                [object(await get(`scopes/${scope}/effective/${source}`, signal)), scope] as [
-                  ObjectValue,
-                  string,
-                ],
-            ),
-          );
+          // A hosted gateway serves a few requests at a time, so each account's view is read four
+          // at a time, and a busy reply is asked again on its own rather than observing again.
+          const views: [ObjectValue, string][] = new Array(sources.length);
+          let next = 0;
+          const read = async () => {
+            for (let index = next++; index < sources.length; index = next++)
+              for (let attempt = 0; ; attempt++) {
+                const response = await call(`/api/scopes/${scope}/effective/${sources[index]}`, { signal });
+                if (response.status === 429 && attempt < 5) {
+                  await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+                  continue;
+                }
+                if (!response.ok)
+                  throw new Error("The observation provider is unavailable. Try scanning again.");
+                views[index] = [object(readJson(await response.text())), scope];
+                break;
+              }
+          };
+          await Promise.all(Array.from({ length: Math.min(4, sources.length) }, read));
+          return views;
         } catch (error) {
           if (signal.aborted || attempt === 3) throw error;
           await new Promise((resolve) => setTimeout(resolve, 1500 * 2 ** attempt));
