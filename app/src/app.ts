@@ -1130,7 +1130,6 @@ async function scanWallet(
       for (let start = 0; start < indexes.length; start += observeBatch)
         batches.push(indexes.slice(start, start + observeBatch));
     }
-    let next = 0;
     let done = 0;
     const progress = () => {
       status(
@@ -1141,22 +1140,27 @@ async function scanWallet(
       heading.textContent = `Checked ${done} of ${owned.length}${verified ? ` · ${verified} verified` : ""}${reported ? ` · ${reported} read-only` : ""}`;
     };
     if (owned.length) progress();
-    const worker = async () => {
-      for (let batch = next++; batch < batches.length; batch = next++) {
-        const indexes = batches[batch]!;
-        const results = await observe(indexes.map((index) => text(owned[index]!.source))).catch(() => {
-          if (signal.aborted) throw signal.reason;
-          return undefined;
-        });
-        indexes.forEach((index, offset) => {
-          views[index] = results?.[offset];
-          mark(index, views[index]);
-        });
-        done += indexes.length;
-        if (!signal.aborted) progress();
+    // A batch that still fails after its retries is split in half, down to single accounts, so a
+    // provider's rate limit costs time rather than the rows of a whole batch.
+    const check = async (indexes: number[]): Promise<void> => {
+      const results = await observe(indexes.map((index) => text(owned[index]!.source))).catch(() => {
+        if (signal.aborted) throw signal.reason;
+        return undefined;
+      });
+      if (!results && indexes.length > 1) {
+        const half = Math.ceil(indexes.length / 2);
+        await check(indexes.slice(0, half));
+        return check(indexes.slice(half));
       }
+      indexes.forEach((index, offset) => {
+        views[index] = results?.[offset];
+        mark(index, views[index]);
+      });
+      done += indexes.length;
+      if (!signal.aborted) progress();
     };
-    await Promise.all(Array.from({ length: Math.min(2, batches.length) }, worker));
+    // One batch at a time: each is a single runtime run, and a provider rate limits bursts.
+    for (const batch of batches) await check(batch);
     unread = views.filter((view) => !view).length;
     views.forEach((view, index) => {
       const projection = view ? object(view[0].projection) : undefined;
