@@ -4,7 +4,7 @@ use arm::{
 };
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::get,
 };
@@ -781,6 +781,45 @@ async fn current_effective(
     Ok(Json(effective_view(view)?))
 }
 
+/// The most accounts one request may name; the launcher observes a wallet in batches this size.
+const EFFECTIVE_BATCH: usize = 25;
+
+#[derive(Deserialize)]
+struct Addresses {
+    addresses: String,
+}
+
+/// Every named account's effective view from one load of the scope's latest record, so a batch
+/// observed together is not loaded and parsed once per account.
+async fn current_effective_many(
+    State(journal): State<Journal>,
+    Path(scope_id): Path<String>,
+    Query(query): Query<Addresses>,
+) -> Result<Json<BTreeMap<String, AuthorizationView<EffectiveAuthorization>>>, StatusCode> {
+    let addresses = query
+        .addresses
+        .split(',')
+        .map(|address| address.parse::<Pubkey>().map(|key| key.to_string()))
+        .collect::<Result<BTreeSet<_>, _>>()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    if addresses.is_empty() || addresses.len() > EFFECTIVE_BATCH {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let record = journal
+        .latest(&scope_id)
+        .await
+        .map_err(scope_error)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    addresses
+        .into_iter()
+        .map(|address| {
+            let view = effective_view(authorization_view(record.clone(), Some(&address)))?;
+            Ok((address, view))
+        })
+        .collect::<Result<_, _>>()
+        .map(Json)
+}
+
 fn effective_view(
     view: AuthorizationView,
 ) -> Result<AuthorizationView<EffectiveAuthorization>, StatusCode> {
@@ -888,6 +927,7 @@ pub fn router(journal: Journal) -> Router {
             "/scopes/:scope_id/effective/:address",
             get(current_effective),
         )
+        .route("/scopes/:scope_id/effective", get(current_effective_many))
         .route("/scopes/:scope_id/coverage", get(current_coverage))
         .route("/scopes/:scope_id/graph/:address", get(current_graph))
         .with_state(journal)

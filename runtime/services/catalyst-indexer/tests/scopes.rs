@@ -819,6 +819,56 @@ async fn effective_native_authority_uses_observed_clock_and_preserves_uncertaint
 }
 
 #[tokio::test]
+async fn a_batch_of_effective_views_equals_each_view_read_alone() {
+    let plan: Snapshot = serde_json::from_str(include_str!("fixtures/owner-pull-60.json")).unwrap();
+    let journal = Journal::open("sqlite::memory:").await.unwrap();
+    let record = ingest(&journal, plan).await;
+    let app = router(journal);
+    let prefix = format!("/scopes/{}", scope(&record.snapshot));
+    let (status, batch) = get(
+        &app,
+        &format!(
+            "{prefix}/effective?addresses={},{},{}",
+            key(1),
+            key(2),
+            key(1)
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(batch.as_object().unwrap().len(), 2);
+    for address in [key(1), key(2)] {
+        let (status, alone) = get(&app, &format!("{prefix}/effective/{address}")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(batch[address.to_string()], alone);
+    }
+    let many = (0..26)
+        .map(|_| Pubkey::new_unique().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    for (uri, expected) in [
+        (
+            format!("{prefix}/effective?addresses={many}"),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            format!("{prefix}/effective?addresses=invalid"),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            format!("{prefix}/effective?addresses="),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            format!("/scopes/missing/effective?addresses={}", key(1)),
+            StatusCode::NOT_FOUND,
+        ),
+    ] {
+        assert_eq!(get(&app, &uri).await.0, expected, "{uri}");
+    }
+}
+
+#[tokio::test]
 async fn scoped_views_cannot_restore_a_revoked_or_failed_grant() {
     let journal = Journal::open("sqlite::memory:").await.unwrap();
     let initial: Snapshot =
