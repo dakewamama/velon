@@ -29,6 +29,8 @@ const methods = new Set([
 const limits = {
   grant: { each: 3, all: 20 },
   revoke: { each: 12, all: 120 },
+  // Waiting for finality polls every two seconds after one revoke was sent.
+  verify: { each: 90, all: 900 },
   send: { each: 6, all: 60 },
   observe: { each: 60, all: 600 },
   read: { each: 60, all: 300 },
@@ -56,6 +58,7 @@ function kind(method: string, path: string, rpc: boolean): Kind | undefined {
   if (rpc) return "rpc";
   if (method !== "POST") return undefined;
   if (path === "/api/test/account" || path === "/api/live/spl/approve") return "grant";
+  if (/\/actions\/revoke\/[^/]+\/verify$/.test(path)) return "verify";
   if (/\/actions\/revoke\//.test(path)) return "revoke";
   // Each observation runs the runtime and reads the cluster; each wallet read lists its accounts.
   if (path === "/api/live/spl/observe") return "observe";
@@ -67,7 +70,18 @@ function kind(method: string, path: string, rpc: boolean): Kind | undefined {
 // IPv6 visitors are grouped by their /64, which one machine can otherwise rotate through freely.
 function visitor(address: string): string {
   if (!address.includes(":")) return address;
-  return address.split(":").slice(0, 4).join(":");
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
+  if (mapped) return mapped[1]!;
+  // "::" stands for any run of zero groups, so it is expanded before the first four are kept.
+  const [head = "", tail] = address.toLowerCase().split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  const groups =
+    tail === undefined ? left : [...left, ...Array(8 - left.length - right.length).fill("0"), ...right];
+  return groups
+    .slice(0, 4)
+    .map((group) => group.replace(/^0+(?=.)/, ""))
+    .join(":");
 }
 
 // One line per request: enough to see abuse, errors and latency without logging bodies or keys.
@@ -123,6 +137,7 @@ Bun.serve({
         if (value) forward.set(key, value);
       }
       const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text();
+      let forwarded = body;
       if (rpc) {
         if (request.method !== "POST") return new Response("POST required", { status: 405, headers });
         let input;
@@ -131,7 +146,8 @@ Bun.serve({
         } catch {
           return new Response("Invalid JSON", { status: 400, headers });
         }
-        // Only the console sends this header, so the relay is not a free RPC endpoint for scripts.
+        // A browser cannot send this header cross-origin without a preflight that is never answered.
+        // Scripts can, so the method allowlist and the rate limits are what bound the relay.
         if (request.headers.get("X-Velon-Action") !== "rpc")
           return new Response("Action header required", { status: 403, headers });
         if (!input || Array.isArray(input) || input.jsonrpc !== "2.0" || !methods.has(input.method))
@@ -142,12 +158,20 @@ Bun.serve({
         if (input.method === "sendTransaction" && !allow("send", client))
           return new Response("Too many transactions; retry in a minute", { status: 429, headers });
         forward.set("Content-Type", "application/json");
+        // The provider receives exactly the request that was checked, never the raw bytes, so a
+        // duplicated key cannot pass one method or params past the checks and send another.
+        forwarded = JSON.stringify({
+          jsonrpc: "2.0",
+          id: input.id ?? null,
+          method: input.method,
+          params: input.params,
+        });
       }
       const target = rpc ? rpcUrl : new URL(url.pathname + url.search, appUrl);
       const response = await fetch(target, {
         method: request.method,
         headers: forward,
-        body,
+        body: forwarded,
         redirect: "error",
         signal: AbortSignal.timeout(45000),
       });

@@ -1,5 +1,7 @@
 import { resolve } from "node:path";
 import { mkdir, rename, unlink } from "node:fs/promises";
+import { lookup } from "node:dns/promises";
+import { isIPv4 } from "node:net";
 import {
   getAddressDecoder,
   getAddressEncoder,
@@ -474,22 +476,73 @@ if (process.env.RPC_URL) {
     if (length > 256 || offset + 4 + length > bytes.length) throw new Error("bad string");
     return [new TextDecoder().decode(bytes.subarray(offset + 4, offset + 4 + length)), offset + 4 + length];
   };
-  // Logos live off chain. Only public https hosts are fetched, small and quickly, once per hour.
+  // Logos live off chain, at an address the token's creator chose. Only names that resolve to
+  // public addresses are fetched, uncompressed and capped, a few at a time, once per hour.
+  const LOGO_JSON_LIMIT = 65536;
+  const publicAddress = (address: string): boolean => {
+    const mapped = address.toLowerCase().replace(/^::ffff:/, "");
+    if (isIPv4(mapped)) {
+      const [a, b] = mapped.split(".").map(Number) as [number, number];
+      return !(
+        a === 0 ||
+        a === 10 ||
+        a === 127 ||
+        a >= 224 ||
+        (a === 100 && b >= 64 && b < 128) ||
+        (a === 169 && b === 254) ||
+        (a === 172 && b >= 16 && b < 32) ||
+        (a === 192 && (b === 0 || b === 168)) ||
+        (a === 198 && (b === 18 || b === 19))
+      );
+    }
+    return !(mapped === "::" || mapped === "::1" || /^(f[cd]|fe[89ab]|ff)/.test(mapped));
+  };
+  let fetching = 0;
+  const waiting: (() => void)[] = [];
   const image = async (uri: string): Promise<string | null> => {
+    while (fetching >= 8) await new Promise<void>((resolve) => waiting.push(resolve));
+    fetching++;
     try {
       const url = new URL(uri);
+      if (url.protocol !== "https:" || url.port || url.username || url.password) return null;
+      const addresses = await lookup(url.hostname, { all: true });
+      if (!addresses.length || !addresses.every(({ address }) => publicAddress(address))) return null;
+      const response = await fetch(url, {
+        redirect: "error",
+        decompress: false,
+        headers: { "Accept-Encoding": "identity" },
+        signal: AbortSignal.timeout(3000),
+      });
+      const encoding = response.headers.get("content-encoding");
+      const declared = Number(response.headers.get("content-length") ?? 0);
       if (
-        url.protocol !== "https:" ||
-        /^(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.|\[)/.test(url.hostname)
-      )
+        !response.ok ||
+        !response.body ||
+        (encoding && encoding !== "identity") ||
+        declared > LOGO_JSON_LIMIT
+      ) {
+        await response.body?.cancel();
         return null;
-      const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(3000) });
-      const body = await response.text();
-      if (!response.ok || body.length > 65536) return null;
+      }
+      const reader = response.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      for (let read = await reader.read(); !read.done; read = await reader.read()) {
+        size += read.value.length;
+        if (size > LOGO_JSON_LIMIT) {
+          await reader.cancel();
+          return null;
+        }
+        chunks.push(read.value);
+      }
+      const body = new TextDecoder().decode(Buffer.concat(chunks));
       const link = (JSON.parse(body) as { image?: unknown }).image;
       return typeof link === "string" && link.startsWith("https://") && link.length < 512 ? link : null;
     } catch {
       return null;
+    } finally {
+      fetching--;
+      waiting.shift()?.();
     }
   };
   const metadata: Live["metadata"] = async (mints) => {
@@ -592,10 +645,17 @@ if (process.env.RPC_URL) {
         if (slice?.dataSlice?.length !== 0) return new Response("Account data refused", { status: 403 });
       }
       try {
+        // Only the checked request is sent on, never the raw bytes.
+        const checked = {
+          jsonrpc: "2.0",
+          id: (input as { id?: unknown }).id ?? null,
+          method: call.method,
+          params: call.params,
+        };
         const response = await fetch(process.env.RPC_URL!, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body,
+          body: JSON.stringify(checked),
           signal: AbortSignal.timeout(45000),
         });
         return new Response(await response.text(), {

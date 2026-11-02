@@ -292,6 +292,10 @@ async function browserProvider(page: Page, mode = "success", subscription?: "end
     expect(route.request().postDataJSON()).toEqual({ signed_transaction: signed });
     if (polls === 1 || mode === "pending")
       return route.fulfill({ status: 404, json: { error: "not finalized" } });
+    // A busy gateway or an unavailable provider while finalizing is asked again.
+    if (mode === "busy" && polls === 2)
+      return route.fulfill({ status: 429, body: "Demo busy; retry shortly" });
+    if (mode === "busy" && polls === 3) return route.fulfill({ status: 502, body: "Demo unavailable" });
     if (mode === "verification-failed")
       return route.fulfill({ status: 409, json: { error: "Native state changed" } });
     finalized = true;
@@ -357,6 +361,17 @@ for (const mode of [
     expect(provider.counts().sends).toBe(sent ? 1 : 0);
   });
 }
+
+test("a busy gateway while finalizing is asked again, and the receipt is kept", async ({ page }) => {
+  const provider = await browserProvider(page, "busy");
+  await connectAndReview(page);
+  await page.getByRole("button", { name: "Confirm in wallet" }).click();
+  // Four polls two seconds apart.
+  await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator("#action-result")).toContainText("c".repeat(64));
+  expect(provider.counts()).toMatchObject({ sends: 1, polls: 4 });
+  expect(await page.evaluate(() => localStorage.getItem("velon:receipts"))).toContain("c".repeat(64));
+});
 
 test("an unknown submission is settled by finalized verification, never resent", async ({ page }) => {
   const provider = await browserProvider(page, "unknown");

@@ -20,6 +20,7 @@ module.exports = async (request, response) => {
   }
   try {
     // A Daytona preview or any private HTTPS host that takes a bearer token.
+    if (process.env.UPSTREAM_URL && !process.env.UPSTREAM_TOKEN) throw new Error("Missing upstream token");
     const base = new URL(process.env.UPSTREAM_URL || process.env.DAYTONA_PREVIEW_URL);
     if (base.protocol !== "https:" || base.username || base.password) throw new Error("Invalid upstream");
     const headers = {

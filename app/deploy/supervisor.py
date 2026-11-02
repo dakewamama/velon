@@ -22,6 +22,8 @@ else:
  # The provider URL may carry a key; it stays in this process tree and never reaches a browser.
  upstream=os.environ.get('UPSTREAM_RPC_URL','')
  if not upstream.startswith('https://'):raise SystemExit('Mainnet mode needs UPSTREAM_RPC_URL over HTTPS')
+ # The gateway port is public on such hosts; without a token anyone could call it directly.
+ if not os.environ.get('GATEWAY_TOKEN'):raise SystemExit('Mainnet mode needs GATEWAY_TOKEN')
  env.update(RPC_URL=upstream,MAINNET_RPC_URL=upstream)
 children=[]
 def launch(args,name):

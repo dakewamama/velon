@@ -49,6 +49,8 @@ type Scenario = {
   snapshots: { id: string; slot: string }[];
   examples: { label: string; address: string }[];
 };
+// The account each live scope was observed for, so another address is never read from it.
+const observedFor = new WeakMap<Scenario, string>();
 const form = document.querySelector<HTMLFormElement>("#scan-form")!;
 const input = document.querySelector<HTMLInputElement>("#address")!;
 const select = document.querySelector<HTMLSelectElement>("#scenario")!;
@@ -501,7 +503,8 @@ async function scan(historical = false, refresh = false) {
         return;
       }
     }
-    if (live && (refresh || !scenario.scope)) {
+    // A live scope belongs to the account it observed; any other address is observed afresh.
+    if (live && (refresh || !scenario.scope || observedFor.get(scenario) !== address)) {
       status("Observing the finalized token account...");
       const observed = await call("/api/live/spl/observe", {
         method: "POST",
@@ -511,6 +514,7 @@ async function scan(historical = false, refresh = false) {
       });
       const observation = object(await result(observed));
       scenario.scope = text(observation.scope_id);
+      observedFor.set(scenario, address);
       if (subscription) {
         const target = array(object(object(observation.record).snapshot).targets)
           .map(object)
@@ -926,18 +930,28 @@ async function holdingsPanel(
     item.append(logo, label, node("span", amount, "holding-amount"), status);
     return item;
   };
-  const safe = () =>
-    node("span", yours ? "Only you can move it" : "Only the owner can move it", "holding-status ok");
+  // Only the account's own delegate is read here; a Token-2022 mint can still name a permanent
+  // delegate, so that case is not called safe.
+  const safe = (entry: ObjectValue) =>
+    entry.program === "spl-token-2022"
+      ? node("span", "No account delegate · mint not checked", "holding-status")
+      : node("span", "No delegate on this account", "holding-status ok");
   // Names are display only; a lookup that fails leaves the addresses in place.
   await nameTokens(
     shown.map((entry) => text(entry.mint)),
     signal,
   ).catch(() => undefined);
-  list.append(row(tokenLogo(WSOL), "SOL", "Native balance", units(BigInt(text(wallet.lamports)), 9), safe()));
+  // Native SOL cannot be delegated; only the wallet's own key moves it.
+  const own = node(
+    "span",
+    yours ? "Only you can move it" : "Only the owner can move it",
+    "holding-status ok",
+  );
+  list.append(row(tokenLogo(WSOL), "SOL", "Native balance", units(BigInt(text(wallet.lamports)), 9), own));
   for (const entry of shown) {
     const mint = text(entry.mint);
     const scale = Number(entry.decimals);
-    let status = safe();
+    let status = safe(entry);
     if (entry.delegate !== null) {
       const delegated = BigInt(text(entry.delegated));
       const limit = delegated === UNLIMITED ? "with no limit" : `up to ${units(delegated, scale)}`;
@@ -1235,12 +1249,13 @@ async function scanWallet(
     content.append(
       node(
         "p",
-        `${unread} of ${owned.length} token accounts could not be read; the RPC may be rate limiting. Reload to try them again.`,
+        `${unread} of ${owned.length} delegated token accounts could not be checked. Check the wallet again to retry them.`,
         "notice",
       ),
     );
   if (cards.length) content.append(...cards);
-  else
+  // "None found" is only true when every listed account was actually read and modelled.
+  else if (!unread && !unsupported.length)
     content.append(
       node(
         "p",
@@ -1405,7 +1420,11 @@ const kept = (): Receipt[] => {
   }
 };
 function remember(receipt: Receipt) {
-  localStorage.setItem("velon:receipts", JSON.stringify([receipt, ...kept()].slice(0, 20)));
+  try {
+    localStorage.setItem("velon:receipts", JSON.stringify([receipt, ...kept()].slice(0, 20)));
+  } catch {
+    /* Blocked or full storage: the verification ID stays on screen and in the journal. */
+  }
 }
 document.querySelector<HTMLButtonElement>("#receipts-tab")!.onclick = () => {
   if (actionState && ["AWAITING_SIGNATURE", "SUBMITTING", "FINALIZING"].includes(actionState)) return;
@@ -1758,15 +1777,28 @@ async function prepare(scanned: ObjectValue, scope: string) {
             : "Waiting for finalized native verification...",
         );
         actionResult.append(link("Transaction", sent.signature));
+        const pause = () => new Promise<void>((resolve) => setTimeout(resolve, 2000));
         for (let attempt = 0; attempt < 60; attempt++) {
           signal.throwIfAborted();
-          const response = await action(path, signal, sent.signedTransaction);
-          if (response.status === 404) {
-            await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+          // The transaction is already sent. Not finalized yet, a busy gateway, an unavailable
+          // provider or a dropped connection are asked again; any other answer is final.
+          const response = await action(path, signal, sent.signedTransaction).catch((error) => {
+            if (signal.aborted) throw error;
+            return undefined;
+          });
+          if (!response || [404, 429, 502, 503, 504].includes(response.status)) {
+            await pause();
             continue;
           }
           const verification = await result(response);
-          const current = await get(`scopes/${scope}`, signal);
+          const current = await get(`scopes/${scope}`, signal).catch((error) => {
+            if (signal.aborted) throw error;
+            return undefined;
+          });
+          if (!current) {
+            await pause();
+            continue;
+          }
           const checked = verifiedRevoke(
             verification,
             current,
@@ -1781,8 +1813,7 @@ async function prepare(scanned: ObjectValue, scope: string) {
           gone?.classList.add("leaving");
           stage.dataset.state = "cut";
           if (gone) await new Promise<void>((resolve) => setTimeout(resolve, 1200));
-          if (!(await reload()))
-            throw new Error("Verification was retained, but current permissions could not be reloaded.");
+          // The receipt and the result come first; refreshing the list is display only.
           remember({
             id: checked.id,
             signature: sent.signature,
@@ -1791,13 +1822,20 @@ async function prepare(scanned: ObjectValue, scope: string) {
             network: config.network,
             at: new Date().toISOString(),
           });
-          signal.throwIfAborted();
           setAction("VERIFIED", `Revoked and verified on ${network().label.toLowerCase()}.`);
           actionResult.append(
             link("Transaction", sent.signature),
             field("Finalized slot", String(checked.slot)),
             field("Verification ID", checked.id),
           );
+          if (!(await reload().catch(() => false)))
+            actionResult.append(
+              node(
+                "p",
+                "The revoke is verified. The list of permissions could not be refreshed; check the wallet again to see it.",
+                "notice",
+              ),
+            );
           // The next queued revoke opens only when the visitor asks for it.
           if (queue.length) {
             const next = labelled(
@@ -1827,7 +1865,17 @@ async function prepare(scanned: ObjectValue, scope: string) {
       }
     };
   } catch (error) {
-    if (!signal.aborted) setAction("FAILED", error instanceof Error ? error.message : "Simulation failed.");
+    if (signal.aborted) return;
+    const reason = error instanceof Error ? error.message : "Simulation failed.";
+    // The Subscriptions program lets a subscriber remove a delegation only once it is cancelled
+    // and its paid period has ended; the runtime refuses anything else before a signature.
+    const subscription = object(scanned.native_context).protocol === "subscriptions";
+    setAction(
+      "FAILED",
+      subscription && reason === "UnsupportedOperation"
+        ? "This subscription can't be removed yet. The Subscriptions program only allows it after the subscription is cancelled and its paid period has ended. Nothing was signed."
+        : reason,
+    );
   }
 }
 review.addEventListener("cancel", invalidateReview);
