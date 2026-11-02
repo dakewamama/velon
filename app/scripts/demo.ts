@@ -640,6 +640,8 @@ if (process.env.RPC_URL) {
       "getTokenAccountBalance",
       "getAccountInfo",
       "sendTransaction",
+      // Shows the visitor when a sent revoke has landed; display only, never evidence.
+      "getSignatureStatuses",
     ]);
     live.relay = async (body) => {
       let input: unknown;

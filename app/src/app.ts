@@ -1644,6 +1644,36 @@ function setAction(state: ActionState, message: string) {
     .forEach((button) => (button.disabled = busy));
 }
 
+// What the RPC reports about a sent transaction. Display only: a timeout or error reads as unknown.
+async function signatureStatus(
+  rpcUrl: string,
+  signature: string,
+  signal: AbortSignal,
+): Promise<{ slot?: unknown; err?: unknown; confirmationStatus?: unknown } | undefined> {
+  try {
+    const response = await call(
+      rpcUrl,
+      {
+        method: "POST",
+        headers: { ...rpcHeaders(rpcUrl), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "getSignatureStatuses",
+          params: [[signature]],
+        }),
+        signal,
+      },
+      5000,
+    );
+    if (!response.ok) return undefined;
+    const value = (await response.json())?.result?.value?.[0];
+    return value && typeof value === "object" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // Scopes that cover a batch of accounts. A revoke is reviewed against one account's own
 // observation, so preparing one from a batch observes that account again first.
 const batchScopes = new Set<string>();
@@ -1790,8 +1820,26 @@ async function prepare(scanned: ObjectValue, scope: string) {
         );
         actionResult.append(link("Transaction", sent.signature));
         const pause = () => new Promise<void>((resolve) => setTimeout(resolve, 2000));
+        let landed = false;
         for (let attempt = 0; attempt < 60; attempt++) {
           signal.throwIfAborted();
+          // Access ends when the revoke lands, about a second after sending; finality, about 13
+          // seconds, is only when Velon can prove it. The RPC's status is shown, never trusted.
+          if (!landed) {
+            const status = await signatureStatus(config.rpcUrl, sent.signature, signal);
+            if (status?.err)
+              throw new Error(
+                `The network reports that the revoke failed (${JSON.stringify(status.err)}). Nothing was removed; the permission is still active.`,
+              );
+            if (status && ["confirmed", "finalized"].includes(String(status.confirmationStatus))) {
+              landed = true;
+              setAction(
+                "FINALIZING",
+                `${sent.status === "unknown" ? "Submission response is uncertain, but the network reports that the revoke landed. " : ""}Access removed. The revoke is confirmed on ${network().label.toLowerCase()} at slot ${status.slot}. Velon is waiting for finality to verify it and issue the receipt.`,
+              );
+              actionResult.append(link("Transaction", sent.signature));
+            }
+          }
           // The transaction is already sent. Not finalized yet, a busy gateway, an unavailable
           // provider or a dropped connection are asked again; any other answer is final.
           const response = await action(path, signal, sent.signedTransaction).catch((error) => {

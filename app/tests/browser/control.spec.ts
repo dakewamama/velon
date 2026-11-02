@@ -281,7 +281,21 @@ async function browserProvider(page: Page, mode = "success", subscription?: "end
       // A lost response leaves submission unknown; only finalized verification can settle it.
       if (mode === "unknown") return route.abort("connectionreset");
       result = getSignatureFromTransaction(submitted);
-    } else throw new Error(`Unexpected RPC ${request.method}`);
+    } else if (request.method === "getSignatureStatuses")
+      result = {
+        context: { slot: 11 },
+        value: [
+          signed
+            ? {
+                slot: 11,
+                confirmations: null,
+                err: mode === "failed-on-chain" ? { InstructionError: [2, { Custom: 4 }] } : null,
+                confirmationStatus: "confirmed",
+              }
+            : null,
+        ],
+      };
+    else throw new Error(`Unexpected RPC ${request.method}`);
     await route.fulfill({ json: { jsonrpc: "2.0", id: request.id, result } });
   });
   await page.route("**/api/snapshots/*/actions/revoke/*/verify", (route) => {
@@ -329,6 +343,8 @@ test("wallet signs exact revoke and success waits for finalized verification and
   await page.screenshot({ path: `test-results/${info.project.name}-review.png`, fullPage: true });
   await page.getByRole("button", { name: "Confirm in wallet" }).click();
   await expect(page.getByRole("heading", { name: "Finalizing", exact: true })).toBeVisible();
+  // Access is reported removed as soon as the revoke lands, before finality proves it.
+  await expect(page.locator("#action-result")).toContainText("Access removed");
   await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toBeVisible();
   await expect(page.locator("#results article")).toHaveCount(0);
   await expect(page.locator("#action-result")).toContainText("Revoked and verified on devnet.");
@@ -361,6 +377,16 @@ for (const mode of [
     expect(provider.counts().sends).toBe(sent ? 1 : 0);
   });
 }
+
+test("a revoke the network reports failed is shown at once, never as removed", async ({ page }) => {
+  const provider = await browserProvider(page, "failed-on-chain");
+  await connectAndReview(page);
+  await page.getByRole("button", { name: "Confirm in wallet" }).click();
+  await expect(page.locator("#action-result")).toContainText("the permission is still active");
+  await expect(page.locator("#action-result")).not.toContainText("Access removed");
+  await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toHaveCount(0);
+  expect(provider.counts().sends).toBe(1);
+});
 
 test("a busy gateway while finalizing is asked again, and the receipt is kept", async ({ page }) => {
   const provider = await browserProvider(page, "busy");

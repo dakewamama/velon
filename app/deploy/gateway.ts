@@ -23,6 +23,8 @@ const methods = new Set([
   "getTokenAccountBalance",
   "getAccountInfo",
   "sendTransaction",
+  // Shows the visitor when a sent revoke has landed; display only, never evidence.
+  "getSignatureStatuses",
 ]);
 // Requests per minute: each visitor, then everyone together.
 // The global caps keep one busy minute well inside a provider plan's request budget.
