@@ -1119,14 +1119,21 @@ async function scanWallet(
             body: JSON.stringify({ sources }),
             signal,
           });
-          const scope = text(object(await result(observed)).scope_id);
+          const reply = object(await result(observed));
+          const scope = text(reply.scope_id);
           if (sources.length > 1) batchScopes.add(scope);
-          // A hosted gateway serves a few requests at a time, so each account's view is read four
-          // at a time, and a busy reply is asked again on its own rather than observing again.
+          // The server returns each account's view with the observation; an older server does not,
+          // and then each view is read on its own, four at a time.
+          const bundled = reply.views ? object(reply.views) : {};
           const views: [ObjectValue, string][] = new Array(sources.length);
           let next = 0;
           const read = async () => {
-            for (let index = next++; index < sources.length; index = next++)
+            for (let index = next++; index < sources.length; index = next++) {
+              const included = bundled[sources[index]!];
+              if (included) {
+                views[index] = [object(included), scope];
+                continue;
+              }
               for (let attempt = 0; ; attempt++) {
                 const response = await call(`/api/scopes/${scope}/effective/${sources[index]}`, { signal });
                 if (response.status === 429 && attempt < 5) {
@@ -1138,6 +1145,7 @@ async function scanWallet(
                 views[index] = [object(readJson(await response.text())), scope];
                 break;
               }
+            }
           };
           await Promise.all(Array.from({ length: Math.min(4, sources.length) }, read));
           return views;
@@ -1184,8 +1192,12 @@ async function scanWallet(
       done += indexes.length;
       if (!signal.aborted) progress();
     };
-    // One batch at a time: each is a single runtime run, and a provider rate limits bursts.
-    for (const batch of batches) await check(batch);
+    // Two batches at a time: each is one runtime run and one response.
+    let nextBatch = 0;
+    const worker = async () => {
+      for (let batch = nextBatch++; batch < batches.length; batch = nextBatch++) await check(batches[batch]!);
+    };
+    await Promise.all(Array.from({ length: Math.min(2, batches.length) }, worker));
     unread = views.filter((view) => !view).length;
     views.forEach((view, index) => {
       const projection = view ? object(view[0].projection) : undefined;

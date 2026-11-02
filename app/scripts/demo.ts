@@ -301,9 +301,22 @@ if (process.env.RPC_URL) {
       } finally {
         await unlink(scope);
       }
-      return new Response(await run([binary, "latest", text(object(readJson(record)).id)]), {
-        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-      });
+      const latest = object(readJson(await run([binary, "latest", text(object(readJson(record)).id)])));
+      const scopeId = text(latest.scope_id);
+      // Each account's view is read here, next to the runtime, so a batch is one response to the
+      // browser instead of one per account. The full record stays on the server.
+      const views = await Promise.all(
+        sources.map(async (source) => {
+          const response = await fetch(`${runtimeUrl}/scopes/${scopeId}/effective/${source}`);
+          if (!response.ok) throw new Error("Observed view unavailable.");
+          return `${JSON.stringify(source)}:${await response.text()}`;
+        }),
+      );
+      const observed = writeJson(object(object(latest.record).snapshot).targets ?? []);
+      return new Response(
+        `{"scope_id":${JSON.stringify(scopeId)},"record":{"snapshot":{"targets":${observed}}},"views":{${views.join(",")}}}`,
+        { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } },
+      );
     } catch {
       return Response.json({ error: "Live observation failed. Check the token account." }, { status: 502 });
     }
