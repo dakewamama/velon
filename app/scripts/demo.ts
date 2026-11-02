@@ -303,18 +303,16 @@ if (process.env.RPC_URL) {
       }
       const latest = object(readJson(await run([binary, "latest", text(object(readJson(record)).id)])));
       const scopeId = text(latest.scope_id);
-      // Each account's view is read here, next to the runtime, so a batch is one response to the
-      // browser instead of one per account. The full record stays on the server.
-      const views = await Promise.all(
-        sources.map(async (source) => {
-          const response = await fetch(`${runtimeUrl}/scopes/${scopeId}/effective/${source}`);
-          if (!response.ok) throw new Error("Observed view unavailable.");
-          return `${JSON.stringify(source)}:${await response.text()}`;
-        }),
+      // Every account's view comes back with the observation, from one load of the record next to
+      // the runtime, so a batch is one response to the browser and one record parse.
+      const read = await fetch(
+        `${runtimeUrl}/scopes/${scopeId}/effective?addresses=${sources.map(encodeURIComponent).join(",")}`,
       );
+      if (!read.ok) throw new Error("Observed views unavailable.");
+      const views = await read.text();
       const observed = writeJson(object(object(latest.record).snapshot).targets ?? []);
       return new Response(
-        `{"scope_id":${JSON.stringify(scopeId)},"record":{"snapshot":{"targets":${observed}}},"views":{${views.join(",")}}}`,
+        `{"scope_id":${JSON.stringify(scopeId)},"record":{"snapshot":{"targets":${observed}}},"views":${views}}`,
         { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } },
       );
     } catch {
