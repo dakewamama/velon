@@ -74,16 +74,26 @@ const PROGRAMS: Program[] = [
   },
 ];
 
+// A provider can answer from a bank whose clock trails its slot, so a failed capture is asked
+// again; a capture that succeeds with another build is a verdict and is never retried.
+const CAPTURES = 6;
+const pause = (attempt: number) => 300 * attempt;
+
 /// Catalog records from the cluster's own finalized code and activated features.
 export function tokenCatalog(binary: string, cwd: string, rpcUrl: string, revision: string): Json[] {
   return PROGRAMS.flatMap((program) => {
-    const result = Bun.spawnSync([binary, "capture", program.id], {
-      cwd,
-      env: { ...process.env, RPC_URL: rpcUrl },
-      stdout: "pipe",
-      stderr: "inherit",
-    });
-    return accept(program, result.exitCode === 0 ? result.stdout.toString() : undefined, rpcUrl, revision);
+    let raw: string | undefined;
+    for (let attempt = 0; raw === undefined && attempt < CAPTURES; attempt++) {
+      if (attempt) Bun.sleepSync(pause(attempt));
+      const result = Bun.spawnSync([binary, "capture", program.id], {
+        cwd,
+        env: { ...process.env, RPC_URL: rpcUrl },
+        stdout: "pipe",
+        stderr: "inherit",
+      });
+      if (result.exitCode === 0) raw = result.stdout.toString();
+    }
+    return accept(program, raw, rpcUrl, revision);
   });
 }
 
@@ -96,14 +106,19 @@ export async function tokenCatalogAsync(
 ): Promise<Json[]> {
   const records: Json[] = [];
   for (const program of PROGRAMS) {
-    const child = Bun.spawn([binary, "capture", program.id], {
-      cwd,
-      env: { ...process.env, RPC_URL: rpcUrl },
-      stdout: "pipe",
-      stderr: "inherit",
-    });
-    const raw = await new Response(child.stdout).text();
-    records.push(...accept(program, (await child.exited) === 0 ? raw : undefined, rpcUrl, revision));
+    let raw: string | undefined;
+    for (let attempt = 0; raw === undefined && attempt < CAPTURES; attempt++) {
+      if (attempt) await Bun.sleep(pause(attempt));
+      const child = Bun.spawn([binary, "capture", program.id], {
+        cwd,
+        env: { ...process.env, RPC_URL: rpcUrl },
+        stdout: "pipe",
+        stderr: "inherit",
+      });
+      const out = await new Response(child.stdout).text();
+      if ((await child.exited) === 0) raw = out;
+    }
+    records.push(...accept(program, raw, rpcUrl, revision));
   }
   return records;
 }
