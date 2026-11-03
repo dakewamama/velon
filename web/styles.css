@@ -382,27 +382,6 @@ a {
   line-height: 1.55;
   max-width: 38ch;
 }
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  align-self: flex-start;
-  height: 32px;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--forest-line-strong);
-  border-radius: var(--radius-pill);
-  background: rgb(255 255 255 / 0.03);
-  color: var(--on-forest-2);
-  font-size: var(--text-xs);
-  letter-spacing: 0.01em;
-}
-.pill-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--mint);
-  box-shadow: 0 0 0 4px rgb(63 224 165 / 0.16);
-}
 .cta {
   display: flex;
   flex-wrap: wrap;
@@ -566,22 +545,8 @@ a {
   padding-left: var(--space-5);
   border-left: 1px solid var(--forest-line);
 }
-.facts-k {
-  color: var(--on-forest-3);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
 
 /* Sections */
-.eyebrow {
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--mint);
-}
 .section-head {
   display: flex;
   flex-direction: column;
@@ -596,9 +561,6 @@ a {
   background: var(--cream);
   color: var(--ink);
 }
-.problem .eyebrow {
-  color: #127a57;
-}
 .problem-grid {
   display: grid;
   grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
@@ -610,7 +572,7 @@ a {
   flex-direction: column;
   gap: var(--space-5);
 }
-.problem-copy p:not(.eyebrow) {
+.problem-copy p {
   color: var(--ink-2);
   font-size: var(--text-lg);
   max-width: 52ch;
@@ -883,13 +845,6 @@ a {
   padding-left: var(--space-6);
   border-left: 1px solid var(--forest-line);
 }
-.use-n {
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--mint);
-}
 .use h3 {
   font-size: clamp(1.375rem, 1.1rem + 0.8vw, 1.75rem);
   letter-spacing: -0.025em;
@@ -905,9 +860,6 @@ a {
   background: var(--cream);
   color: var(--ink);
 }
-.dev .eyebrow {
-  color: #127a57;
-}
 .dev-grid {
   display: grid;
   grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
@@ -919,7 +871,7 @@ a {
   flex-direction: column;
   gap: var(--space-5);
 }
-.dev-grid > div:first-child > p:not(.eyebrow) {
+.dev-grid > div:first-child > p {
   color: var(--ink-2);
   font-size: var(--text-lg);
 }

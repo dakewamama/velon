@@ -3,17 +3,17 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Velon · Take back every token approval on Solana</title>
+    <title>Velon · See and remove token approvals on Solana</title>
     <meta
       name="description"
-      content="Velon finds every key allowed to spend your Solana tokens, runs the revoke against finalized state before you sign, and reads the chain again to prove it is gone."
+      content="Velon shows which keys can move your Solana tokens, tests each removal against the chain before you sign, and reads the chain again to confirm the access is gone."
     />
     <meta name="theme-color" content="#072a21" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Velon · Take back every token approval" />
+    <meta property="og:title" content="Velon · See and remove token approvals" />
     <meta
       property="og:description"
-      content="Proof before you sign, and proof after. Open source, for Solana mainnet and devnet."
+      content="Checked before you sign and after. Open source, for Solana mainnet and devnet."
     />
     <meta property="og:image" content="https://velonsecure.xyz/og.png" />
     <meta property="og:url" content="https://velonsecure.xyz/" />
@@ -55,14 +55,10 @@
       <section class="hero" id="top">
         <div class="wrap hero-grid">
           <div class="hero-copy">
-            <p class="pill reveal">
-              <span class="pill-dot" aria-hidden="true"></span>
-              Open source · Solana mainnet and devnet
-            </p>
-            <h1 class="reveal">Take back <span class="nowrap">every approval.</span></h1>
+            <h1 class="reveal">Remove old token approvals <span class="nowrap">on Solana.</span></h1>
             <p class="lede reveal">
-              Apps you used once can still move your tokens. Velon finds every key that can, proves the revoke
-              before you sign, and proves it again after.
+              Apps you used once can still move your tokens. Velon shows which ones can, removes the access
+              you choose, and checks the chain afterwards to confirm it is gone.
             </p>
             <div class="cta reveal">
               <a class="button" href="https://console.velonsecure.xyz">
@@ -101,9 +97,9 @@
                 alt="Velon result: Revoked and verified, with the transaction, finalized slot 419474793 and a verification ID."
               />
             </div>
-            <div class="stage-steps" role="tablist" aria-label="The revoke, step by step">
+            <div class="stage-steps" role="tablist" aria-label="A removal, step by step">
               <button type="button" role="tab" data-go="0" aria-selected="true">
-                <span class="n">01</span>The permission
+                <span class="n">01</span>The approval
               </button>
               <button type="button" role="tab" data-go="1" aria-selected="false">
                 <span class="n">02</span>The review
@@ -113,19 +109,17 @@
               </button>
             </div>
             <figcaption>
-              Captured from a real revoke on a local Agave 4.3.2 validator, finalized at slot 419,474,793.
+              From a real removal on a local Agave 4.3.2 validator, finalized at slot 419,474,793.
             </figcaption>
           </figure>
         </div>
 
         <div class="wrap facts-wrap">
           <div class="facts reveal">
-            <div>
-              <span class="facts-k">Networks</span><span>Solana mainnet, devnet and a local validator</span>
-            </div>
-            <div><span class="facts-k">Wallets</span><span>Any Wallet Standard wallet</span></div>
-            <div><span class="facts-k">Revocable</span><span>SPL Token delegates</span></div>
-            <div><span class="facts-k">Read only</span><span>Solana Subscriptions, Token-2022</span></div>
+            <div><span>Works on Solana mainnet, devnet and a local validator</span></div>
+            <div><span>Connects to any Wallet Standard wallet</span></div>
+            <div><span>Removes SPL Token approvals</span></div>
+            <div><span>Shows Solana Subscriptions and Token-2022 approvals, read only for now</span></div>
           </div>
         </div>
       </section>
@@ -133,15 +127,15 @@
       <section class="problem" aria-labelledby="problem-title">
         <div class="wrap problem-grid">
           <div class="problem-copy">
-            <p class="eyebrow reveal">The problem</p>
-            <h2 id="problem-title" class="reveal">An approval outlives the app that asked for it.</h2>
+            <h2 id="problem-title" class="reveal">Approvals stay after you leave the app.</h2>
             <p class="reveal">
-              Swaps, aggregators, payment and subscription apps ask for a delegate on your token account. The
-              tab closes. The delegate stays, and it can move tokens without asking again until you revoke it.
+              Swaps, aggregators, payment and subscription apps often ask for permission to move a token from
+              your wallet later. Closing the tab doesn't end it. That key can keep moving the token without
+              asking again until you remove its access.
             </p>
             <p class="reveal">
-              When one of those apps is compromised, every wallet that approved it needs a revoke it can
-              trust, fast.
+              If one of those apps is hacked, every wallet that approved it needs to remove that access
+              quickly, and know that it worked.
             </p>
           </div>
 
@@ -177,8 +171,8 @@
               </div>
             </dl>
             <figcaption>
-              A live token account on the Velon test validator, read at finalized slot 419,475,046. The
-              delegate can move 25 of its 100 tokens without the owner signing again.
+              A real token account on Velon's test validator, read at finalized slot 419,475,046. The delegate
+              can move 25 of its 100 tokens without the owner signing again.
             </figcaption>
           </figure>
         </div>
@@ -187,18 +181,17 @@
       <section class="proof" id="proof" aria-labelledby="proof-title">
         <div class="wrap">
           <div class="section-head">
-            <p class="eyebrow reveal">Why Velon</p>
-            <h2 id="proof-title" class="reveal">Proof on both sides of your signature.</h2>
+            <h2 id="proof-title" class="reveal">Checked before you sign, and again after.</h2>
           </div>
 
           <div class="bento">
             <article class="tile tile-evidence reveal">
               <div class="tile-copy">
-                <h3>Executed before you sign</h3>
+                <h3>Tested before you sign</h3>
                 <p>
-                  Velon runs the exact Revoke instruction itself, on the finalized bank it observed, with that
-                  cluster's activated features and the verified SPL Token program. A provider's simulation
-                  must reach the same account state.
+                  Velon runs the exact removal itself, on the finalized state it read, with that network's
+                  active features and the verified SPL Token program. The RPC provider's simulation must end
+                  in the same account state.
                 </p>
               </div>
               <dl class="evidence" aria-label="Mainnet evidence captured by Velon">
@@ -231,10 +224,10 @@
 
             <article class="tile tile-shot tile-delegate reveal">
               <div class="tile-copy">
-                <h3>Names the delegate</h3>
+                <h3>Shows who holds each approval</h3>
                 <p>
-                  Who holds the permission, read from the chain: a wallet, a program's signer or a known
-                  program.
+                  Read from the chain: a wallet, a program or a program's account. Velon names an app only
+                  when it is a known program.
                 </p>
               </div>
               <div class="crop crop-delegate">
@@ -244,8 +237,8 @@
 
             <article class="tile tile-closed reveal">
               <div class="tile-copy">
-                <h3>Fails closed</h3>
-                <p>If anything disagrees, nothing is offered for signing. Some of the runtime's refusals:</p>
+                <h3>Stops if anything disagrees</h3>
+                <p>If any check fails, Velon offers nothing to sign. Some of the runtime's refusals:</p>
               </div>
               <ul class="stops mono">
                 <li>feature unknown to the pinned runtime</li>
@@ -257,8 +250,11 @@
 
             <article class="tile tile-shot tile-verified reveal">
               <div class="tile-copy">
-                <h3>Read again after finality</h3>
-                <p>"Revoked" appears only after the chain confirms the delegate is gone.</p>
+                <h3>Read again once final</h3>
+                <p>
+                  "Removed and verified" appears only after Velon reads the final chain state and the approval
+                  is gone.
+                </p>
               </div>
               <img
                 class="shot"
@@ -272,9 +268,10 @@
 
             <article class="tile tile-shot tile-receipt reveal">
               <div class="tile-copy">
-                <h3>A receipt that replays without the chain</h3>
+                <h3>A receipt you can check later</h3>
                 <p>
-                  Every verified revoke keeps its evidence. Replay it later and the result still checks out.
+                  Every verified removal keeps its evidence. Replay it later, without the chain, and it still
+                  checks out.
                 </p>
               </div>
               <img
@@ -293,37 +290,35 @@
       <section class="how" id="how" aria-labelledby="how-title">
         <div class="wrap">
           <div class="section-head">
-            <p class="eyebrow reveal">How it works</p>
-            <h2 id="how-title" class="reveal">Four steps. Two of them are proof.</h2>
+            <h2 id="how-title" class="reveal">How a removal works</h2>
           </div>
           <ol class="steps" data-steps>
             <li class="step reveal">
               <span class="step-n">01</span>
-              <h3>Observe</h3>
+              <h3>Read</h3>
               <p>
-                Reads your token accounts from a finalized bank and lists every delegate, with how much it may
-                spend.
+                Velon reads your token accounts from the chain's final state and lists each approval and how
+                much it allows.
               </p>
             </li>
             <li class="step reveal">
               <span class="step-n">02</span>
-              <h3>Execute</h3>
+              <h3>Test</h3>
               <p>
-                Runs the revoke on that bank itself. A provider's simulation must reach the same account
-                state.
+                Velon runs the removal itself on that same state. The RPC provider's simulation must match it.
               </p>
             </li>
             <li class="step reveal">
               <span class="step-n">03</span>
               <h3>Sign</h3>
-              <p>Your wallet signs the exact bytes that were reviewed, and nothing else.</p>
+              <p>Your wallet signs exactly the transaction you reviewed, and nothing else.</p>
             </li>
             <li class="step reveal">
               <span class="step-n">04</span>
               <h3>Verify</h3>
               <p>
-                Waits for finality, reads the account again, confirms the delegate is gone and issues a
-                verification ID.
+                Once the chain is final, Velon reads the account again, confirms the approval is gone and
+                gives you a receipt.
               </p>
             </li>
           </ol>
@@ -333,32 +328,27 @@
       <section class="uses" id="uses" aria-labelledby="uses-title">
         <div class="wrap">
           <div class="section-head">
-            <p class="eyebrow reveal">Who it is for</p>
-            <h2 id="uses-title" class="reveal">Wherever a key can still spend.</h2>
+            <h2 id="uses-title" class="reveal">Who it is for</h2>
           </div>
           <div class="use-grid">
             <article class="use reveal">
-              <span class="use-n">Wallets</span>
-              <h3>Who can spend this, next to every balance.</h3>
+              <h3>Wallets</h3>
               <p>
-                The SDK turns token accounts into exact permissions and builds revokes your users review
-                before they sign.
+                Show who can take each token next to its balance. The SDK reads token accounts into exact
+                permissions and builds removals your users review before they sign.
               </p>
             </article>
             <article class="use reveal">
-              <span class="use-n">Treasuries</span>
-              <h3>Know every delegate on the team's tokens.</h3>
+              <h3>Treasuries</h3>
               <p>
-                List delegates across a treasury's token accounts. Squads V4 spending limits are modelled in
-                the SDK.
+                List the approvals on a team's token accounts. The SDK also models Squads V4 spending limits.
               </p>
             </article>
             <article class="use reveal">
-              <span class="use-n">Exploit response</span>
-              <h3>A revoke people can trust when it matters.</h3>
+              <h3>After an exploit</h3>
               <p>
-                When a protocol is compromised, each affected wallet sees the exact delegate, signs one
-                reviewed revoke and gets a verification ID.
+                When an app is hacked, each affected wallet sees the exact approval, signs one reviewed
+                removal and gets a receipt.
               </p>
             </article>
           </div>
@@ -368,17 +358,16 @@
       <section class="dev" id="developers" aria-labelledby="dev-title">
         <div class="wrap dev-grid">
           <div>
-            <p class="eyebrow reveal">Developers</p>
-            <h2 id="dev-title" class="reveal">Open source, end to end.</h2>
+            <h2 id="dev-title" class="reveal">Open source</h2>
             <p class="reveal">
-              The runtime that observes, executes and verifies, the SDK and the console live in one public
-              repository. Run it with recorded evidence, point it at mainnet or devnet, or start a local
-              validator with the real SPL Token program.
+              The runtime, the SDK and the console are in one public repository. Run it with recorded
+              evidence, point it at mainnet or devnet, or start a local validator with the real SPL Token
+              program.
             </p>
             <dl class="repo reveal">
               <div>
                 <dt class="mono">runtime/</dt>
-                <dd>Observes finalized state, executes and verifies revokes</dd>
+                <dd>Reads finalized state, runs and verifies removals</dd>
               </div>
               <div>
                 <dt class="mono">sdk/</dt>
@@ -415,10 +404,10 @@
         <div class="wrap">
           <div class="final-panel reveal">
             <div>
-              <h2 id="final-title">See who can spend from your wallet.</h2>
+              <h2 id="final-title">Check your wallet</h2>
               <p>
-                Paste any address or connect a wallet. Velon lists the approvals it can verify and revokes
-                them with proof. Nothing to install.
+                Paste any address or connect a wallet. Velon lists the token approvals on it and removes the
+                ones you choose, when it can verify them. Nothing to install.
               </p>
             </div>
             <div class="cta">
