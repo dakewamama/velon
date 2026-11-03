@@ -99,7 +99,13 @@ export const PROGRAMS: Record<string, string> = {
   De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44: "Solana Subscriptions",
 };
 
-export type Delegate = { title: string; detail: string };
+// What the chain says the key is: a listed program, a program, no account, a wallet, an account of a
+// listed program, or another program's account.
+export type Delegate = {
+  kind: "listed" | "program" | "none" | "wallet" | "owned" | "account";
+  title: string;
+  detail: string;
+};
 
 /// The console's own RPC relay only answers requests that carry its header; any other endpoint,
 /// such as a local validator, is called plainly so no CORS preflight is needed.
@@ -120,7 +126,7 @@ export function describeDelegate(rpcUrl: string, key: string): Promise<Delegate>
 }
 
 async function lookupDelegate(rpcUrl: string, key: string): Promise<Delegate> {
-  if (PROGRAMS[key]) return { title: PROGRAMS[key]!, detail: "Program" };
+  if (PROGRAMS[key]) return { kind: "listed", title: PROGRAMS[key]!, detail: "Program" };
   const response = await fetch(rpcUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...rpcHeaders(rpcUrl) },
@@ -138,14 +144,20 @@ async function lookupDelegate(rpcUrl: string, key: string): Promise<Delegate> {
   if (value === undefined) throw new Error("RPC unavailable");
   if (value === null)
     return {
-      title: "Program-derived address",
+      kind: "none",
+      title: "Address",
       detail: "No account at this address; usually a program's signer",
     };
-  if (value.executable) return { title: "Program", detail: PROGRAMS[value.owner] ?? "Executable account" };
+  if (value.executable)
+    return { kind: "program", title: "Program", detail: PROGRAMS[value.owner] ?? "Executable account" };
   if (value.owner === "11111111111111111111111111111111")
-    return { title: "Wallet", detail: "A regular key that can sign on its own" };
+    return { kind: "wallet", title: "Wallet", detail: "A regular key that can sign on its own" };
   const program = PROGRAMS[value.owner];
   return program
-    ? { title: program, detail: "An account controlled by this program" }
-    : { title: "Program account", detail: `Owned by ${value.owner.slice(0, 4)}…${value.owner.slice(-4)}` };
+    ? { kind: "owned", title: program, detail: "An account controlled by this program" }
+    : {
+        kind: "account",
+        title: "Program account",
+        detail: `Owned by ${value.owner.slice(0, 4)}…${value.owner.slice(-4)}`,
+      };
 }

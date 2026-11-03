@@ -93,7 +93,7 @@ export function principalLabel(value: Json | undefined): string {
 }
 
 // Only exact calendar-like lengths get a name; anything else stays in seconds.
-function periodName(seconds: bigint): string {
+export function periodName(seconds: bigint): string {
   const names: [bigint, string][] = [
     [2592000n, "30 days"],
     [604800n, "week"],
@@ -114,6 +114,22 @@ export function mintOf(grant: ObjectValue): string | undefined {
   return undefined;
 }
 
+export const UNLIMITED = 18446744073709551615n;
+
+// One amount is stated only when the constraints are exactly one amount, plus other plain leaves.
+export function limitOf(grant: ObjectValue): { amount: bigint; more: boolean } | undefined {
+  const constraints = object(grant.constraints);
+  const leaves = constraints.kind === "all" ? array(constraints.value).map(object) : [constraints];
+  const amounts = leaves.filter(
+    (leaf) => leaf.kind === "constraint" && object(leaf.value).kind === "amount_at_most",
+  );
+  if (amounts.length !== 1 || leaves.some((leaf) => !["true", "constraint"].includes(text(leaf.kind))))
+    return undefined;
+  const amount = integer(object(amounts[0]!.value).amount);
+  if (amount < 0n || amount > UNLIMITED) throw new Error("Invalid native amount.");
+  return { amount, more: leaves.length > 1 };
+}
+
 export function permissionLabel(
   grant: ObjectValue,
   units = (amount: bigint) => `${amount.toLocaleString("en-US")} base units`,
@@ -121,22 +137,16 @@ export function permissionLabel(
   const capability = text(grant.capability).replaceAll("_", " ");
   const verb = capability[0]!.toUpperCase() + capability.slice(1);
   const usage = object(grant.usage);
-  const constraints = object(grant.constraints);
-  const leaves = constraints.kind === "all" ? array(constraints.value).map(object) : [constraints];
-  const amounts = leaves.filter(
-    (leaf) => leaf.kind === "constraint" && object(leaf.value).kind === "amount_at_most",
-  );
-  if (amounts.length !== 1 || leaves.some((leaf) => !["true", "constraint"].includes(text(leaf.kind))))
-    return `${verb} under the recorded constraints`;
-  const amount = integer(object(amounts[0]!.value).amount);
-  if (amount < 0n || amount > 18446744073709551615n) throw new Error("Invalid native amount.");
+  const limit = limitOf(grant);
+  if (!limit) return `${verb} under the recorded constraints`;
+  const { amount, more } = limit;
   const period =
     usage.kind === "recurring"
       ? ` every ${periodName(integer(usage.period_seconds))}`
       : usage.kind === "cumulative"
         ? " in total"
         : "";
-  return `${verb} up to ${units(amount)}${period}${leaves.length > 1 ? ", subject to constraints" : ""}`;
+  return `${verb} up to ${units(amount)}${period}${more ? ", subject to constraints" : ""}`;
 }
 
 export type Change = { kind: "added" | "removed" | "changed"; before?: ObjectValue; after?: ObjectValue };

@@ -397,8 +397,8 @@ if (process.env.RPC_URL) {
   // A wallet's own token accounts, as the RPC's index reports them; each is then observed natively.
   const owned: Live["owned"] = async (owner) => {
     try {
-      const { entries } = await tokenAccounts(owner);
-      const found = entries
+      const { entries, skipped } = await tokenAccounts(owner);
+      const accounts = entries
         .filter((entry) => entry.delegate !== null)
         .map(({ program, source, owner, delegate, mint, delegated, ui, decimals }) => ({
           program,
@@ -410,7 +410,8 @@ if (process.env.RPC_URL) {
           ui,
           decimals,
         }));
-      return Response.json(found, { headers: { "Cache-Control": "no-store" } });
+      // Accounts the RPC could not describe are counted, so the console never calls the wallet clear.
+      return Response.json({ accounts, skipped }, { headers: { "Cache-Control": "no-store" } });
     } catch {
       return Response.json({ error: "The wallet's token accounts could not be read." }, { status: 502 });
     }

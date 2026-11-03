@@ -76,14 +76,15 @@ async function review(page: Page, request: APIRequestContext, mode: "sign" | "re
   });
   await page.goto("/app");
   await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
-  // The wallet's accounts are read from the chain before the first one is shown.
-  const from = page.locator("#results .permission .field", { hasText: "From" }).locator(".mono").first();
+  // The wallet's accounts are read from the chain before the first one is shown. The account
+  // address lives under Technical details, so it is read from the card itself.
+  const from = page.locator("#results .permission[data-source]").first();
   await expect(from).toBeVisible({ timeout: 30000 });
-  const source = await from.innerText();
+  const source = (await from.getAttribute("data-source"))!;
   const spender = await delegate(request, source);
   expect(spender).toBeTruthy();
   await expect(page.locator("#results article")).toContainText(spender!);
-  await page.getByRole("button", { name: "Revoke", exact: true }).click();
+  await page.getByRole("button", { name: "Remove access", exact: true }).click();
   // Observation and simulation are real round trips; allow for a busy machine.
   await expect(page.getByRole("dialog")).toContainText(spender!, { timeout: 30000 });
   await expect(page.getByRole("dialog")).toContainText(source);
@@ -125,7 +126,9 @@ test("the product page lists what the chain reports and links into the console",
 
 test("owner revokes a finalized SPL delegate and the chain agrees", async ({ page, request }, info) => {
   const { source, sends } = await review(page, request, "sign", info.project.name);
-  await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toBeVisible({ timeout: 150000 });
+  await expect(page.getByRole("heading", { name: "Removed and verified", exact: true })).toBeVisible({
+    timeout: 150000,
+  });
   await expect(page.locator("#results article")).toHaveCount(0);
   await page.screenshot({ path: `test-results/live-${info.project.name}-verified.png`, fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -163,11 +166,11 @@ test("the test bench approves a real permission that the feed then reports", asy
   await expect(page.locator("#notice")).toContainText("on chain", { timeout: 30000 });
   const allowance = /Approving (\d+) base units/.exec(await page.locator("#notice").innerText())![1]!;
   await expect(page.locator(".feed-row")).toHaveCount(before + 1, { timeout: 90000 });
-  await expect(page.locator("#feed")).toContainText(`can spend ${allowance}`);
+  await expect(page.locator("#feed")).toContainText(`can take up to ${allowance} smallest units`);
   // The page only reports it; the chain is the authority.
   const row = page
     .locator(".feed-row")
-    .filter({ hasText: `can spend ${allowance}` })
+    .filter({ hasText: `can take up to ${allowance} smallest units` })
     .first();
   await row.click();
   await expect(page.locator("#results article")).toContainText(`${allowance} base units`, { timeout: 30000 });
@@ -185,17 +188,16 @@ test("a visitor with no wallet gets a permission, revokes it and keeps a replaya
   });
   await page.goto("/app");
   await page.getByRole("button", { name: "Use a test wallet" }).click();
-  await expect(page.locator("#results")).toContainText("No classic SPL token delegates found", {
+  await expect(page.locator("#results")).toContainText("No token approvals on this wallet yet", {
     timeout: 30000,
   });
   await page.getByRole("button", { name: "Get a test permission" }).click();
   await expect(page.locator("#try-status")).toContainText("Your permission is live", { timeout: 120000 });
   // The wallet granted it by signing; the chain, not the page, is asked whether it exists.
-  const source = await page
-    .locator("#results .permission .field", { hasText: "From" })
-    .locator(".mono")
+  const source = (await page
+    .locator("#results .permission[data-source]")
     .first()
-    .innerText();
+    .getAttribute("data-source"))!;
   const spender = await delegate(request, source);
   expect(spender).toBeTruthy();
   await expect(page.locator("#results article")).toContainText(spender!, { timeout: 30000 });
@@ -203,11 +205,13 @@ test("a visitor with no wallet gets a permission, revokes it and keeps a replaya
   await page.getByRole("button", { name: "Get a test permission" }).click();
   await expect(page.locator("#results article")).toHaveCount(2, { timeout: 120000 });
   const first = page.locator("#results article").first();
-  const revoked = await first.locator("dd").nth(2).innerText();
-  await first.getByRole("button", { name: "Revoke", exact: true }).click();
+  const revoked = (await first.getAttribute("data-source"))!;
+  await first.getByRole("button", { name: "Remove access", exact: true }).click();
   await expect(page.getByRole("dialog")).toContainText(revoked, { timeout: 30000 });
   await page.getByRole("button", { name: "Confirm in wallet" }).click();
-  await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toBeVisible({ timeout: 150000 });
+  await expect(page.getByRole("heading", { name: "Removed and verified", exact: true })).toBeVisible({
+    timeout: 150000,
+  });
   await expect(page.locator("#results article")).toHaveCount(1);
   await expect(page.locator("#results")).not.toContainText(revoked);
   expect(await delegate(request, revoked)).toBeUndefined();
@@ -219,5 +223,5 @@ test("a visitor with no wallet gets a permission, revokes it and keeps a replaya
   await page.getByRole("button", { name: "Permissions", exact: true }).click();
   await expect(page.locator("#results article")).toHaveCount(1, { timeout: 30000 });
   await expect(page.locator("#results")).toContainText("Who can act on your wallet");
-  await expect(page.getByRole("button", { name: "Revoke", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove access", exact: true })).toBeVisible();
 });

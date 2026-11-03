@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Velon console: observe, review and revoke permissions with native evidence."
+      content="Velon console: see who can take your tokens, and remove that access with proof."
     />
     <title>Velon Console</title>
     <link
@@ -39,7 +39,7 @@
           <header>
             <span class="pulse" aria-hidden="true"></span>
             <strong>Test chain</strong>
-            <span class="badge">You can revoke these</span>
+            <span class="badge">You can remove these</span>
           </header>
           <p class="muted">
             Token accounts with a delegate on a local Solana validator, listed as they change.
@@ -58,8 +58,8 @@
             <button type="button" data-net="mainnet">Mainnet</button>
           </div>
           <p class="muted">
-            The newest wallets that let another key spend their tokens, five at most. Only approvals a wallet
-            can revoke are listed.
+            The newest wallets that let another key take their tokens, five at most. Only approvals a wallet
+            can remove are listed.
           </p>
           <div id="mainnet-feed" class="feed"></div>
         </section>
@@ -107,7 +107,12 @@
           </div>
         </form>
         <section class="stage" id="stage" aria-label="Your wallet and what can act on it">
-          <svg id="orbit" viewBox="0 0 1000 380" role="img" aria-label="Permissions around the wallet"></svg>
+          <svg
+            id="orbit"
+            viewBox="0 0 1000 380"
+            role="group"
+            aria-label="Permissions around the wallet"
+          ></svg>
           <div class="try" id="try" hidden>
             <div class="try-start">
               <button id="use-test-wallet" class="button" type="button">Use a test wallet</button>
@@ -128,10 +133,10 @@
         <div id="notice" role="status" aria-live="polite"></div>
         <section id="results" aria-label="Permissions"></section>
         <section id="diff" hidden aria-label="Observed permission changes"></section>
-        <section id="receipts" hidden aria-label="Verified revokes"></section>
+        <section id="receipts" hidden aria-label="Receipts"></section>
       </div>
     </main>
-    <dialog id="revoke-review" aria-label="Review revoke"></dialog>
+    <dialog id="revoke-review" aria-label="Review removal"></dialog>
     <dialog id="wallet-chooser" class="chooser" aria-label="Connect a wallet"></dialog>
     <script type="module" src="./app.ts"></script>
   </body>

@@ -14,6 +14,7 @@ import {
 } from "@solana/transactions";
 import fixture from "../fixtures/spl-control.json" with { type: "json" };
 import { DEVNET_GENESIS } from "../../src/control.ts";
+import { short } from "../../src/wire.ts";
 
 const SUBSCRIPTIONS = "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44";
 // Technical and derived grants compiled by the SDK from the Mollusk-executed recurring subscription
@@ -35,8 +36,14 @@ const bytes = (address: string) => Array.from(getAddressEncoder().encode(address
 
 // `subscription` swaps the SPL grant for the subscription pair. "ended" observes at the cancel
 // time, "active" is a controlled edit with no cancel time; the signing message is a controlled
-// RevokeDelegation with the native account order, not a captured transaction.
-async function browserProvider(page: Page, mode = "success", subscription?: "ended" | "active") {
+// RevokeDelegation with the native account order, not a captured transaction. `permanent` adds a
+// Token-2022 permanent delegate on the same mint, shaped as sdk/src/token2022.rs compiles it.
+async function browserProvider(
+  page: Page,
+  mode = "success",
+  subscription?: "ended" | "active",
+  permanent = false,
+) {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const rawPublic = new Uint8Array(publicKey.export({ format: "der", type: "spki" }).subarray(-32));
   const owner = getAddressDecoder().decode(rawPublic);
@@ -92,8 +99,18 @@ async function browserProvider(page: Page, mode = "success", subscription?: "end
   const afterObservation = { ...observation, slot: 12 };
   const coverage = { complete: false, accounts: [], targets: [] };
   const current = () => (changed ? { ...grant, usage: { ...grant.usage, remaining: 24 } } : grant);
+  const mint = spl.constraints.value.asset.id;
+  const holder = {
+    ...spl,
+    id: `TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb:${mint}:permanent-delegate:spend`,
+    subject: { kind: "resource", value: { namespace: "solana:mint", id: mint } },
+    resource: { namespace: "solana:mint-token-accounts", id: mint },
+    constraints: { kind: "true" },
+    usage: { kind: "unlimited" },
+    native_context: { ...spl.native_context, protocol: "token-2022" },
+  };
   // The SPL approval to the subscription authority outlives the closed delegation.
-  const kept = subscription ? [parent] : [];
+  const kept = [...(subscription ? [parent] : []), ...(permanent ? [holder] : [])];
   const view = () => ({
     state_version: finalized ? afterId : beforeId,
     observation: finalized ? afterObservation : observation,
@@ -105,7 +122,7 @@ async function browserProvider(page: Page, mode = "success", subscription?: "end
       status: "compiled",
       authorizations: [...kept, ...(finalized ? [] : [current()])].map((authorization) => ({
         authorization,
-        availability: "active",
+        availability: "conditional",
       })),
     },
   });
@@ -330,7 +347,7 @@ async function browserProvider(page: Page, mode = "success", subscription?: "end
 async function connectAndReview(page: Page) {
   await page.goto("/app");
   await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
-  await page.getByRole("button", { name: "Revoke", exact: true }).click();
+  await page.getByRole("button", { name: "Remove access", exact: true }).click();
 }
 
 test("wallet signs exact revoke and success waits for finalized verification and scope reload", async ({
@@ -345,9 +362,9 @@ test("wallet signs exact revoke and success waits for finalized verification and
   await expect(page.getByRole("heading", { name: "Finalizing", exact: true })).toBeVisible();
   // Access is reported removed as soon as the revoke lands, before finality proves it.
   await expect(page.locator("#action-result")).toContainText("Access removed");
-  await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Removed and verified", exact: true })).toBeVisible();
   await expect(page.locator("#results article")).toHaveCount(0);
-  await expect(page.locator("#action-result")).toContainText("Revoked and verified on devnet.");
+  await expect(page.locator("#action-result")).toContainText("the access is gone on devnet.");
   await expect(page.locator("#action-result")).toContainText("c".repeat(64));
   expect(provider.counts()).toEqual({ sends: 1, polls: 2, observes: 1 });
   await page.screenshot({ path: `test-results/${info.project.name}-verified.png`, fullPage: true });
@@ -372,7 +389,7 @@ for (const mode of [
     await expect(
       page.getByRole("heading", { name: sent ? "Unconfirmed" : "Not submitted", exact: true }),
     ).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Removed and verified", exact: true })).toHaveCount(0);
     await expect(page.locator("#action-result dd")).toHaveCount(sent ? 1 : 0);
     expect(provider.counts().sends).toBe(sent ? 1 : 0);
   });
@@ -384,7 +401,7 @@ test("a revoke the network reports failed is shown at once, never as removed", a
   await page.getByRole("button", { name: "Confirm in wallet" }).click();
   await expect(page.locator("#action-result")).toContainText("the permission is still active");
   await expect(page.locator("#action-result")).not.toContainText("Access removed");
-  await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Removed and verified", exact: true })).toHaveCount(0);
   expect(provider.counts().sends).toBe(1);
 });
 
@@ -393,7 +410,9 @@ test("a busy gateway while finalizing is asked again, and the receipt is kept", 
   await connectAndReview(page);
   await page.getByRole("button", { name: "Confirm in wallet" }).click();
   // Four polls two seconds apart.
-  await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "Removed and verified", exact: true })).toBeVisible({
+    timeout: 20_000,
+  });
   await expect(page.locator("#action-result")).toContainText("c".repeat(64));
   expect(provider.counts()).toMatchObject({ sends: 1, polls: 4 });
   expect(await page.evaluate(() => localStorage.getItem("velon:receipts"))).toContain("c".repeat(64));
@@ -403,8 +422,8 @@ test("an unknown submission is settled by finalized verification, never resent",
   const provider = await browserProvider(page, "unknown");
   await connectAndReview(page);
   await page.getByRole("button", { name: "Confirm in wallet" }).click();
-  await expect(page.locator("#action-result")).toContainText("Submission response is uncertain");
-  await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toBeVisible();
+  await expect(page.locator("#action-result")).toContainText("didn't get a clear answer");
+  await expect(page.getByRole("heading", { name: "Removed and verified", exact: true })).toBeVisible();
   await expect(page.locator("#results article")).toHaveCount(0);
   expect(provider.counts()).toMatchObject({ sends: 1, polls: 2 });
 });
@@ -431,12 +450,15 @@ test("an ended subscription is revoked by its delegation and the token approval 
 }) => {
   const provider = await browserProvider(page, "success", "ended");
   await connectAndReview(page);
-  await expect(card(page, technical.id).getByRole("button", { name: "Revoke", exact: true })).toHaveCount(0);
+  await expect(
+    card(page, technical.id).getByRole("button", { name: "Remove access", exact: true }),
+  ).toHaveCount(0);
+  // The delegation's rent goes to whoever paid for it, which need not be this wallet.
   await expect(page.getByRole("dialog")).toContainText(
-    "Subscription delegation closed, rent returned to you; the token approval to the subscription authority remains",
+    "The ended subscription's record is closed, and its SOL deposit goes back to whoever paid for it. The approval Solana Subscriptions holds on this account stays.",
   );
   await page.getByRole("button", { name: "Confirm in wallet" }).click();
-  await expect(page.getByRole("heading", { name: "Revoked", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Removed and verified", exact: true })).toBeVisible();
   await expect(card(page, derived.id)).toHaveCount(0);
   await expect(card(page, technical.id)).toHaveCount(1);
   expect(provider.counts()).toEqual({ sends: 1, polls: 2, observes: 1 });
@@ -448,7 +470,8 @@ test("an active subscription and its technical approval offer no revoke", async 
   await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
   await expect(card(page, derived.id)).toBeVisible();
   await expect(card(page, technical.id)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Revoke", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Remove access", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /remove access/i })).toHaveCount(0);
 });
 
 test("a subscription simulation that changes the grant instead of removing it is refused", async ({
@@ -462,4 +485,68 @@ test("a subscription simulation that changes the grant instead of removing it is
   );
   await expect(page.getByRole("dialog")).not.toBeVisible();
   expect(provider.counts().sends).toBe(0);
+});
+
+test("the card leads with one plain sentence and keeps the evidence under Technical details", async ({
+  page,
+}) => {
+  await browserProvider(page);
+  await page.goto("/app");
+  await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+  const row = card(page, fixture.grant.id);
+  // The bench delegate is a plain wallet, as the RPC reports it; the sentence names it so.
+  await expect(row.getByRole("heading", { level: 3 })).toHaveText(
+    `Wallet ${short(fixture.grant.principal.value)} can take up to 25 of this token's smallest units in total from your wallet without asking you again.`,
+  );
+  await expect(row.locator(".availability")).toHaveText("In force");
+  await expect(row.getByRole("button", { name: "Remove access", exact: true })).toBeVisible();
+  const details = row.locator(".technical");
+  await expect(details).toBeHidden();
+  await expect(row).not.toContainText("base units", { useInnerText: true });
+  await expect(row).not.toContainText("Acts directly", { useInnerText: true });
+  const toggle = row.getByRole("button", { name: "Technical details" });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(details).toBeVisible();
+  await expect(details).toContainText("25 base units");
+  await expect(details).toContainText("SPL Token");
+  await expect(details).toContainText(fixture.signing.source);
+  await expect(details.getByText("Exact ARM authorization", { exact: true })).toBeVisible();
+  await toggle.click();
+  await expect(details).toBeHidden();
+});
+
+test("a token name its creator chose is labelled and never enters the sentence", async ({ page }) => {
+  await browserProvider(page);
+  const mint = fixture.grant.constraints.value.asset.id;
+  await page.route("**/api/live/tokens", (route) =>
+    route.fulfill({ json: { [mint]: { name: "USD Coin", symbol: "USDC", image: null } } }),
+  );
+  await page.goto("/app");
+  await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+  const row = card(page, fixture.grant.id);
+  await expect(row.locator(".token")).toContainText("USDC");
+  await expect(row.locator(".token .unverified")).toHaveText("unverified");
+  await expect(row.getByRole("heading", { level: 3 })).toContainText("25 of this token's smallest units");
+  await expect(row.getByRole("heading", { level: 3 })).not.toContainText("USDC");
+});
+
+test("a permanent delegate is explained and never offered for removal", async ({ page }) => {
+  await browserProvider(page, "success", undefined, true);
+  await page.goto(`/app#${fixture.signing.source}`);
+  const holder = page.locator('#results article[data-id$=":permanent-delegate:spend"]');
+  await expect(holder.getByRole("heading", { level: 3 })).toContainText(
+    "out of any account that holds it. It is set on the token itself, so holders can't remove it.",
+  );
+  // Before connecting, only what connecting could make removable offers it.
+  await expect(
+    card(page, fixture.grant.id).getByRole("button", { name: "Connect to remove access", exact: true }),
+  ).toBeVisible();
+  await expect(holder.getByRole("button", { name: /remove access/i })).toHaveCount(0);
+  await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+  await expect(
+    card(page, fixture.grant.id).getByRole("button", { name: "Remove access", exact: true }),
+  ).toBeVisible();
+  await expect(holder.getByRole("button", { name: /remove access/i })).toHaveCount(0);
 });

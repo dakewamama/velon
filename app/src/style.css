@@ -1426,7 +1426,6 @@ input:focus {
   margin: 0;
 }
 .section-heading h2,
-#detail h2,
 #diff h2 {
   font-size: 22px;
   letter-spacing: -0.03em;
@@ -1438,6 +1437,40 @@ input:focus {
 }
 .state-meta {
   margin: 0 0 4px;
+}
+.coverage-note {
+  max-width: 72ch;
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.provenance > .eyebrow {
+  margin-top: 8px;
+}
+/* The words the cards use, explained once per list. */
+.glossary {
+  margin: 0 0 12px;
+}
+/* Stays a list item so the browser keeps its open and closed marker. */
+.glossary > summary {
+  padding: 5px 0;
+  font-size: 14px;
+  line-height: 18px;
+}
+.glossary dl {
+  display: grid;
+  gap: 10px;
+  max-width: 72ch;
+  margin: 8px 0 0;
+}
+.glossary dt {
+  color: inherit;
+  font-weight: 600;
+}
+.glossary dd {
+  margin: 2px 0 0;
+  color: inherit;
+  font-family: var(--sans);
+  font-size: 14px;
 }
 .permission {
   padding: 26px 28px;
@@ -1471,38 +1504,67 @@ input:focus {
   background: var(--wash);
   text-transform: capitalize;
 }
+/* The chip's words carry its meaning; colour only repeats them. The border keeps its edge in
+   forced colours, and a dashed one marks what the network reported but Velon did not verify. */
 .availability {
   padding: 3px 10px;
+  border: 1px solid transparent;
   border-radius: 999px;
   background: var(--wash);
-  color: var(--muted);
+  color: var(--body);
   font-size: 12px;
   font-weight: 560;
   text-transform: capitalize;
 }
 .availability:is([data-state="conditional"], [data-state="active"]) {
+  border-color: rgb(11 125 87 / 35%);
   background: var(--accent-wash);
-  color: var(--accent);
+  color: var(--ink-2);
+}
+.reported .availability {
+  border: 1px dashed var(--muted);
+  background: transparent;
 }
 .permission h3 {
-  margin: 16px 0 6px;
-  font-size: clamp(21px, 2.3vw, 28px);
-  line-height: 1.12;
-  letter-spacing: -0.035em;
+  margin: 14px 0 8px;
+  font-size: clamp(18px, 1.9vw, 22px);
+  line-height: 1.3;
+  letter-spacing: -0.02em;
   overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+/* An unlimited approval is the one users most often forget; its sentence says so and reads as a warning. */
+.permission.unlimited > h3 {
+  color: var(--warn);
+}
+/* Why a permission is not in force, under the sentence it qualifies. */
+.why {
+  max-width: 62ch;
+  margin: 0 0 14px;
+  color: var(--body);
+  font-size: 14px;
+}
+/* The review dialog's sentence; the product page keeps its own .lead. */
+.review-lead {
+  margin: 12px 0 8px;
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1.4;
+}
+.technical {
+  margin-top: 16px;
+}
+.technical > summary {
+  color: var(--ink);
+  font-size: 14px;
+}
+.technical dl {
+  margin-top: 12px;
 }
 .remaining {
   margin: 0 0 20px;
   font-size: 15px;
   font-variant-numeric: tabular-nums;
-}
-/* An unlimited approval is the one users most often forget; it reads as a warning. */
-.remaining.unlimited {
-  padding: 10px 14px;
-  border-radius: var(--r-s);
-  background: var(--warn-wash);
-  color: var(--warn);
-  font-weight: 600;
 }
 .start {
   margin: 8px 0 24px;
@@ -2177,11 +2239,8 @@ dialog .action-button {
   transform: none;
 }
 .console:not(.is-live) #browse,
-.console.is-live :is(.state-meta, .summary) {
+.console.is-live :is(.state-meta > .provenance, .summary) {
   display: none;
-}
-.console.is-live .permission:has(#detail) > dl {
-  display: grid;
 }
 .console.is-live .workspace {
   order: 0;
@@ -2816,6 +2875,41 @@ dialog .action-button {
   background: var(--mint);
   color: var(--ink);
 }
+/* The accent ring is too dark to see on the forest; the cream surfaces keep it. */
+.console :focus-visible {
+  outline-color: var(--mint);
+}
+.console :is(.permission, dialog, .holdings, .start, .checking) :focus-visible {
+  outline-color: var(--accent);
+}
+/* On the forest page the glossary and the coverage line take its light text. */
+.console .glossary > summary {
+  color: var(--on-forest);
+}
+.console .glossary dt {
+  color: var(--on-forest);
+}
+/* So do the list's heading, its empty state and the evidence line; raw evidence keeps its wash. */
+.console .section-heading :is(h2, .link-button),
+.console .state-meta summary {
+  color: var(--on-forest);
+}
+.console .section-heading .link-button {
+  text-decoration-color: var(--forest-line-strong);
+}
+.console .section-heading .link-button:hover {
+  text-decoration-color: var(--mint);
+}
+.console :is(#results, #receipts, #diff) > .empty,
+.console .state-meta .eyebrow {
+  color: var(--on-forest-2);
+}
+.console .state-meta pre {
+  color: var(--body);
+}
+.console :is(.permission, dialog) .technical > summary {
+  color: var(--ink);
+}
 /* Cream surfaces keep the console's dark text; the page's light text stays outside them. */
 .console :is(.permission, dialog, .reported) {
   color: var(--body);
@@ -2911,7 +3005,7 @@ dialog .action-button {
 }
 .holding-status.ok {
   background: var(--accent-wash);
-  color: var(--accent);
+  color: var(--ink-2);
 }
 .holding-status.risk {
   background: var(--warn-wash);
@@ -2947,42 +3041,43 @@ dialog .action-button {
 }
 .console .permission.compact {
   display: grid;
-  grid-template-columns: minmax(150px, 0.9fr) minmax(0, 1.3fr) minmax(0, 1.3fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px 20px;
-  padding: 14px 20px;
+  gap: 4px 24px;
+  padding: 16px 20px;
   border-radius: 16px;
   animation: none;
 }
+/* Token and status, then the sentence and its reason; the holder is already named in the sentence. */
 .permission.compact > .permission-header {
-  display: contents;
-}
-.permission.compact .permission-header > :is(.badge, .availability) {
-  display: none;
-}
-.permission.compact .token {
   grid-column: 1;
   grid-row: 1;
+  justify-content: flex-start;
+}
+.permission.compact .permission-header .token {
+  margin-right: 0;
   font-weight: 600;
 }
 .permission.compact > h3 {
-  grid-column: 2;
-  grid-row: 1;
-  margin: 0;
-  font-size: 15px;
+  grid-column: 1;
+  grid-row: 2;
+  margin: 2px 0 0;
+  font-size: 16px;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
-.permission.compact > .delegate {
-  grid-column: 3;
-  grid-row: 1;
+.permission.compact > .why {
+  grid-column: 1;
+  grid-row: 3;
   margin: 0;
-  padding: 0;
-  background: none;
+  font-size: 13.5px;
+}
+.permission.compact > .delegate {
+  display: none;
 }
 .permission.compact > .permission-actions {
-  grid-column: 4;
-  grid-row: 1;
+  grid-column: 2;
+  grid-row: 1 / span 2;
   margin: 0;
   padding: 0;
   border: 0;
@@ -2995,22 +3090,10 @@ dialog .action-button {
 .permission.compact .permission-actions .link-button {
   font-size: 14px;
 }
-/* The explanation, amounts and addresses wait until the row is opened. */
-.permission.compact > :is(.explain, .remaining, dl, .notice) {
-  display: none;
+.permission.compact > .technical {
   grid-column: 1 / -1;
-}
-.permission.compact:has(#detail) > :is(.explain, .remaining, dl) {
-  display: block;
-}
-.permission.compact:has(#detail) > dl {
-  display: grid;
-}
-.permission.compact > #detail {
-  grid-column: 1 / -1;
-}
-.permission.compact:has(.remaining.unlimited) > h3 {
-  color: var(--warn);
+  grid-row: 4;
+  margin-top: 8px;
 }
 .holdings.folded .holdings-list,
 .holdings.folded > .muted {
@@ -3036,24 +3119,17 @@ dialog .action-button {
 }
 @media (max-width: 760px) {
   .console .permission.compact {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     padding: 14px 16px;
   }
-  .permission.compact .token {
-    grid-column: 1;
-  }
-  .permission.compact > h3 {
-    grid-column: 1 / -1;
-    grid-row: 2;
-  }
-  .permission.compact > .delegate {
-    grid-column: 1 / -1;
-    grid-row: 3;
-  }
   .permission.compact > .permission-actions {
-    grid-column: 1 / -1;
+    grid-column: 1;
     grid-row: 4;
+    margin-top: 8px;
     justify-content: space-between;
+  }
+  .permission.compact > .technical {
+    grid-row: 5;
   }
 }
 /* With a wallet's approvals listed, the picture shrinks so the list starts on the first screen. */
@@ -3165,14 +3241,14 @@ dialog .action-button {
 }
 .checking-who,
 .checking-amount {
-  color: var(--muted);
+  color: var(--body);
   font-family: var(--mono, ui-monospace, monospace);
   font-size: 0.8rem;
 }
 .checking-state {
   min-width: 7.5em;
   padding: 2px 10px;
-  color: var(--muted);
+  color: var(--body);
   font-size: 0.78rem;
   text-align: center;
   border: 1px solid var(--line);
@@ -3182,7 +3258,7 @@ dialog .action-button {
   animation: checking 1.4s ease-in-out infinite;
 }
 .checking .verified .checking-state {
-  color: var(--accent);
+  color: var(--ink-2);
   background: var(--accent-wash);
   border-color: transparent;
 }
