@@ -1,5 +1,5 @@
 use cataloger::{Catalog, ProgramVersion};
-use catalyst_indexer::rpc::{Scope, action_router, observe, simulate_revoke};
+use catalyst_indexer::rpc::{Scope, action_router, observe_catalogued, simulate_revoke};
 use catalyst_indexer::{Journal, Snapshot, router};
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -68,7 +68,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Duration::from_secs(30),
                 CommitmentConfig::finalized(),
             );
-            let snapshot = observe(&client, scope).await?;
+            let snapshot = observe_catalogued(&client, scope, &catalog).await?;
             let record = journal.ingest(snapshot, &catalog).await?;
             println!("{}", serde_json::to_string(&record)?);
         }

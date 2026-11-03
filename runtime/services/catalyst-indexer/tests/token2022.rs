@@ -176,6 +176,33 @@ fn client(reply: Value) -> RpcClient {
     )
 }
 
+#[test]
+fn an_uncatalogued_program_is_not_downloaded_with_every_observation() {
+    let programdata = get_program_data_address(&token2022::Token2022Adapter.protocol().program_id);
+    let scope = rpc::Scope {
+        cluster: CLUSTER.into(),
+        accounts: vec![owner(), delegate()],
+        targets: snapshot().targets,
+        min_context_slot: None,
+    };
+    // A pinned build is read in full and checked byte for byte at every observation.
+    assert!(scope.accounts().unwrap().contains(&programdata));
+    assert!(
+        scope
+            .accounts_known(&catalog())
+            .unwrap()
+            .contains(&programdata)
+    );
+    // Without one the program is still read, so its owner and identity are observed, but its
+    // bytes are not: the approval is reported unsupported whatever they are.
+    let unpinned = scope
+        .accounts_known(&Catalog::new(vec![]).unwrap())
+        .unwrap();
+    assert!(!unpinned.contains(&programdata));
+    assert!(unpinned.contains(&token2022::Token2022Adapter.protocol().program_id));
+    assert!(unpinned.contains(&source()));
+}
+
 #[tokio::test]
 async fn a_real_mainnet_token_2022_approval_compiles_to_its_exact_delegate() {
     let journal = Journal::open("sqlite::memory:").await.unwrap();

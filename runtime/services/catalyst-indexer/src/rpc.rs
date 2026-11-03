@@ -128,6 +128,17 @@ pub struct Scope {
 
 impl Scope {
     pub fn accounts(&self) -> Result<Vec<Pubkey>, Error> {
+        self.keys(|_| true)
+    }
+
+    /// The accounts to read when only catalogued programs can be verified. A program with no
+    /// catalogued build is reported unsupported whatever its bytes are, so its programdata,
+    /// 1.4 MB for Token-2022, is not downloaded and stored with every observation.
+    pub fn accounts_known(&self, catalog: &Catalog) -> Result<Vec<Pubkey>, Error> {
+        self.keys(|program| catalog.knows(&self.cluster, program))
+    }
+
+    fn keys(&self, verifiable: impl Fn(&Pubkey) -> bool) -> Result<Vec<Pubkey>, Error> {
         if self.cluster.is_empty() || self.targets.is_empty() {
             return Err(Error::InvalidObservation("empty scope"));
         }
@@ -165,7 +176,7 @@ impl Scope {
             token2022::Token2022Adapter.protocol().program_id,
             subscriptions::DelegationAdapter.protocol().program_id,
         ] {
-            if keys.contains(&program) {
+            if keys.contains(&program) && verifiable(&program) {
                 keys.insert(get_program_data_address(&program));
             }
         }
@@ -202,6 +213,24 @@ fn clock(accounts: &[(Pubkey, Account)], slot: u64) -> Result<Clock, AdapterErro
 
 pub async fn observe(client: &RpcClient, scope: Scope) -> Result<Snapshot, Error> {
     let keys = scope.accounts()?;
+    observe_keys(client, scope, keys).await
+}
+
+/// Observes a scope reading program bytes only for programs the catalog can verify.
+pub async fn observe_catalogued(
+    client: &RpcClient,
+    scope: Scope,
+    catalog: &Catalog,
+) -> Result<Snapshot, Error> {
+    let keys = scope.accounts_known(catalog)?;
+    observe_keys(client, scope, keys).await
+}
+
+async fn observe_keys(
+    client: &RpcClient,
+    scope: Scope,
+    keys: Vec<Pubkey>,
+) -> Result<Snapshot, Error> {
     if !client.commitment().is_finalized() {
         return Err(Error::InvalidObservation("finalized commitment required"));
     }

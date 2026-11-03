@@ -107,6 +107,13 @@ impl Catalog {
         Ok(Self { versions })
     }
 
+    /// Whether any build of the program is catalogued for the cluster, at any slot.
+    pub fn knows(&self, cluster: &str, program_id: &Pubkey) -> bool {
+        self.versions
+            .iter()
+            .any(|known| known.cluster == cluster && &known.program_id == program_id)
+    }
+
     pub fn resolve(
         &self,
         cluster: &str,
