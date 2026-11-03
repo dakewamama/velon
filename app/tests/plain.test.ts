@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { array, object, readJson, short, text, UNLIMITED, type ObjectValue } from "../src/wire.ts";
 import {
+  allowance,
   assetMint,
   decimal,
   GLOSSARY,
@@ -372,4 +373,15 @@ test("the glossary explains the words the cards use", () => {
     expect.arrayContaining(["Approval", "Token account", "Subscription", "Remove access"]),
   );
   for (const [, meaning] of GLOSSARY) expect(meaning).not.toContain("\u2014");
+});
+
+test("a wallet row's amount names a listed token only, and says smallest units when the scale is unknown", () => {
+  expect(allowance(limit(spl(), UNLIMITED), USDC)).toBe("No limit");
+  expect(allowance(limit(spl(), 18446744073709551555n), USDC)).toBe("Up to 18,446,744,073,709.551555 USDC");
+  expect(allowance(limit(spl(), 2_500_000n), USDC)).toBe("Up to 2.5 USDC");
+  // A creator-set symbol stays in the token cell; the amount stands alone.
+  expect(allowance(limit(spl(), 2_500_000n), { symbol: "USDC", verified: false, decimals: 6 })).toBe(
+    "Up to 2.5",
+  );
+  expect(allowance(limit(spl(), 25n))).toBe("Up to 25 smallest units");
 });

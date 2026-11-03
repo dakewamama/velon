@@ -230,6 +230,24 @@ export function sentence(grant: ObjectValue, facts: Facts = {}): string {
   return `${holder} ${can} ${act}${state.starting}${state.ending}${limit.more ? rules(grant) : ""}${asks}.`;
 }
 
+/// The "How much" cell of a wallet row. The token cell names the token, so a number stands alone
+/// unless the token is listed; an unknown scale is said to be in smallest units.
+export function allowance(grant: ObjectValue, token?: Token): string {
+  const limit = limitOf(grant);
+  if (!limit) return "Set by rules, see details";
+  const usage = object(grant.usage);
+  if (usage.kind === "cumulative" && usage.remaining != null && integer(usage.remaining) === 0n)
+    return "Nothing left";
+  if (limit.amount === UNLIMITED) return "No limit";
+  const units =
+    token?.decimals === undefined
+      ? `${limit.amount.toLocaleString("en-US")} smallest units`
+      : `${decimal(limit.amount, token.decimals)}${listed(token) ? ` ${listed(token)}` : ""}`;
+  return usage.kind === "recurring"
+    ? `Up to ${units} every ${periodName(integer(usage.period_seconds))}`
+    : `Up to ${units}`;
+}
+
 // Mirrors the runtime's availability_at order, so the reason matches why it said so.
 function inactive(grant: ObjectValue, now?: bigint): Status {
   const lifecycle = object(grant.lifecycle);

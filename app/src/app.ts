@@ -34,6 +34,7 @@ import {
   reported as networkReport,
   sentence,
   status as rate,
+  allowance as allowanceCell,
   subscriptionsAuthority,
   UNVERIFIED,
   who,
@@ -303,14 +304,14 @@ function evidence(grant: ObjectValue): HTMLElement[] {
 
 // One card's technical details are open at a time. Only card toggles are closed here, so the
 // holdings panel keeps its own state.
-function toggleDetail(button: HTMLButtonElement, panel: HTMLElement, grant: ObjectValue) {
+function toggleDetail(button: HTMLButtonElement, panel: HTMLElement, grant?: ObjectValue) {
   const open = button.getAttribute("aria-expanded") === "true";
   for (const other of results.querySelectorAll<HTMLButtonElement>(".permission-actions [aria-expanded]")) {
     other.setAttribute("aria-expanded", "false");
     document.getElementById(other.getAttribute("aria-controls") ?? "")?.setAttribute("hidden", "");
   }
   if (open) return;
-  if (!panel.dataset.built) {
+  if (grant && !panel.dataset.built) {
     panel.append(...evidence(grant));
     panel.dataset.built = "true";
   }
@@ -380,15 +381,17 @@ function tokenChip(mint: string | undefined, id: string): HTMLElement {
   return asset;
 }
 
-// The face says who can do what, in one sentence, with one status and one action.
+// The face says who can do what, in one sentence, with one status and one action. In a wallet's
+// list it is one row: token, holder and amount, with the sentence as its name and under Details.
 function card(
   grant: ObjectValue,
   view: ObjectValue,
   availability: string,
   scope?: string,
   viewer: Viewer = { address: connected?.account.address, yours: true },
+  list = false,
 ): HTMLElement {
-  const row = node("article", "", "permission");
+  const row = node("article", "", list ? "permission compact" : "permission");
   row.dataset.id = text(grant.id);
   const actor = object(grant.principal);
   row.dataset.who = actor.kind === "identity" ? short(text(actor.value)) : "several keys";
@@ -410,15 +413,25 @@ function card(
   const about = `${asset.id} ${title.id}`;
   header.append(asset, state);
   row.setAttribute("aria-labelledby", title.id);
+  // A row shows its sentence only under Details; screen readers get it as the row's name.
+  const said = node("p", title.textContent, "sentence");
+  said.setAttribute("aria-hidden", "true");
+  if (list) title.className = "visually-hidden";
   row.append(header, title);
   if (rating.reason) row.append(node("p", rating.reason, "why"));
   row.append(
-    delegate(grant, (found) => (title.textContent = sentence(grant, { ...known, delegate: found }))),
+    delegate(
+      grant,
+      (found) => (title.textContent = said.textContent = sentence(grant, { ...known, delegate: found })),
+      list,
+    ),
   );
+  if (list) row.append(node("span", allowanceCell(grant, known.token), "row-amount"));
   const actions = node("div", "", "permission-actions");
   const panel = technical(grant, availability, rating);
   panel.id = `${title.id}-details`;
-  const button = node("button", "Technical details", "link-button");
+  if (list) panel.prepend(said);
+  const button = node("button", list ? "Details" : "Technical details", "link-button");
   button.type = "button";
   button.setAttribute("aria-expanded", "false");
   button.setAttribute("aria-controls", panel.id);
@@ -427,6 +440,17 @@ function card(
   actions.append(button);
   row.append(actions, panel);
   const protocol = text(object(grant.native_context).protocol);
+  // Only the token account's owner can sign a revoke; that is the chain's rule, not a setting.
+  // Never offered for a permanent delegate, a subscription's technical approval or a subscription
+  // that has not ended: connecting would not make any of them removable.
+  const holder = object(grant.subject);
+  const owner = holder.kind === "identity" ? text(holder.value) : "";
+  const removable =
+    owner !== "" &&
+    grant.capability === "spend" &&
+    object(grant.lifecycle).kind === "active" &&
+    (protocol !== "subscriptions" || ended(grant, view));
+  if (scope && removable) row.dataset.removable = owner;
   if (
     control &&
     scope &&
@@ -450,16 +474,8 @@ function card(
     };
     revocable.set(row, start);
     actions.prepend(revoke);
-  } else if (scope && grant.capability === "spend") {
-    // Only the token account's owner can sign a revoke; that is the chain's rule, not a setting.
-    const holder = object(grant.subject);
-    const owner = holder.kind === "identity" ? text(holder.value) : "";
-    // Never offered for a permanent delegate, a subscription's technical approval or a subscription
-    // that has not ended: connecting would not make any of them removable.
-    const removable =
-      owner !== "" &&
-      object(grant.lifecycle).kind === "active" &&
-      (protocol !== "subscriptions" || ended(grant, view));
+  } else if (scope && grant.capability === "spend" && !list) {
+    // A wallet's list says this once, above its rows.
     if (!connected) {
       if (removable) {
         const start = labelled(node("button", "Connect to remove access", "action-button"), "wallet");
@@ -508,7 +524,7 @@ function revokeKey(grant: ObjectValue): string | undefined {
 
 // Who holds the permission, named from what the chain says the key is. The card's sentence is
 // told once the answer arrives; until then, or if it never does, the key is only an address.
-function delegate(grant: ObjectValue, named: (found: Delegate) => void): HTMLElement {
+function delegate(grant: ObjectValue, named: (found: Delegate) => void, brief = false): HTMLElement {
   const actor = object(grant.principal);
   const line = node("div", "", "delegate");
   if (actor.kind !== "identity") {
@@ -521,15 +537,19 @@ function delegate(grant: ObjectValue, named: (found: Delegate) => void): HTMLEle
   const key = text(actor.value);
   // The Subscriptions authority is named by the verified grant, not by the RPC.
   const subscriptions = subscriptionsAuthority(grant);
-  const name = node("strong", subscriptions ? "Solana Subscriptions" : short(key));
-  const detail = node("span", subscriptions ? `Program authority · ${short(key)}` : "Address", "muted");
+  const name = node("strong", subscriptions ? "Solana Subscriptions" : brief ? "Address" : short(key));
+  const detail = node(
+    "span",
+    subscriptions ? `Program authority · ${short(key)}` : brief ? short(key) : "Address",
+    "muted",
+  );
   line.append(avatar(key), name, detail);
   if (control && !subscriptions)
     void describeDelegate(control.rpcUrl, key)
       .then((found) => {
         holders.set(key, found);
         name.textContent = found.title;
-        detail.textContent = `${found.detail} · ${short(key)}`;
+        detail.textContent = brief ? short(key) : `${found.detail} · ${short(key)}`;
         named(found);
       })
       .catch(() => {});
@@ -1166,6 +1186,66 @@ function unverified(
   return row;
 }
 
+// An approval Velon could not verify, as one row of a wallet's list. Why is said once per group.
+function reportedRow(entry: ObjectValue, said: string, link: string, extra: HTMLElement[]): HTMLElement {
+  const row = node("article", "", "permission compact reported");
+  const mint = text(entry.mint);
+  const title = node("h3", said, "visually-hidden");
+  title.id = `permission-${++cardCount}`;
+  row.setAttribute("aria-labelledby", title.id);
+  const header = node("div", "", "permission-header");
+  header.append(tokenChip(mint, `${title.id}-token`));
+  const key = text(entry.delegate);
+  const who = node("div", "", "delegate");
+  const name = node("strong", "Address");
+  who.append(avatar(key), name, node("span", short(key), "muted"));
+  if (control)
+    void describeDelegate(control.rpcUrl, key)
+      .then((found) => (name.textContent = found.title))
+      .catch(() => {});
+  const open = labelled(node("a", "Explorer", "link-button"), "external");
+  open.href = link;
+  open.target = "_blank";
+  open.rel = "noreferrer";
+  open.setAttribute("aria-describedby", `${title.id}-token ${title.id}`);
+  // The same Details toggle as a verified row, so both kinds of row work alike.
+  const panel = node("section", "", "detail technical");
+  panel.id = `${title.id}-details`;
+  panel.hidden = true;
+  const toggle = node("button", "Details", "link-button");
+  toggle.type = "button";
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.setAttribute("aria-controls", panel.id);
+  toggle.setAttribute("aria-describedby", `${title.id}-token ${title.id}`);
+  toggle.onclick = () => toggleDetail(toggle, panel);
+  const actions = node("div", "", "permission-actions");
+  actions.append(open, toggle);
+  const facts = node("dl");
+  facts.append(
+    address("Who", key, "holder"),
+    address("Token account", text(entry.source)),
+    address("Owner", text(entry.owner)),
+    address("Token", mint),
+    ...extra,
+  );
+  const sentence = node("p", said, "sentence");
+  sentence.setAttribute("aria-hidden", "true");
+  panel.append(sentence, facts);
+  const amount = text(entry.amount) === String(UNLIMITED) ? "No limit" : `Up to ${text(entry.ui)}`;
+  row.append(header, title, who, node("span", amount, "row-amount"), actions, panel);
+  return row;
+}
+
+// A titled group of wallet rows, with the column names the rows line up under.
+function group(heading: string, about: string[], rows: HTMLElement[]): HTMLElement {
+  const block = node("section", "", "approval-group");
+  const head = node("div", "", "approvals-head");
+  head.setAttribute("aria-hidden", "true");
+  head.append(node("span", "Token"), node("span", "Who can take it"), node("span", "How much"));
+  block.append(node("h2", heading), ...about.map((line) => node("p", line, "group-note")), head, ...rows);
+  return block;
+}
+
 // Every permission across the connected wallet's token accounts.
 // Each account is observed through the runtime; the RPC's index only says where to look.
 // Any wallet can be read; only the connected owner can sign a revoke for it.
@@ -1376,10 +1456,14 @@ async function scanWallet(
       last = view;
       for (const item of array(object(view.projection).authorizations ?? []))
         cards.push(
-          card(authorization(object(item).authorization), view, text(object(item).availability), scope, {
-            address: owner,
-            yours,
-          }),
+          card(
+            authorization(object(item).authorization),
+            view,
+            text(object(item).availability),
+            scope,
+            { address: owner, yours },
+            true,
+          ),
         );
     }
   } catch (error) {
@@ -1393,30 +1477,57 @@ async function scanWallet(
   const holdings = await wallet.catch(() => undefined);
   if (signal.aborted) return false;
   if (holdings) content.append(holdings);
-  content.append(node("h2", yours ? "Who can act on your wallet" : "Who can act on this wallet"), glossary());
-  if (control?.network === "mainnet")
-    content.append(
+  const reportedRows = unsupported.map(([entry, reason]) => ({
+    reason,
+    unlimited: text(entry.amount) === String(UNLIMITED),
+    row: reportedRow(
+      entry,
+      networkReport({
+        delegate: text(entry.delegate),
+        ui: text(entry.ui),
+        unlimited: text(entry.amount) === String(UNLIMITED),
+        where: yours ? "your wallet" : "this wallet",
+        token: tokenName(text(entry.mint)),
+      }),
+      explorer("address", text(entry.source)),
+      [field("Program", entry.program === "spl-token-2022" ? "Token-2022" : "SPL Token")],
+    ),
+  }));
+  const total = cards.length + reportedRows.length;
+  const unlimited =
+    cards.filter((row) => row.dataset.amount === "∞").length +
+    reportedRows.filter((row) => row.unlimited).length;
+  const whose = yours ? "your wallet" : "this wallet";
+  // The answer first: how many, how many have no limit, and the one thing to do about it.
+  const lead = node("section", "", "wallet-summary");
+  if (total) {
+    lead.append(
+      node("h2", `${total} approval${total === 1 ? "" : "s"} on ${whose}`),
       node(
         "p",
-        "This is mainnet. Removing access is a real transaction with a small SOL fee. Velon tries the exact transaction against the chain's final state first, then asks you to sign.",
-        "notice",
+        `Each one lets the address shown take that token from ${whose} without asking again${unlimited ? `. ${unlimited === total ? (total === 1 ? "It has" : "All of them have") : `${unlimited} of them ${unlimited === 1 ? "has" : "have"}`} no limit` : ""}. If you don't use the app behind one any more, remove it.`,
+        "muted",
       ),
     );
-  if (last) content.append(metadata(last, { read: owned.length - unread, listed: owned.length }));
-  // In a wallet, each permission is one row; its evidence opens under Technical details.
-  for (const row of cards) row.classList.add("compact");
-  if (cards.length) {
-    const unlimited = cards.filter((row) => row.dataset.amount === "∞").length;
-    content.append(
-      node(
-        "p",
-        `${cards.length} approval${cards.length === 1 ? "" : "s"} on this wallet${unlimited ? ` · ${unlimited} unlimited` : ""}`,
-        "approvals-summary",
-      ),
-    );
-    cards.sort((a, b) => Number(b.dataset.amount === "∞") - Number(a.dataset.amount === "∞"));
+    const removable = cards.filter((row) => row.dataset.removable);
     const batch = cards.filter((row) => row.dataset.amount === "∞" && revocable.has(row));
-    if (batch.length > 1) {
+    if (!connected && removable.length) {
+      const start = labelled(
+        node("button", yours ? "Connect wallet to remove" : "Connect this wallet to remove", "action-button"),
+        "wallet",
+      );
+      start.type = "button";
+      start.onclick = () => connectButton.click();
+      lead.append(start);
+    } else if (connected && removable.some((row) => row.dataset.removable !== connected!.account.address))
+      lead.append(
+        node(
+          "p",
+          `Only the owner of this wallet, ${short(owner)}, can remove these. Connect it to do so.`,
+          "muted",
+        ),
+      );
+    else if (batch.length > 1) {
       const all = labelled(node("button", `Review all ${batch.length} unlimited`, "action-button"), "revoke");
       all.type = "button";
       all.onclick = () => {
@@ -1424,9 +1535,16 @@ async function scanWallet(
         queue = rest;
         first!();
       };
-      content.append(all);
+      lead.append(all);
     }
-  }
+  } else
+    lead.append(
+      node(
+        "h2",
+        unread || skipped ? `Velon couldn't check all of ${whose}` : `No token approvals found on ${whose}`,
+      ),
+    );
+  content.append(lead);
   if (unread)
     content.append(
       node(
@@ -1443,34 +1561,30 @@ async function scanWallet(
         "notice",
       ),
     );
-  if (cards.length) content.append(...cards);
+  cards.sort((a, b) => Number(b.dataset.amount === "∞") - Number(a.dataset.amount === "∞"));
+  if (cards.length)
+    content.append(
+      group(reportedRows.length ? `Velon can remove these (${cards.length})` : "Approvals", [], cards),
+    );
   // "None found" is only true when every listed account was actually read and modelled.
-  else if (!unread && !unsupported.length && !skipped)
+  else if (!unread && !skipped && control?.testBench)
+    content.append(node("p", "Get a test permission above, then remove it here.", "empty"));
+  if (reportedRows.length) {
+    reportedRows.sort((a, b) => Number(b.unlimited) - Number(a.unlimited));
+    const reasons = [...new Set(reportedRows.map(({ reason }) => UNVERIFIED[reason] ?? UNVERIFIED.default!))];
     content.append(
-      node(
-        "p",
-        control?.testBench
-          ? "No token approvals on this wallet yet. Get a test permission above, then remove it here."
-          : "No token approvals found on this wallet. Velon checked the token approvals the network lists for it; other kinds of permission aren't read yet, so this isn't an all-clear.",
-        "empty",
+      group(
+        `Velon can show these, but can't remove them yet (${reportedRows.length})`,
+        reasons,
+        reportedRows.map(({ row }) => row),
       ),
     );
-  for (const [entry, reason] of unsupported)
-    content.append(
-      unverified(
-        entry,
-        networkReport({
-          delegate: text(entry.delegate),
-          ui: text(entry.ui),
-          unlimited: text(entry.amount) === String(UNLIMITED),
-          where: yours ? "your wallet" : "this wallet",
-          token: tokenName(text(entry.mint)),
-        }),
-        UNVERIFIED[reason] ?? UNVERIFIED.default!,
-        explorer("address", text(entry.source)),
-        [field("Program", entry.program === "spl-token-2022" ? "Token-2022" : "SPL Token")],
-      ),
-    );
+  }
+  // The fine print comes last: what was read, what wasn't, and the words used.
+  const footer = node("section", "", "wallet-footer");
+  if (last) footer.append(metadata(last, { read: owned.length - unread, listed: owned.length }));
+  footer.append(glossary());
+  content.append(footer);
   compareTab(false);
   results.replaceChildren(content);
   notice.replaceChildren();

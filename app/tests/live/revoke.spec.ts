@@ -188,7 +188,7 @@ test("a visitor with no wallet gets a permission, revokes it and keeps a replaya
   });
   await page.goto("/app");
   await page.getByRole("button", { name: "Use a test wallet" }).click();
-  await expect(page.locator("#results")).toContainText("No token approvals on this wallet yet", {
+  await expect(page.locator("#results")).toContainText("No token approvals found on your wallet", {
     timeout: 30000,
   });
   await page.getByRole("button", { name: "Get a test permission" }).click();
@@ -222,6 +222,6 @@ test("a visitor with no wallet gets a permission, revokes it and keeps a replaya
   // Coming back from Receipts shows the wallet again, with the remaining permission still revocable.
   await page.getByRole("button", { name: "Permissions", exact: true }).click();
   await expect(page.locator("#results article")).toHaveCount(1, { timeout: 30000 });
-  await expect(page.locator("#results")).toContainText("Who can act on your wallet");
+  await expect(page.locator("#results")).toContainText("on your wallet");
   await expect(page.getByRole("button", { name: "Remove access", exact: true })).toBeVisible();
 });

@@ -3029,55 +3029,119 @@ dialog .action-button {
   }
 }
 
-/* Wallet view: one row per approval. Token, what it allows, who holds it, and the action. */
+/* The running count while the chain is read. */
 .approvals-summary {
   margin: 0 0 4px;
   color: var(--on-forest-2);
   font-size: 15px;
 }
-.console #results:has(.permission.compact) {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
+/* Wallet view: the answer, then one row per approval under Token, Who and How much. */
+.wallet-summary {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  margin: 8px 0 20px;
+  padding: 24px 28px;
+  color: var(--body);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 20px;
 }
+.wallet-summary h2 {
+  font-size: clamp(22px, 3vw, 28px);
+  letter-spacing: -0.02em;
+}
+.wallet-summary p {
+  max-width: 62ch;
+  margin: 0;
+  font-size: 15px;
+}
+.wallet-summary .action-button {
+  margin-top: 6px;
+}
+.approval-group {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 28px;
+}
+.approval-group > h2 {
+  margin: 0;
+  color: var(--on-forest);
+  font-size: 17px;
+  font-weight: 600;
+}
+.approval-group > .group-note {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--on-forest-2);
+  font-size: 14px;
+}
+.approvals-head,
 .console .permission.compact {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 0.8fr) auto;
   align-items: center;
-  gap: 4px 24px;
-  padding: 16px 20px;
-  border-radius: 16px;
+  gap: 4px 20px;
+}
+.approvals-head {
+  margin-top: 4px;
+  padding: 0 20px;
+  color: var(--on-forest-2);
+  font-size: 12.5px;
+  font-weight: 560;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.console .permission.compact {
+  padding: 12px 20px;
+  border-radius: 14px;
   animation: none;
 }
-/* Token and status, then the sentence and its reason; the holder is already named in the sentence. */
 .permission.compact > .permission-header {
   grid-column: 1;
   grid-row: 1;
   justify-content: flex-start;
+  margin: 0;
 }
 .permission.compact .permission-header .token {
   margin-right: 0;
   font-weight: 600;
 }
-.permission.compact > h3 {
-  grid-column: 1;
-  grid-row: 2;
-  margin: 2px 0 0;
-  font-size: 16px;
+/* The usual state goes without saying; only an exception is shown on a row. */
+.permission.compact .availability[data-state="conditional"],
+.permission.compact.reported .availability {
+  display: none;
+}
+.permission.compact > .delegate {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.permission.compact > .row-amount {
+  grid-column: 3;
+  grid-row: 1;
+  color: var(--ink);
+  font-size: 15px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+}
+.permission.compact.unlimited > .row-amount,
+.permission.compact.reported > .row-amount {
+  color: var(--warn);
 }
 .permission.compact > .why {
-  grid-column: 1;
-  grid-row: 3;
+  grid-column: 1 / -1;
+  grid-row: 2;
   margin: 0;
   font-size: 13.5px;
 }
-.permission.compact > .delegate {
-  display: none;
-}
 .permission.compact > .permission-actions {
-  grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-column: 4;
+  grid-row: 1;
+  justify-content: flex-end;
   margin: 0;
   padding: 0;
   border: 0;
@@ -3092,7 +3156,21 @@ dialog .action-button {
 }
 .permission.compact > .technical {
   grid-column: 1 / -1;
-  grid-row: 4;
+  grid-row: 3;
+  margin-top: 8px;
+}
+.permission.compact.reported {
+  max-width: none;
+}
+.permission.compact .sentence {
+  margin: 0 0 12px;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 560;
+}
+.wallet-footer {
+  display: grid;
+  gap: 12px;
   margin-top: 8px;
 }
 .holdings.folded .holdings-list,
@@ -3118,12 +3196,27 @@ dialog .action-button {
   font-size: 14px;
 }
 @media (max-width: 760px) {
+  .approvals-head {
+    display: none;
+  }
   .console .permission.compact {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
     padding: 14px 16px;
   }
-  .permission.compact > .permission-actions {
+  .permission.compact > .delegate {
     grid-column: 1;
+    grid-row: 2;
+  }
+  .permission.compact > .row-amount {
+    grid-column: 2;
+    grid-row: 1;
+    text-align: right;
+  }
+  .permission.compact > .why {
+    grid-row: 3;
+  }
+  .permission.compact > .permission-actions {
+    grid-column: 1 / -1;
     grid-row: 4;
     margin-top: 8px;
     justify-content: space-between;
@@ -3131,10 +3224,13 @@ dialog .action-button {
   .permission.compact > .technical {
     grid-row: 5;
   }
+  .wallet-summary {
+    padding: 20px;
+  }
 }
-/* With a wallet's approvals listed, the picture shrinks so the list starts on the first screen. */
-.console:has(.permission.compact) .stage:not(:has(.try:not([hidden]))) #orbit {
-  max-height: 22vh;
+/* With a wallet's approvals listed, the list is the picture; the diagram only returns for the bench. */
+.console:has(.permission.compact) .stage:not(:has(.try:not([hidden]))) {
+  display: none;
 }
 
 /* The wallet lookup leads the public console. */
