@@ -7,10 +7,10 @@ export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 export const PROGRAM_HASH = "8190d3f7ceb6cb7a7a8d8924bff89f9f611e15ce1f806f2b6237f3311a98f697";
 const TOKEN_SOURCE = "a94dd19750dc3b2409f73e15bb74754935b2a489";
 export const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
-// Mainnet's Token-2022 at its 427147035 deployment; OtterSec verifies these bytes from source.
+// Mainnet's Token-2022 at its 460497271 deployment; OtterSec verifies these bytes from source.
 // https://verify.osec.io/status/TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb
-const TOKEN_2022_HASH = "0999dbf708971e723b08d1caafc988826a59c6001ed6dc02260da07defbe1469";
-const TOKEN_2022_SOURCE = "9bc02757f600ffe754746708a8a072bcd49d1260";
+const TOKEN_2022_HASH = "15a2e615a42e20f31714bbaaee43002ae6f1cda2e8d7118243117ab3c1342e2d";
+const TOKEN_2022_SOURCE = "8867f751c0f69367ba03af4f85510b5611989491";
 export const SUBSCRIPTIONS_PROGRAM = "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44";
 // Devnet's Subscriptions at its 506642674 deployment, hashed over the whole padded payload.
 // The foundation's verify run built this source; trimmed of trailing zeros, its bytes hash to e705f5a3.

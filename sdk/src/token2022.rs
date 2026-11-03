@@ -65,6 +65,12 @@ pub const LIVE_DEPLOYMENT: &str =
     "solana:loader-v3:DoU57AYuPFu2QU514RktNPG22QhApEjnKxnBcu4BHDTY:427147035";
 pub const LIVE_PROGRAM_VERSION: &str =
     "sha256:0999dbf708971e723b08d1caafc988826a59c6001ed6dc02260da07defbe1469";
+/// Its 460497271 upgrade, verified by OtterSec from @8867f751 (sha256 5e888b29… unpadded).
+/// Approve, Revoke, owner checks and the account layout are unchanged from 9bc02757.
+pub const UPGRADED_DEPLOYMENT: &str =
+    "solana:loader-v3:DoU57AYuPFu2QU514RktNPG22QhApEjnKxnBcu4BHDTY:460497271";
+pub const UPGRADED_PROGRAM_VERSION: &str =
+    "sha256:15a2e615a42e20f31714bbaaee43002ae6f1cda2e8d7118243117ab3c1342e2d";
 
 pub struct Token2022Adapter;
 
@@ -163,7 +169,9 @@ impl Adapter for Token2022Adapter {
         native.protocol == "token-2022"
             && ((native.deployment == DEPLOYMENT && native.program_version == PROGRAM_VERSION)
                 || (native.deployment == LIVE_DEPLOYMENT
-                    && native.program_version == LIVE_PROGRAM_VERSION))
+                    && native.program_version == LIVE_PROGRAM_VERSION)
+                || (native.deployment == UPGRADED_DEPLOYMENT
+                    && native.program_version == UPGRADED_PROGRAM_VERSION))
             && native.adapter_version == "0.1"
     }
 

@@ -636,3 +636,23 @@ fn unsigned_wrong_controller_and_noncanonical_revokes_fail_closed() {
         Err(Error::InvalidProjection)
     );
 }
+
+#[test]
+fn only_verified_token_2022_deployments_are_supported() {
+    let native = |deployment: &str, version: &str| NativeContext {
+        protocol: "token-2022".into(),
+        deployment: deployment.into(),
+        program_version: version.into(),
+        adapter_version: "0.1".into(),
+    };
+    for (deployment, version) in [
+        (DEPLOYMENT, PROGRAM_VERSION),
+        (LIVE_DEPLOYMENT, LIVE_PROGRAM_VERSION),
+        (UPGRADED_DEPLOYMENT, UPGRADED_PROGRAM_VERSION),
+    ] {
+        assert!(Token2022Adapter.supports(&native(deployment, version)));
+    }
+    // A pinned hash is only trusted at the deployment it was verified for, and the reverse.
+    assert!(!Token2022Adapter.supports(&native(UPGRADED_DEPLOYMENT, LIVE_PROGRAM_VERSION)));
+    assert!(!Token2022Adapter.supports(&native(LIVE_DEPLOYMENT, UPGRADED_PROGRAM_VERSION)));
+}
