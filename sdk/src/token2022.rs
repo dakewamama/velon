@@ -328,7 +328,13 @@ impl Adapter for Token2022Adapter {
         .into_iter()
         .flatten()
         {
-            let instruction = revoke(state, signer)?;
+            let instruction = match revoke(state, signer) {
+                Ok(instruction) => instruction,
+                // A delegate held by a program signs through that program, not here; the owner's
+                // revoke, checked in full, still stands. Missing evidence still fails closed.
+                Err(Error::UnsupportedOperation) if signer != account.owner => continue,
+                Err(error) => return Err(error),
+            };
             if actions
                 .iter()
                 .any(|action: &Action| action.instructions.first() == Some(&instruction))

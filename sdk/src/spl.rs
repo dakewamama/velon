@@ -429,10 +429,11 @@ impl Adapter for DelegateAdapter {
         let Some(delegate) = Option::<Pubkey>::from(account.delegate) else {
             return Ok(vec![]);
         };
-        // The token program reads a delegate as M-of-N signers only when it owns an account of
-        // exactly multisig size. Any other key, a wallet or a program-derived address, spends by
-        // signing for itself, so it is exactly that identity.
-        if state.delegate.owner == spl_token_interface::id()
+        // The pinned build is p-token, which reads a delegate as M-of-N signers when an account of
+        // exactly multisig size is owned by either token program (`validate_owner`). Any other key,
+        // a wallet or a program-derived address, spends by signing for itself.
+        if (state.delegate.owner == spl_token_interface::id()
+            || state.delegate.owner == spl_token_2022_interface::id())
             && state.delegate.data.len() == Multisig::LEN
         {
             return Err(Error::UnsupportedOperation);

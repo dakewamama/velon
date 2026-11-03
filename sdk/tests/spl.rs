@@ -528,6 +528,12 @@ fn requirements_and_wrong_program_owner_are_explicit() {
         sdk::compile_state(&DelegateAdapter, &state, &context()),
         Err(Error::UnsupportedOperation)
     );
+    // p-token, the pinned build, reads a Token-2022 multisig the same way.
+    state.delegate.owner = spl_token_2022_interface::id();
+    assert_eq!(
+        sdk::compile_state(&DelegateAdapter, &state, &context()),
+        Err(Error::UnsupportedOperation)
+    );
     state.account.owner = Pubkey::default();
     assert!(matches!(
         sdk::compile_state(&DelegateAdapter, &state, &context()),

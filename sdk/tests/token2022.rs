@@ -284,6 +284,32 @@ fn owner_and_delegate_can_each_revoke_only_the_ordinary_delegation() {
 }
 
 #[test]
+fn a_program_held_delegate_still_leaves_the_owner_its_revoke() {
+    let mut state = fixture();
+    // The delegate is a program's account with data: it signs through its program, not here.
+    state.source.authorities[0].1.owner = Pubkey::new_unique();
+    state.source.authorities[0].1.data = vec![7; 8];
+    let before = sdk::compile_state(&Token2022Adapter, &state, &context()).unwrap();
+    let actions = sdk::actions(&Token2022Adapter, &before[0], &state, &context()).unwrap();
+    assert_eq!(actions.len(), 1);
+    assert_ne!(actions[0].instructions[0].accounts[1].pubkey, key(2));
+    let mut accounts = vec![(state.source.address, state.source.account.clone())];
+    accounts.extend(state.source.authorities.clone());
+    let result = svm().process_instruction(&actions[0].instructions[0], &accounts);
+    assert_eq!(result.raw_result, Ok(()));
+    let base = StateWithExtensions::<TokenAccount>::unpack(&result.resulting_accounts[0].1.data)
+        .unwrap()
+        .base;
+    assert_eq!(base.delegate, COption::None);
+    // Missing evidence for that delegate still refuses every action.
+    state
+        .source
+        .authorities
+        .retain(|(address, _)| *address != key(2));
+    assert!(sdk::actions(&Token2022Adapter, &before[0], &state, &context()).is_err());
+}
+
+#[test]
 fn same_principal_permanent_authority_must_not_be_misreported_as_a_cumulative_budget() {
     let mut state = fixture();
     let approve = instruction::approve(
