@@ -1404,11 +1404,17 @@ async function scanWallet(
     };
     // A batch holds one token program's accounts: a program Velon cannot verify makes the whole
     // observation read-only, so it must not take the other program's accounts with it.
+    // An account with any other Token-2022 extension is read alone, so if Velon can't model it,
+    // it doesn't take the plain accounts with it. The runtime still decides every verdict.
+    const plain = (entry: ObjectValue) =>
+      array(entry.extensions ?? []).every((extension) => extension === "immutableOwner");
     const batches: number[][] = [];
     for (const program of new Set(owned.map((entry) => String(entry.program)))) {
       const indexes = [...owned.keys()].filter((index) => String(owned[index]!.program) === program);
-      for (let start = 0; start < indexes.length; start += observeBatch)
-        batches.push(indexes.slice(start, start + observeBatch));
+      const together = indexes.filter((index) => plain(owned[index]!));
+      for (let start = 0; start < together.length; start += observeBatch)
+        batches.push(together.slice(start, start + observeBatch));
+      for (const index of indexes) if (!plain(owned[index]!)) batches.push([index]);
     }
     let done = 0;
     const progress = () => {
@@ -1427,7 +1433,12 @@ async function scanWallet(
         if (signal.aborted) throw signal.reason;
         return undefined;
       });
-      if (!results && indexes.length > 1) {
+      // A batch is one projection, so one account Velon can't model would mark every other one;
+      // it is split too. An unverified program version is the same answer for all of them.
+      const verdict = results?.[0] ? object(results[0][0].projection) : undefined;
+      const mixed =
+        verdict !== undefined && verdict.status !== "compiled" && verdict.reason !== "UnsupportedVersion";
+      if ((!results || mixed) && indexes.length > 1) {
         const half = Math.ceil(indexes.length / 2);
         await check(indexes.slice(0, half));
         return check(indexes.slice(half));

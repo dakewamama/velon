@@ -336,6 +336,8 @@ if (process.env.RPC_URL) {
     delegate: string | null;
     delegated: string;
     ui: string;
+    /// Token-2022 extensions on the account, as the RPC parses them. Only used to batch reads.
+    extensions: string[];
   };
   // One wallet paste asks for the owner's accounts more than once; a short cache answers them all.
   const recent = new Map<string, { at: number; read: Promise<{ entries: TokenEntry[]; skipped: number }> }>();
@@ -379,6 +381,7 @@ if (process.env.RPC_URL) {
                   delegate: typeof info.delegate === "string" ? info.delegate : null,
                   delegated: delegated ? text(delegated.amount) : "0",
                   ui: delegated ? text(delegated.uiAmountString) : "0",
+                  extensions: array(info.extensions ?? []).map((item) => text(object(item).extension)),
                 },
               ];
             } catch {
@@ -400,7 +403,7 @@ if (process.env.RPC_URL) {
       const { entries, skipped } = await tokenAccounts(owner);
       const accounts = entries
         .filter((entry) => entry.delegate !== null)
-        .map(({ program, source, owner, delegate, mint, delegated, ui, decimals }) => ({
+        .map(({ program, source, owner, delegate, mint, delegated, ui, decimals, extensions }) => ({
           program,
           source,
           owner,
@@ -409,6 +412,7 @@ if (process.env.RPC_URL) {
           amount: delegated,
           ui,
           decimals,
+          extensions,
         }));
       // Accounts the RPC could not describe are counted, so the console never calls the wallet clear.
       return Response.json({ accounts, skipped }, { headers: { "Cache-Control": "no-store" } });
