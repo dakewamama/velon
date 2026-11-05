@@ -56,86 +56,90 @@ async fn health() -> &'static str {
     "ok"
 }
 
+/// The stored row for one event: where it sits, its raw bytes, and every field the decoder read.
+/// Amounts above i64 stay exact in `amount_units`; `amount` is left empty rather than wrapped.
+fn record(
+    event: &extractor::ExtractedEvent,
+    decoded: Option<&events::CatalystEvent>,
+) -> NewTriggerEvent {
+    use events::CatalystEvent::*;
+    let mut row = NewTriggerEvent {
+        signature: event.signature.clone(),
+        program_id: SUBSCRIPTIONS_PROGRAM_ID.to_string(),
+        discriminator: event.bytes[8],
+        raw_data: event.bytes.clone(),
+        slot: i64::try_from(event.slot).ok(),
+        outer_index: Some(i64::from(event.outer_index)),
+        inner_index: i64::try_from(event.inner_index).ok(),
+        ..NewTriggerEvent::default()
+    };
+    let units = |amount: u64| (i64::try_from(amount).ok(), Some(amount.to_string()));
+    match decoded {
+        Some(SubscriptionCreated(e)) => {
+            row.plan = Some(e.plan.clone());
+            row.subscriber = Some(e.subscriber.clone());
+            row.mint = Some(e.mint.clone());
+            row.payer = e.payer.clone();
+        }
+        Some(SubscriptionCancelled(e)) => {
+            row.plan = Some(e.plan.clone());
+            row.subscriber = Some(e.subscriber.clone());
+            row.period_end_ts = Some(e.expires_at_ts);
+        }
+        Some(SubscriptionTransfer(e)) => {
+            row.plan = Some(e.plan.clone());
+            row.subscriber = Some(e.delegator.clone());
+            row.mint = Some(e.mint.clone());
+            (row.amount, row.amount_units) = units(e.amount);
+            row.period_start_ts = Some(e.period_start_ts);
+            row.period_end_ts = Some(e.period_end_ts);
+            row.delegation = Some(e.subscription.clone());
+            row.receiver = Some(e.receiver.clone());
+            row.receiver_token_account = e.receiver_token_account.clone();
+            row.puller = e.puller.clone();
+        }
+        // The program requires the delegatee's signature on every fixed and recurring pull.
+        Some(FixedTransfer(e)) => {
+            row.subscriber = Some(e.delegator.clone());
+            row.mint = Some(e.mint.clone());
+            (row.amount, row.amount_units) = units(e.amount);
+            row.delegation = Some(e.delegation.clone());
+            row.receiver = Some(e.receiver.clone());
+            row.receiver_token_account = e.receiver_token_account.clone();
+            row.puller = Some(e.delegatee.clone());
+        }
+        Some(RecurringTransfer(e)) => {
+            row.subscriber = Some(e.delegator.clone());
+            row.mint = Some(e.mint.clone());
+            (row.amount, row.amount_units) = units(e.amount);
+            row.period_start_ts = Some(e.period_start_ts);
+            row.period_end_ts = Some(e.period_end_ts);
+            row.delegation = Some(e.delegation.clone());
+            row.receiver = Some(e.receiver.clone());
+            row.receiver_token_account = e.receiver_token_account.clone();
+            row.puller = Some(e.delegatee.clone());
+        }
+        Some(SubscriptionResumed(e)) => {
+            row.plan = Some(e.plan.clone());
+            row.subscriber = Some(e.subscriber.clone());
+        }
+        Some(PlanUpdated(e)) => {
+            row.plan = Some(e.plan.clone());
+            row.owner = Some(e.owner.clone());
+            row.period_end_ts = Some(e.end_ts);
+        }
+        None => {}
+    }
+    row
+}
+
 async fn webhook(State(state): State<AppState>, Json(payload): Json<WebhookPayload>) -> StatusCode {
     let raw_events = extract_events(&payload);
 
     for event in &raw_events {
-        let raw = &event.bytes;
-        let discriminator = raw[8];
-        let decoded = decoder::decode_event(raw);
-
-        let (plan, subscriber, mint, amount, period_start_ts, period_end_ts, delegation) =
-            match &decoded {
-                Some(events::CatalystEvent::SubscriptionCreated(e)) => (
-                    Some(e.plan.clone()),
-                    Some(e.subscriber.clone()),
-                    Some(e.mint.clone()),
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-                Some(events::CatalystEvent::SubscriptionCancelled(e)) => (
-                    Some(e.plan.clone()),
-                    Some(e.subscriber.clone()),
-                    None,
-                    None,
-                    None,
-                    Some(e.expires_at_ts),
-                    None,
-                ),
-                Some(events::CatalystEvent::SubscriptionTransfer(e)) => (
-                    Some(e.plan.clone()),
-                    Some(e.delegator.clone()),
-                    Some(e.mint.clone()),
-                    Some(e.amount as i64),
-                    Some(e.period_start_ts),
-                    Some(e.period_end_ts),
-                    Some(e.subscription.clone()),
-                ),
-                Some(events::CatalystEvent::FixedTransfer(e)) => (
-                    None,
-                    Some(e.delegator.clone()),
-                    Some(e.mint.clone()),
-                    Some(e.amount as i64),
-                    None,
-                    None,
-                    Some(e.delegation.clone()),
-                ),
-                Some(events::CatalystEvent::RecurringTransfer(e)) => (
-                    None,
-                    Some(e.delegator.clone()),
-                    Some(e.mint.clone()),
-                    Some(e.amount as i64),
-                    Some(e.period_start_ts),
-                    Some(e.period_end_ts),
-                    Some(e.delegation.clone()),
-                ),
-                Some(events::CatalystEvent::SubscriptionResumed(e)) => (
-                    Some(e.plan.clone()),
-                    Some(e.subscriber.clone()),
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-                None => (None, None, None, None, None, None, None),
-            };
-
-        let new_event = NewTriggerEvent {
-            signature: event.signature.clone(),
-            program_id: SUBSCRIPTIONS_PROGRAM_ID.to_string(),
-            discriminator,
-            raw_data: raw.clone(),
-            plan,
-            subscriber,
-            mint,
-            amount,
-            period_start_ts,
-            period_end_ts,
-            delegation,
-        };
+        let discriminator = event.bytes[8];
+        let decoded = decoder::decode_event(&event.bytes);
+        let new_event = record(event, decoded.as_ref());
 
         match state.trigger_event_repo.insert(&new_event).await {
             Ok(Some(e)) => {
@@ -216,5 +220,39 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn a_pull_above_i64_is_kept_exact_and_names_who_pulled() {
+        let mut bytes = crate::constants::EVENT_IX_TAG.to_vec();
+        bytes.push(4);
+        for byte in 1..=4u8 {
+            bytes.extend_from_slice(&[byte; 32]);
+        }
+        bytes.extend_from_slice(&u64::MAX.to_le_bytes());
+        bytes.extend_from_slice(&[0; 24]);
+        bytes.extend_from_slice(&[5; 32]);
+        bytes.extend_from_slice(&[6; 32]);
+        let event = extractor::ExtractedEvent {
+            signature: "sig".into(),
+            slot: 9,
+            outer_index: 1,
+            inner_index: 3,
+            bytes,
+        };
+        let row = record(&event, decoder::decode_event(&event.bytes).as_ref());
+        assert_eq!(
+            (row.amount, row.amount_units.as_deref()),
+            (None, Some("18446744073709551615"))
+        );
+        assert_eq!(
+            (row.slot, row.outer_index, row.inner_index),
+            (Some(9), Some(1), Some(3))
+        );
+        assert_eq!(row.puller, Some(bs58::encode([3u8; 32]).into_string()));
+        assert_eq!(
+            row.receiver_token_account,
+            Some(bs58::encode([6u8; 32]).into_string())
+        );
     }
 }

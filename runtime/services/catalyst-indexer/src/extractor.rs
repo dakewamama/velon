@@ -1,9 +1,12 @@
 use crate::constants::{EVENT_IX_TAG, EVENT_PREFIX_LEN, SUBSCRIPTIONS_PROGRAM_ID};
 use crate::types::WebhookPayload;
 
+/// One event and where it sits: its transaction, slot, top-level instruction and inner position.
 pub struct ExtractedEvent {
     pub signature: String,
     pub slot: u64,
+    pub outer_index: u8,
+    pub inner_index: usize,
     pub bytes: Vec<u8>,
 }
 
@@ -24,7 +27,7 @@ pub fn extract_events(payload: &WebhookPayload) -> Vec<ExtractedEvent> {
         let account_keys = &tx.transaction.message.account_keys;
 
         for inner in &tx.meta.inner_instructions {
-            for instruction in &inner.instructions {
+            for (position, instruction) in inner.instructions.iter().enumerate() {
                 let program_id = match account_keys.get(instruction.program_id_index as usize) {
                     Some(id) => id,
                     None => continue,
@@ -50,6 +53,8 @@ pub fn extract_events(payload: &WebhookPayload) -> Vec<ExtractedEvent> {
                 events.push(ExtractedEvent {
                     signature: signature.clone(),
                     slot: tx.slot,
+                    outer_index: inner.index,
+                    inner_index: position,
                     bytes,
                 });
             }
@@ -72,6 +77,7 @@ mod tests {
             meta: Meta {
                 err: None,
                 inner_instructions: vec![InnerInstruction {
+                    index: 2,
                     instructions: vec![Instruction {
                         program_id_index: 0,
                         data: data.to_string(),
@@ -125,6 +131,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].signature, "sig");
         assert_eq!(events[0].slot, 1);
+        assert_eq!((events[0].outer_index, events[0].inner_index), (2, 0));
     }
 
     #[test]

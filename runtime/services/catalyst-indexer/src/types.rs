@@ -31,6 +31,8 @@ pub struct Meta {
 
 #[derive(Deserialize)]
 pub struct InnerInstruction {
+    /// The top-level instruction these were invoked from.
+    pub index: u8,
     pub instructions: Vec<Instruction>,
 }
 

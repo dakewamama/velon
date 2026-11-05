@@ -15,9 +15,18 @@ pub struct TriggerEvent {
     pub period_start_ts: Option<i64>,
     pub period_end_ts: Option<i64>,
     pub delegation: Option<String>,
+    pub slot: Option<i64>,
+    pub outer_index: Option<i64>,
+    pub inner_index: Option<i64>,
+    pub amount_units: Option<String>,
+    pub receiver: Option<String>,
+    pub receiver_token_account: Option<String>,
+    pub puller: Option<String>,
+    pub payer: Option<String>,
+    pub owner: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct NewTriggerEvent {
     pub signature: String,
     pub program_id: String,
@@ -30,4 +39,13 @@ pub struct NewTriggerEvent {
     pub period_start_ts: Option<i64>,
     pub period_end_ts: Option<i64>,
     pub delegation: Option<String>,
+    pub slot: Option<i64>,
+    pub outer_index: Option<i64>,
+    pub inner_index: Option<i64>,
+    pub amount_units: Option<String>,
+    pub receiver: Option<String>,
+    pub receiver_token_account: Option<String>,
+    pub puller: Option<String>,
+    pub payer: Option<String>,
+    pub owner: Option<String>,
 }

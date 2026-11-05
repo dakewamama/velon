@@ -19,12 +19,16 @@ impl TriggerEventRepo {
             r#"
             INSERT INTO trigger_events (
                     signature, program_id, discriminator, raw_data,
-                    plan, subscriber, mint, amount, period_start_ts, period_end_ts, delegation
+                    plan, subscriber, mint, amount, period_start_ts, period_end_ts, delegation,
+                    slot, outer_index, inner_index, amount_units, receiver, receiver_token_account,
+                    puller, payer, owner
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(signature, discriminator, raw_data) DO NOTHING
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(signature, outer_index, inner_index) DO NOTHING
             RETURNING id, signature, program_id, discriminator, raw_data, created_at,
-                      plan, subscriber, mint, amount, period_start_ts, period_end_ts, delegation
+                    plan, subscriber, mint, amount, period_start_ts, period_end_ts, delegation,
+                    slot, outer_index, inner_index, amount_units, receiver, receiver_token_account,
+                    puller, payer, owner
             "#,
         )
         .bind(&event.signature)
@@ -38,6 +42,15 @@ impl TriggerEventRepo {
         .bind(event.period_start_ts)
         .bind(event.period_end_ts)
         .bind(&event.delegation)
+        .bind(event.slot)
+        .bind(event.outer_index)
+        .bind(event.inner_index)
+        .bind(&event.amount_units)
+        .bind(&event.receiver)
+        .bind(&event.receiver_token_account)
+        .bind(&event.puller)
+        .bind(&event.payer)
+        .bind(&event.owner)
         .fetch_optional(&self.db)
         .await?;
 
@@ -47,7 +60,10 @@ impl TriggerEventRepo {
     pub async fn list(&self) -> Result<Vec<TriggerEvent>, sqlx::Error> {
         let rows = sqlx::query_as::<_, TriggerEvent>(
             r#"
-            SELECT id, signature, program_id, discriminator, raw_data, created_at, plan, subscriber, mint, amount, period_start_ts, period_end_ts, delegation
+            SELECT id, signature, program_id, discriminator, raw_data, created_at,
+                    plan, subscriber, mint, amount, period_start_ts, period_end_ts, delegation,
+                    slot, outer_index, inner_index, amount_units, receiver, receiver_token_account,
+                    puller, payer, owner
             FROM trigger_events
             ORDER BY created_at DESC
             "#,
@@ -76,13 +92,10 @@ mod tests {
             program_id: SUBSCRIPTIONS_PROGRAM_ID.to_string(),
             discriminator: 0,
             raw_data: vec![0u8; 9],
-            plan: None,
-            subscriber: None,
-            mint: None,
-            amount: None,
-            period_start_ts: None,
-            period_end_ts: None,
-            delegation: None,
+            slot: Some(7),
+            outer_index: Some(0),
+            inner_index: Some(0),
+            ..NewTriggerEvent::default()
         }
     }
 
@@ -119,5 +132,19 @@ mod tests {
 
         let all = repo.list().await.unwrap();
         assert_eq!(all.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn identical_events_at_two_positions_are_two_rows() {
+        let repo = setup().await;
+        let first = make_event();
+        let second = NewTriggerEvent {
+            inner_index: Some(1),
+            ..make_event()
+        };
+        assert!(repo.insert(&first).await.unwrap().is_some());
+        assert!(repo.insert(&second).await.unwrap().is_some());
+        assert!(repo.insert(&second).await.unwrap().is_none());
+        assert_eq!(repo.list().await.unwrap().len(), 2);
     }
 }
