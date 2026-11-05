@@ -13,10 +13,11 @@ RUN curl -fsSL -o /tmp/bun.zip https://github.com/oven-sh/bun/releases/download/
   && echo "9fd36f87e4b90b07632b987a2e4ec81ca15a62c81bf983190cea6d715be2ad74  /tmp/bun-linux-x64/bun" | sha256sum -c - \
   && install -D /tmp/bun-linux-x64/bun /opt/velon/bin/bun
 ENV PATH=/opt/velon/bin:$PATH
-# The commit being built: passed explicitly, or the one Render checked out.
+# The commit being built: passed explicitly, or the one Render or Railway checked out.
 ARG VELON_REVISION
 ARG RENDER_GIT_COMMIT
-ENV VELON_REVISION=${VELON_REVISION:-$RENDER_GIT_COMMIT}
+ARG RAILWAY_GIT_COMMIT_SHA
+ENV VELON_REVISION=${VELON_REVISION:-${RENDER_GIT_COMMIT:-$RAILWAY_GIT_COMMIT_SHA}}
 RUN test "${#VELON_REVISION}" -eq 40
 WORKDIR /src
 COPY . .
