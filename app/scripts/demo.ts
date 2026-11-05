@@ -2,13 +2,7 @@ import { resolve } from "node:path";
 import { mkdir, rename, unlink } from "node:fs/promises";
 import { lookup } from "node:dns/promises";
 import { isIPv4 } from "node:net";
-import {
-  getAddressDecoder,
-  getAddressEncoder,
-  getProgramDerivedAddress,
-  isAddress,
-  type Address,
-} from "@solana/addresses";
+import { getAddressEncoder, getProgramDerivedAddress, isAddress, type Address } from "@solana/addresses";
 import {
   array,
   grants,
@@ -21,7 +15,8 @@ import {
   type Json,
 } from "../src/wire.ts";
 import { DEVNET_GENESIS, MAINNET_GENESIS, type Control } from "../src/control.ts";
-import { SUBSCRIPTIONS_PROGRAM, TOKEN_PROGRAM, tokenCatalog, tokenCatalogAsync } from "./catalog.ts";
+import { SUBSCRIPTIONS_PROGRAM, tokenCatalog, tokenCatalogAsync } from "./catalog.ts";
+import { DELEGATOR_OFFSET, delegation, plan, type Delegation } from "./subscriptions.ts";
 import type { Live } from "../src/server.ts";
 
 const root = resolve(import.meta.dir, "..");
@@ -173,10 +168,10 @@ if (process.env.RPC_URL) {
     throw new Error(`LIVE_CATALOG has no SPL Token deployment with runtime evidence for cluster ${cluster}.`);
   control = { rpcUrl: rpcUrl.href, network, cluster };
   const encoder = getAddressEncoder();
-  const decoder = getAddressDecoder();
   const bytes = (address: string) => Array.from(encoder.encode(address as Address));
   const ASSOCIATED_TOKEN = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
-  const NONE = "11111111111111111111111111111111";
+  // A subscription whose plan is gone has no mint to name; the runtime refuses it.
+  const NONE_MINT = "11111111111111111111111111111111";
   // Subscriptions accounts have no RPC parser, so jsonParsed returns their bytes in base64.
   const subscriptionData = (info: Json | undefined) => {
     if (info == null) return undefined;
@@ -199,53 +194,57 @@ if (process.env.RPC_URL) {
       const witnesses: string[] = [];
       const targets: Json[] = [];
       const mints = new Set<string>();
-      // A SubscriptionDelegation is discriminator 4, version 1 and bump, then delegator, plan and payer.
-      const delegations = new Map<string, { delegator: Address; plan: Address; payer: Address }>();
+      // A Subscriptions delegation names its delegator, delegatee and payer; a subscription's
+      // delegatee is its plan, which names the mint, the merchant and the pullers.
+      const found = new Map<string, Delegation>();
       sources.forEach((source, index) => {
         const data = subscriptionData(infos[index]);
-        if (data?.length === 155 && data[0] === 4 && data[1] === 1)
-          delegations.set(source, {
-            delegator: decoder.decode(data, 3),
-            plan: decoder.decode(data, 35),
-            payer: decoder.decode(data, 67),
-          });
+        const value = data && delegation(data);
+        if (value) found.set(source, value);
       });
-      // Its plan names the mint, the merchant and the pullers. Anything else stays a plain target,
-      // which the runtime refuses rather than guesses.
       const subscriptions = new Map<string, Json>();
-      if (delegations.size) {
-        const plans = [...new Set([...delegations.values()].map(({ plan }) => plan))];
-        const accounts = await parsedAccounts(plans);
-        for (const [delegation, { delegator, plan, payer }] of delegations) {
-          const data = subscriptionData(accounts[plans.indexOf(plan)]);
-          // A Plan is discriminator 1, owner, bump, status, then plan_id, mint, terms, end,
-          // four destinations and four pullers.
-          if (data?.length !== 491 || data[0] !== 1) continue;
-          const mint = decoder.decode(data, 43);
-          const pullers = [0, 1, 2, 3].map((index) => decoder.decode(data, 235 + index * 32));
+      // A subscription's grants rest on its token account, so its view is read there.
+      const drawsFrom = new Map<string, string>();
+      if (found.size) {
+        const planKeys = [
+          ...new Set([...found.values()].flatMap((d) => (d.kind === "subscription" ? [d.plan] : []))),
+        ];
+        const planInfos = planKeys.length ? await parsedAccounts(planKeys) : [];
+        const plans = new Map(
+          planKeys.map((key, index) => [key, plan(subscriptionData(planInfos[index]) ?? new Uint8Array())]),
+        );
+        const mintOf = (d: Delegation) => (d.kind === "subscription" ? plans.get(d.plan)?.mint : d.mint);
+        const mintKeys = [...new Set([...found.values()].flatMap((d) => mintOf(d) ?? []))];
+        const mintInfos = mintKeys.length ? await parsedAccounts(mintKeys) : [];
+        const tokenProgram = new Map(
+          mintKeys.map((key, index) => [key, mintInfos[index] ? text(object(mintInfos[index]).owner) : ""]),
+        );
+        // Anything unread, such as a deleted plan, stays a plain target the runtime refuses.
+        for (const [address, d] of found) {
+          const mint = mintOf(d);
+          const program = mint && tokenProgram.get(mint);
+          if (!mint || !program) continue;
           const [[authority], [source]] = await Promise.all([
             getProgramDerivedAddress({
               programAddress: SUBSCRIPTIONS_PROGRAM as Address,
-              seeds: ["SubscriptionAuthority", encoder.encode(delegator), encoder.encode(mint)],
+              seeds: ["SubscriptionAuthority", encoder.encode(d.delegator), encoder.encode(mint)],
             }),
             getProgramDerivedAddress({
               programAddress: ASSOCIATED_TOKEN as Address,
-              seeds: [
-                encoder.encode(delegator),
-                encoder.encode(TOKEN_PROGRAM as Address),
-                encoder.encode(mint),
-              ],
+              seeds: [encoder.encode(d.delegator), encoder.encode(program as Address), encoder.encode(mint)],
             }),
           ]);
-          subscriptions.set(delegation, {
+          drawsFrom.set(address, source);
+          subscriptions.set(address, {
             kind: "subscription",
-            delegation: bytes(delegation),
+            delegation: bytes(address),
             authority: bytes(authority),
             source: bytes(source),
             mint: bytes(mint),
-            plan: bytes(plan),
+            plan: d.kind === "subscription" ? bytes(d.plan) : null,
           });
-          witnesses.push(delegator, payer, decoder.decode(data, 1), ...pullers.filter((key) => key !== NONE));
+          const terms = d.kind === "subscription" ? plans.get(d.plan) : undefined;
+          witnesses.push(d.delegator, d.payer, ...(terms ? [terms.owner, ...terms.pullers] : [d.delegatee]));
         }
       }
       sources.forEach((source, index) => {
@@ -307,11 +306,17 @@ if (process.env.RPC_URL) {
       const scopeId = observed.scope_id;
       // Every account's view comes back with the observation, from one load of the record next to
       // the runtime, so a batch is one response to the browser and one record parse.
+      const keys = sources.map((source) => drawsFrom.get(source) ?? source);
       const read = await fetch(
-        `${runtimeUrl}/scopes/${scopeId}/effective?addresses=${sources.map(encodeURIComponent).join(",")}`,
+        `${runtimeUrl}/scopes/${scopeId}/effective?addresses=${[...new Set(keys)].map(encodeURIComponent).join(",")}`,
       );
       if (!read.ok) throw new Error("Observed views unavailable.");
-      const views = await read.text();
+      // Views keep u64 amounts, so they are only re-keyed losslessly, and only when one moved.
+      let views = await read.text();
+      if (drawsFrom.size) {
+        const byKey = object(readJson(views));
+        views = writeJson(Object.fromEntries(sources.map((source, index) => [source, byKey[keys[index]!]!])));
+      }
       return new Response(
         `{"scope_id":${JSON.stringify(scopeId)},"record":{"snapshot":{"targets":${JSON.stringify(observed.targets ?? [])}}},"views":${views}}`,
         { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } },
@@ -393,9 +398,87 @@ if (process.env.RPC_URL) {
     return read;
   };
   // A wallet's own token accounts, as the RPC's index reports them; each is then observed natively.
+  const decimal = (units: bigint, scale: number) => {
+    const base = 10n ** BigInt(scale);
+    const fraction = (units % base).toString().padStart(scale, "0").replace(/0+$/, "");
+    return `${units / base}${fraction ? `.${fraction}` : ""}`;
+  };
+  // A wallet's Subscriptions delegations, found where every delegation keeps its delegator. Each is
+  // listed for the console to observe; what it allows is only shown once the runtime has verified it.
+  const subscriptionsOf = async (owner: string) => {
+    const base64 = (info: Json) =>
+      Uint8Array.from(atob(text(array(object(info).data)[0])), (c) => c.charCodeAt(0));
+    const accounts = array(
+      await rpc("getProgramAccounts", [
+        SUBSCRIPTIONS_PROGRAM,
+        {
+          encoding: "base64",
+          commitment: "finalized",
+          filters: [{ memcmp: { offset: DELEGATOR_OFFSET, bytes: owner } }],
+        },
+      ]),
+    ).map(object);
+    const found = accounts.flatMap((entry) => {
+      const value = delegation(base64(object(entry.account)));
+      return value?.delegator === owner ? [{ address: text(entry.pubkey), value }] : [];
+    });
+    const planKeys = [
+      ...new Set(found.flatMap(({ value }) => (value.kind === "subscription" ? [value.plan] : []))),
+    ];
+    const planInfos = planKeys.length
+      ? array(
+          object(
+            await rpc("getMultipleAccounts", [planKeys, { encoding: "base64", commitment: "finalized" }]),
+          ).value,
+        )
+      : [];
+    const plans = new Map(
+      planKeys.map((key, index) => [key, planInfos[index] ? plan(base64(planInfos[index])) : undefined]),
+    );
+    const terms = found.map(({ address, value }) => {
+      const merchant = value.kind === "subscription" ? plans.get(value.plan) : undefined;
+      return {
+        address,
+        delegate: merchant ? merchant.owner : value.delegatee,
+        mint: value.kind === "subscription" ? merchant?.mint : value.mint,
+        amount: value.amount,
+      };
+    });
+    const mintKeys = [...new Set(terms.flatMap(({ mint }) => mint ?? []))];
+    const mintInfos = mintKeys.length
+      ? array(
+          object(
+            await rpc("getMultipleAccounts", [mintKeys, { encoding: "jsonParsed", commitment: "finalized" }]),
+          ).value,
+        )
+      : [];
+    const scale = new Map(
+      mintKeys.map((key, index) => {
+        const decimals = mintInfos[index] && object(object(object(mintInfos[index]).data).parsed).info;
+        return [key, decimals ? Number(object(decimals).decimals) : undefined];
+      }),
+    );
+    return terms.map(({ address, delegate, mint, amount }) => {
+      const decimals = mint ? scale.get(mint) : undefined;
+      return {
+        program: "subscriptions",
+        source: address,
+        owner,
+        delegate,
+        mint: mint ?? NONE_MINT,
+        amount: amount.toString(),
+        ui: decimals === undefined ? amount.toString() : decimal(amount, decimals),
+        decimals,
+        extensions: [] as string[],
+      };
+    });
+  };
   const owned: Live["owned"] = async (owner) => {
     try {
-      const { entries, skipped } = await tokenAccounts(owner);
+      const [{ entries, skipped }, subscriptions] = await Promise.all([
+        tokenAccounts(owner),
+        subscriptionsOf(owner).catch(() => undefined),
+      ]);
       const accounts = entries
         .filter((entry) => entry.delegate !== null)
         .map(({ program, source, owner, delegate, mint, delegated, ui, decimals, extensions }) => ({
@@ -409,8 +492,12 @@ if (process.env.RPC_URL) {
           decimals,
           extensions,
         }));
-      // Accounts the RPC could not describe are counted, so the console never calls the wallet clear.
-      return Response.json({ accounts, skipped }, { headers: { "Cache-Control": "no-store" } });
+      // Accounts the RPC could not describe are counted, and a Subscriptions listing that failed is
+      // said, so the console never calls the wallet clear.
+      return Response.json(
+        { accounts: [...accounts, ...(subscriptions ?? [])], skipped, subscriptionsUnread: !subscriptions },
+        { headers: { "Cache-Control": "no-store" } },
+      );
     } catch {
       return Response.json({ error: "The wallet's token accounts could not be read." }, { status: 502 });
     }

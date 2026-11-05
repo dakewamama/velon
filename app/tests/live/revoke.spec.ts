@@ -188,9 +188,12 @@ test("a visitor with no wallet gets a permission, revokes it and keeps a replaya
   });
   await page.goto("/app");
   await page.getByRole("button", { name: "Use a test wallet" }).click();
-  await expect(page.locator("#results")).toContainText("No token approvals found on your wallet", {
-    timeout: 30000,
-  });
+  await expect(page.locator("#results")).toContainText(
+    "No token approvals or subscriptions found on your wallet",
+    {
+      timeout: 30000,
+    },
+  );
   await page.getByRole("button", { name: "Get a test permission" }).click();
   await expect(page.locator("#try-status")).toContainText("Your permission is live", { timeout: 120000 });
   // The wallet granted it by signing; the chain, not the page, is asked whether it exists.

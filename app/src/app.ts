@@ -171,8 +171,8 @@ function metadata(view: ObjectValue, wallet?: { read: number; listed: number }):
   const block = node("section", "", "state-meta");
   const checked =
     wallet && wallet.read < wallet.listed
-      ? `Velon checked ${wallet.read} of the ${wallet.listed} token accounts with an approval that the network lists for this wallet.`
-      : "Velon checked the token approvals the network lists for this wallet.";
+      ? `Velon checked ${wallet.read} of the ${wallet.listed} token approvals and Solana Subscriptions the network lists for this wallet.`
+      : "Velon checked the token approvals and Solana Subscriptions the network lists for this wallet.";
   block.append(
     node(
       "p",
@@ -1293,6 +1293,7 @@ async function scanWallet(
   // The localnet index is a plain list; an owner's list also counts accounts the RPC could not describe.
   const answer = readJson(await listed.text());
   const skipped = Array.isArray(answer) ? 0 : Number(object(answer).skipped ?? 0);
+  const subscriptionsUnread = !Array.isArray(answer) && object(answer).subscriptionsUnread === true;
   const reported = array(Array.isArray(answer) ? answer : object(answer).accounts!)
     .map(object)
     .filter((entry) => entry.owner === owner);
@@ -1436,8 +1437,11 @@ async function scanWallet(
       // A batch is one projection, so one account Velon can't model would mark every other one;
       // it is split too. An unverified program version is the same answer for all of them.
       const verdict = results?.[0] ? object(results[0][0].projection) : undefined;
+      // A Subscriptions batch spans mints on different token programs, so every refusal is split.
       const mixed =
-        verdict !== undefined && verdict.status !== "compiled" && verdict.reason !== "UnsupportedVersion";
+        verdict !== undefined &&
+        verdict.status !== "compiled" &&
+        (verdict.reason !== "UnsupportedVersion" || owned[indexes[0]!]!.program === "subscriptions");
       if ((!results || mixed) && indexes.length > 1) {
         const half = Math.ceil(indexes.length / 2);
         await check(indexes.slice(0, half));
@@ -1463,19 +1467,30 @@ async function scanWallet(
         unsupported.push([owned[index]!, text(projection.reason ?? projection.status)]);
     });
     await naming;
-    for (const [view, scope] of views.filter((view) => view !== undefined)) {
+    // The approval a subscription rests on is read from its token account and from the subscription
+    // itself; it is one permission, so it is shown once, as the Subscriptions approval it is.
+    const found = views.flatMap((entry) =>
+      entry
+        ? array(object(entry[0].projection).authorizations ?? []).map((item) => ({
+            grant: authorization(object(item).authorization),
+            availability: text(object(item).availability),
+            view: entry[0],
+            scope: entry[1],
+          }))
+        : [],
+    );
+    const holds = (grant: ObjectValue) =>
+      `${text(object(grant.resource).id)}:${text(object(grant.principal).value)}`;
+    const covered = new Set(
+      found.filter(({ grant }) => subscriptionsAuthority(grant)).map(({ grant }) => holds(grant)),
+    );
+    const shown = new Set<string>();
+    for (const { grant, availability, view, scope } of found) {
       last = view;
-      for (const item of array(object(view.projection).authorizations ?? []))
-        cards.push(
-          card(
-            authorization(object(item).authorization),
-            view,
-            text(object(item).availability),
-            scope,
-            { address: owner, yours },
-            true,
-          ),
-        );
+      const copy = text(object(grant.native_context).protocol) === "spl-token" && covered.has(holds(grant));
+      if (copy || shown.has(text(grant.id))) continue;
+      shown.add(text(grant.id));
+      cards.push(card(grant, view, availability, scope, { address: owner, yours }, true));
     }
   } catch (error) {
     if (!signal.aborted)
@@ -1501,7 +1516,13 @@ async function scanWallet(
         token: tokenName(text(entry.mint)),
       }),
       explorer("address", text(entry.source)),
-      [field("Program", entry.program === "spl-token-2022" ? "Token-2022" : "SPL Token")],
+      [
+        field(
+          "Program",
+          { "spl-token-2022": "Token-2022", subscriptions: "Solana Subscriptions" }[text(entry.program)] ??
+            "SPL Token",
+        ),
+      ],
     ),
   }));
   const total = cards.length + reportedRows.length;
@@ -1552,7 +1573,9 @@ async function scanWallet(
     lead.append(
       node(
         "h2",
-        unread || skipped ? `Velon couldn't check all of ${whose}` : `No token approvals found on ${whose}`,
+        unread || skipped || subscriptionsUnread
+          ? `Velon couldn't check all of ${whose}`
+          : `No token approvals or subscriptions found on ${whose}`,
       ),
     );
   content.append(lead);
@@ -1560,7 +1583,15 @@ async function scanWallet(
     content.append(
       node(
         "p",
-        `Velon couldn't read ${unread} of the ${owned.length} token accounts with an approval. Check the wallet again to retry them.`,
+        `Velon couldn't read ${unread} of the ${owned.length} approvals and subscriptions it found. Check the wallet again to retry them.`,
+        "notice",
+      ),
+    );
+  if (subscriptionsUnread)
+    content.append(
+      node(
+        "p",
+        "Velon couldn't list this wallet's Solana Subscriptions right now. Check the wallet again to retry.",
         "notice",
       ),
     );
@@ -1575,10 +1606,10 @@ async function scanWallet(
   cards.sort((a, b) => Number(b.dataset.amount === "∞") - Number(a.dataset.amount === "∞"));
   if (cards.length)
     content.append(
-      group(reportedRows.length ? `Velon can remove these (${cards.length})` : "Approvals", [], cards),
+      group(reportedRows.length ? `Velon checked these (${cards.length})` : "Approvals", [], cards),
     );
   // "None found" is only true when every listed account was actually read and modelled.
-  else if (!unread && !skipped && control?.testBench)
+  else if (!unread && !skipped && !subscriptionsUnread && control?.testBench)
     content.append(node("p", "Get a test permission above, then remove it here.", "empty"));
   if (reportedRows.length) {
     reportedRows.sort((a, b) => Number(b.unlimited) - Number(a.unlimited));
@@ -2300,7 +2331,7 @@ function lesson() {
       node("h2", "See who can take your tokens"),
       node(
         "p",
-        `Connect a wallet to see the token approvals on its accounts on ${network().label.toLowerCase()} and which address holds each one. Connecting signs nothing. You choose what to remove, and you approve every change in your wallet.`,
+        `Connect a wallet to see the token approvals and Solana Subscriptions on it on ${network().label.toLowerCase()}, and which address holds each one. Connecting signs nothing. You choose what to remove, and you approve every change in your wallet.`,
         "muted",
       ),
       start,
