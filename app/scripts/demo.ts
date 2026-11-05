@@ -301,14 +301,10 @@ if (process.env.RPC_URL) {
       } finally {
         await unlink(scope);
       }
-      // Only the ids and targets are read here, none of them a 64-bit number, so the platform's
-      // own parser is used: the record can be megabytes and lossless parsing is far slower.
-      const { id } = JSON.parse(record) as { id: string };
-      const latest = JSON.parse(await run([binary, "latest", id])) as {
-        scope_id: string;
-        record: { snapshot: { targets: Json } };
-      };
-      const scopeId = latest.scope_id;
+      // The runtime answers with the record's id, scope and targets, none a 64-bit number. The
+      // view below reads the scope's latest record and refuses an ambiguous one itself.
+      const observed = JSON.parse(record) as { id: string; scope_id: string; targets: Json };
+      const scopeId = observed.scope_id;
       // Every account's view comes back with the observation, from one load of the record next to
       // the runtime, so a batch is one response to the browser and one record parse.
       const read = await fetch(
@@ -316,9 +312,8 @@ if (process.env.RPC_URL) {
       );
       if (!read.ok) throw new Error("Observed views unavailable.");
       const views = await read.text();
-      const observed = JSON.stringify(latest.record.snapshot.targets ?? []);
       return new Response(
-        `{"scope_id":${JSON.stringify(scopeId)},"record":{"snapshot":{"targets":${observed}}},"views":${views}}`,
+        `{"scope_id":${JSON.stringify(scopeId)},"record":{"snapshot":{"targets":${JSON.stringify(observed.targets ?? [])}}},"views":${views}}`,
         { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } },
       );
     } catch {
