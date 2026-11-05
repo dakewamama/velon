@@ -241,9 +241,7 @@ function technical(grant: ObjectValue, availability: string, rating: Status): HT
       "Runtime status",
       availability === HISTORICAL
         ? "Not evaluated for an earlier reading"
-        : rating.label === availability
-          ? availability
-          : `${rating.label} (${availability})`,
+        : `${rating.label === availability ? availability : `${rating.label} (${availability})`}${rating.reason ? `. ${rating.reason}` : ""}`,
     ),
     field("Kind", KINDS[kind] ?? kind),
   );
@@ -427,7 +425,11 @@ function card(
   said.setAttribute("aria-hidden", "true");
   if (list) title.className = "visually-hidden";
   row.append(header, title);
-  if (rating.reason) row.append(node("p", rating.reason, "why"));
+  // A subscription always acts through the approval it rests on, so the runtime never confirms it
+  // alone; on a wallet's row that is noise, and the reason stays under Details.
+  const structural = list && object(grant.authority_kind).kind === "derived" && availability === "unknown";
+  if (structural) row.classList.add("derived");
+  else if (rating.reason) row.append(node("p", rating.reason, "why"));
   row.append(
     delegate(
       grant,
@@ -647,10 +649,10 @@ function delegate(grant: ObjectValue, named: (found: Delegate) => void, brief = 
   const key = text(actor.value);
   // The Subscriptions authority is named by the verified grant, not by the RPC.
   const subscriptions = subscriptionsAuthority(grant);
-  const name = node("strong", subscriptions ? "Solana Subscriptions" : brief ? "Address" : short(key));
+  const name = node("strong", subscriptions ? "Solana Subscriptions" : short(key));
   const detail = node(
     "span",
-    subscriptions ? `Program authority · ${short(key)}` : brief ? short(key) : "Address",
+    subscriptions ? `Program authority · ${short(key)}` : brief ? "" : "Address",
     "muted",
   );
   line.append(avatar(key), name, detail);
@@ -658,8 +660,10 @@ function delegate(grant: ObjectValue, named: (found: Delegate) => void, brief = 
     void describeDelegate(control.rpcUrl, key)
       .then((found) => {
         holders.set(key, found);
-        name.textContent = found.title;
-        detail.textContent = brief ? short(key) : `${found.detail} · ${short(key)}`;
+        // An address with no account says nothing more than its key, so the key stays.
+        if (found.kind !== "none") name.textContent = found.title;
+        detail.textContent =
+          brief && found.kind !== "none" ? short(key) : brief ? "" : `${found.detail} · ${short(key)}`;
         named(found);
       })
       .catch(() => {});
@@ -709,6 +713,9 @@ async function scan(historical = false, refresh = false) {
   request = new AbortController();
   const signal = request.signal;
   const address = input.value.trim() || subject;
+  // Switching back to this tab shows this lookup again, even if it was refused.
+  reload = () => scan();
+  document.body.classList.remove("first-screen");
   results.replaceChildren();
   scanButton.disabled = false;
   if (!isAddress(address)) {
@@ -1009,7 +1016,7 @@ function invalidateReview() {
 function refreshWallets() {
   const available = signingWallets();
   connectButton.hidden = !!connected;
-  connectButton.disabled = !available.length || !scenarios.length;
+  connectButton.disabled = !scenarios.length;
   connectButton.title = available.length ? "" : "No Solana wallet with signTransaction was detected.";
 }
 wallets.on("register", refreshWallets);
@@ -1049,6 +1056,7 @@ disconnectButton.onclick = () => {
 connectButton.onclick = () => {
   if (actionState && ["AWAITING_SIGNATURE", "SUBMITTING", "FINALIZING"].includes(actionState)) return;
   const available = signingWallets();
+  if (!available.length) return noWallet();
   if (available.length < 2) return void connect(available[0]);
   chooser.replaceChildren(
     node("h2", "Connect a wallet"),
@@ -1067,6 +1075,37 @@ connectButton.onclick = () => {
   );
   chooser.showModal();
 };
+
+// Connecting needs a wallet in this browser; without one, say so and how to get one.
+function noWallet() {
+  const links = node("p", "", "wallet-links");
+  for (const [name, href] of [
+    ["Phantom", "https://phantom.com"],
+    ["Solflare", "https://solflare.com"],
+    ["Backpack", "https://backpack.app"],
+  ] as const) {
+    const anchor = labelled(node("a", name, "link-button"), "external");
+    anchor.href = href;
+    anchor.target = "_blank";
+    anchor.rel = "noreferrer";
+    links.append(anchor);
+  }
+  const close = node("button", "Close", "action-button");
+  close.type = "button";
+  close.onclick = () => chooser.close();
+  chooser.replaceChildren(
+    node("h2", "No Solana wallet in this browser"),
+    node(
+      "p",
+      "To remove an approval, Velon asks your wallet to sign it, so a wallet needs to be installed here. On a phone, open this page in your wallet app's own browser.",
+      "muted",
+    ),
+    links,
+    node("p", "You can still check any wallet without one: paste its address.", "muted"),
+    close,
+  );
+  chooser.showModal();
+}
 
 async function connect(wallet: SigningWallet | undefined) {
   try {
@@ -1212,7 +1251,12 @@ async function holdingsPanel(
     let status = safe(entry);
     if (entry.delegate !== null) {
       const delegated = BigInt(text(entry.delegated));
-      const limit = delegated === UNLIMITED ? "any amount" : `up to ${units(delegated, scale)}`;
+      const limit =
+        delegated === UNLIMITED
+          ? "any amount"
+          : delegated >= 2n ** 63n
+            ? "with no practical limit"
+            : `up to ${units(delegated, scale)}`;
       status = node("span", `${short(text(entry.delegate))} can take ${limit}`, "holding-status risk");
     }
     const label = tokenName(mint);
@@ -1312,11 +1356,17 @@ function reportedRow(entry: ObjectValue, said: string, link: string, extra: HTML
   header.append(tokenChip(mint, `${title.id}-token`));
   const key = text(entry.delegate);
   const who = node("div", "", "delegate");
-  const name = node("strong", "Address");
-  who.append(avatar(key), name, node("span", short(key), "muted"));
+  // The key itself until the chain says what it is, as on a verified row.
+  const name = node("strong", short(key));
+  const kind = node("span", "", "muted");
+  who.append(avatar(key), name, kind);
   if (control)
     void describeDelegate(control.rpcUrl, key)
-      .then((found) => (name.textContent = found.title))
+      .then((found) => {
+        if (found.kind === "none") return;
+        name.textContent = found.title;
+        kind.textContent = short(key);
+      })
       .catch(() => {});
   const open = labelled(node("a", "Explorer", "link-button"), "external");
   open.href = link;
@@ -1537,9 +1587,6 @@ async function scanWallet(
     }
     let done = 0;
     const progress = () => {
-      status(
-        `Checking ${done} of ${owned.length} token account${owned.length === 1 ? "" : "s"} against the chain…`,
-      );
       const verified = checking.querySelectorAll(".verified").length;
       const reported = checking.querySelectorAll(".reported").length;
       heading.textContent = `Checked ${done} of ${owned.length}${verified ? ` · ${verified} verified` : ""}${reported ? ` · ${reported} not verified` : ""}`;
@@ -1695,6 +1742,15 @@ async function scanWallet(
           ? `Velon couldn't check all of ${whose}`
           : `No token approvals or subscriptions found on ${whose}`,
       ),
+      ...(unread || skipped || subscriptionsUnread
+        ? []
+        : [
+            node(
+              "p",
+              "Velon checked the token approvals and Solana Subscriptions the network lists for this wallet and found none. Other kinds of permission aren't read yet.",
+              "muted",
+            ),
+          ]),
     );
   content.append(lead);
   if (unread)
@@ -2440,16 +2496,21 @@ function publicMode() {
 function lesson() {
   compareTab(false);
   results.replaceChildren();
-  // On a public cluster the visitor's own wallet is the whole point; ask for it first.
+  // On a public cluster, looking needs nothing; removing needs the owner's wallet.
   if (control && !control.testBench && !connected) {
+    document.body.classList.toggle("first-screen", !kept().length);
     const start = labelled(node("button", "Connect your wallet", "action-button"), "wallet");
     start.onclick = () => connectButton.click();
     const panel = node("section", "", "start");
     panel.append(
-      node("h2", "See who can take your tokens"),
+      node("h2", "Check what can take tokens from a Solana wallet"),
       node(
         "p",
-        `Connect a wallet to see the token approvals and Solana Subscriptions on it on ${network().label.toLowerCase()}, and which address holds each one. Connecting signs nothing. You choose what to remove, and you approve every change in your wallet.`,
+        `Paste any wallet address above to see its token approvals and Solana Subscriptions on ${network().label.toLowerCase()}: who holds each one, how much it allows, and what it has charged. Looking signs nothing.`,
+      ),
+      node(
+        "p",
+        "To remove one, connect the wallet that owns it. You approve every change in your wallet.",
         "muted",
       ),
       start,

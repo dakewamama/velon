@@ -40,6 +40,16 @@ export function decimal(units: bigint, scale: number): string {
   return fraction ? `${whole}.${fraction}` : whole;
 }
 
+// Past 2^63 an approval is beyond any real balance, so it reads as no practical limit.
+const NEAR_MAX = 2n ** 63n;
+const SCALES: [number, string][] = [
+  [1e18, "quintillion"],
+  [1e15, "quadrillion"],
+  [1e12, "trillion"],
+  [1e9, "billion"],
+  [1e6, "million"],
+];
+
 // One fixed UTC format, so a grant reads the same in every browser.
 export function when(seconds: bigint): string | undefined {
   const date = new Date(Number(seconds) * 1000);
@@ -109,6 +119,14 @@ function where(grant: ObjectValue, facts: Facts): { place: string; mine: boolean
 
 /// An amount in the token's own units when its decimals are known, else in its smallest units.
 export function amount(units: bigint, token?: Token): string {
+  // Approvals set near the u64 ceiling are read in words; the exact figure stays under Details.
+  if (units >= NEAR_MAX && units !== UNLIMITED) {
+    const scale = token?.decimals;
+    const value = Number(units) / 10 ** (scale ?? 0);
+    const [size, name] = SCALES.find(([size]) => value >= size) ?? [1, ""];
+    const words = `${Number((value / size).toFixed(1)).toLocaleString("en-US")}${name ? ` ${name}` : ""}`;
+    return `${words} ${scale === undefined ? "of this token's smallest units" : (listed(token) ?? "of this token")} (no practical limit)`;
+  }
   if (token?.decimals === undefined) return `${units.toLocaleString("en-US")} of this token's smallest units`;
   return `${decimal(units, token.decimals)} ${listed(token) ?? "of this token"}`;
 }
@@ -207,7 +225,7 @@ export function sentence(grant: ObjectValue, facts: Facts = {}): string {
     : limit && `up to ${amount(limit.amount, facts.token)}`;
   const span = recurring
     ? ` every ${periodName(integer(usage.period_seconds))}`
-    : usage.kind === "cumulative" && !unlimited
+    : usage.kind === "cumulative" && !unlimited && limit !== undefined && limit.amount < NEAR_MAX
       ? " in total"
       : "";
   const wide = object(grant.resource).namespace === "solana:mint-token-accounts";
@@ -240,6 +258,7 @@ export function allowance(grant: ObjectValue, token?: Token): string {
   if (usage.kind === "cumulative" && usage.remaining != null && integer(usage.remaining) === 0n)
     return "Nothing left";
   if (limit.amount === UNLIMITED) return "No limit";
+  if (limit.amount >= NEAR_MAX) return "No practical limit";
   const units =
     token?.decimals === undefined
       ? `${limit.amount.toLocaleString("en-US")} smallest units`

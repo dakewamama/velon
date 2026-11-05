@@ -107,14 +107,14 @@ test("the holder is named only by the kind describeDelegate reported, never gues
   expect(inside({ kind: "listed", title: "Jupiter Aggregator v6" })).toBe("Jupiter Aggregator v6");
 });
 
-test("an unlimited approval says any amount, while a near-maximum amount stays exact", () => {
+test("an unlimited approval says any amount, while a near-maximum one reads as no practical limit", () => {
   const open = limit(spl(), UNLIMITED);
   expect(sentence(open, { ...mine, token: USDC })).toBe(
     `Address ${short(DELEGATE)} can take any amount of USDC from your wallet, now and later, without asking you again.`,
   );
   expect(sentence(open)).toContain("any amount of this token");
   const near = sentence(limit(spl(), UNLIMITED - 60n));
-  expect(near).toContain("up to 18,446,744,073,709,551,555 of this token's smallest units");
+  expect(near).toContain("up to 18.4 quintillion of this token's smallest units (no practical limit)");
   expect(near).not.toContain("any amount");
 });
 
@@ -150,7 +150,7 @@ test("a grant Velon read as on hold, ended, barred or used up never says it can 
   // A frozen account's Subscriptions approval is on hold; one with nothing left is used up.
   const frozen = { ...technical(), lifecycle: { kind: "suspended" } };
   expect(sentence(frozen)).toBe(
-    `Solana Subscriptions is approved to take up to 18,446,744,073,709,551,555 of this token's smallest units in total from an account owned by ${short(SUBSCRIBER)}, but it is on hold.`,
+    `Solana Subscriptions is approved to take up to 18.4 quintillion of this token's smallest units (no practical limit) from an account owned by ${short(SUBSCRIBER)}, but it is on hold.`,
   );
   const spent = limit(technical(), 0n);
   expect(sentence(spent)).toBe(
@@ -212,7 +212,7 @@ test("a permanent delegate is set on the token itself and is never described as 
 test("a subscriptions technical approval is named from the verified grant, not the RPC", () => {
   const said = sentence(technical(), { delegate: { kind: "none", title: "Program-derived address" } });
   expect(said).toBe(
-    `Solana Subscriptions can take up to 18,446,744,073,709,551,555 of this token's smallest units from an account owned by ${short(SUBSCRIBER)}; it uses this approval to collect payments for any subscription on this account.`,
+    `Solana Subscriptions can take up to 18.4 quintillion of this token's smallest units (no practical limit) from an account owned by ${short(SUBSCRIBER)}; it uses this approval to collect payments for any subscription on this account.`,
   );
 });
 
@@ -381,7 +381,7 @@ test("the glossary explains the words the cards use", () => {
 
 test("a wallet row's amount names a listed token only, and says smallest units when the scale is unknown", () => {
   expect(allowance(limit(spl(), UNLIMITED), USDC)).toBe("No limit");
-  expect(allowance(limit(spl(), 18446744073709551555n), USDC)).toBe("Up to 18,446,744,073,709.551555 USDC");
+  expect(allowance(limit(spl(), 18446744073709551555n), USDC)).toBe("No practical limit");
   expect(allowance(limit(spl(), 2_500_000n), USDC)).toBe("Up to 2.5 USDC");
   // A creator-set symbol stays in the token cell; the amount stands alone.
   expect(allowance(limit(spl(), 2_500_000n), { symbol: "USDC", verified: false, decimals: 6 })).toBe(

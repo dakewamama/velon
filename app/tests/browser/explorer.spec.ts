@@ -59,7 +59,9 @@ test("native subscriptions scan, evidence and state comparison", async ({ page }
 test("large native amount, partial coverage and SPL reuse", async ({ page }, info) => {
   await page.goto("/app");
   await expect(
-    page.getByRole("heading", { name: /Solana Subscriptions can take up to 18,446,744,073,709,551/ }),
+    page.getByRole("heading", {
+      name: /Solana Subscriptions can take up to 18\.4 quintillion .*\(no practical limit\)/,
+    }),
   ).toBeVisible();
   // What was read is said plainly; the slot and origin wait under Technical details.
   await expect(page.locator(".coverage-note")).toContainText("Velon read only this account.");

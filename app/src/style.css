@@ -1577,8 +1577,14 @@ input:focus {
   margin: 0 0 8px;
 }
 .start p {
-  max-width: 52ch;
-  margin: 0 0 20px;
+  max-width: 60ch;
+  margin: 0 0 12px;
+  color: var(--body);
+  font-size: 16px;
+}
+.start p.muted {
+  margin-bottom: 20px;
+  font-size: 14px;
 }
 .permission dl {
   display: grid;
@@ -3079,7 +3085,7 @@ dialog .action-button {
 .approvals-head,
 .console .permission.compact {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 0.8fr) auto;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 0.9fr) 168px;
   align-items: center;
   gap: 4px 20px;
 }
@@ -3200,37 +3206,56 @@ dialog .action-button {
     display: none;
   }
   .console .permission.compact {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
     padding: 14px 16px;
   }
-  .permission.compact > .delegate {
+  .permission.compact > .permission-header,
+  .permission.compact > .delegate,
+  .permission.compact > .row-amount,
+  .permission.compact > .why,
+  .permission.compact > .permission-actions,
+  .permission.compact > .technical {
     grid-column: 1;
-    grid-row: 2;
-  }
-  .permission.compact > .row-amount {
-    grid-column: 2;
-    grid-row: 1;
-    text-align: right;
-  }
-  .permission.compact > .why {
-    grid-row: 3;
+    grid-row: auto;
   }
   .permission.compact > .permission-actions {
-    grid-column: 1 / -1;
-    grid-row: 4;
-    margin-top: 8px;
+    margin-top: 4px;
     justify-content: space-between;
   }
-  .permission.compact > .technical {
-    grid-row: 5;
+  .holding-status {
+    white-space: normal;
+    text-align: right;
+  }
+  .permission.compact > .delegate {
+    flex-wrap: wrap;
+  }
+  .permission.compact > .delegate strong {
+    white-space: normal;
   }
   .wallet-summary {
     padding: 20px;
   }
 }
-/* With a wallet's approvals listed, the list is the picture; the diagram only returns for the bench. */
-.console:has(.permission.compact) .stage:not(:has(.try:not([hidden]))) {
+/* On the public console the list is the picture; the diagram and the account drawer belong to the
+   test bench. A fresh first screen has nothing to tab between yet. */
+.console:has(.permission.compact) .stage:not(:has(.try:not([hidden]))),
+.public .stage:not(:has(.try:not([hidden]))),
+.public #browse,
+.first-screen .tabs {
   display: none;
+}
+/* A subscription's structural status is under Details, not on its row. */
+.permission.compact.derived .availability {
+  display: none;
+}
+.permission.compact > .delegate {
+  min-width: 0;
+}
+.permission.compact > .delegate strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The wallet lookup leads the public console. */
@@ -3293,12 +3318,9 @@ dialog .action-button {
 /* A creator-chosen token name is labelled, so a name like a link is never mistaken for a fact. */
 .token .unverified {
   margin-left: 6px;
-  padding: 1px 6px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 500;
+  color: var(--body);
+  font-size: 11.5px;
+  font-weight: 450;
 }
 .token img.token-logo {
   object-fit: cover;
@@ -3338,8 +3360,10 @@ dialog .action-button {
 .checking-who,
 .checking-amount {
   color: var(--body);
-  font-family: var(--mono, ui-monospace, monospace);
   font-size: 0.8rem;
+}
+.checking-who {
+  font-family: var(--mono, ui-monospace, monospace);
 }
 .checking-state {
   min-width: 7.5em;
@@ -3456,4 +3480,11 @@ dialog .action-button {
 .plan-why p {
   max-width: 72ch;
   margin: 0 0 8px;
+}
+
+/* Where to get a wallet when none is installed. */
+.wallet-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
 }
