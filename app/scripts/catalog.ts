@@ -16,21 +16,25 @@ export const SUBSCRIPTIONS_PROGRAM = "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR
 // The foundation's verify run built this source; trimmed of trailing zeros, its bytes hash to e705f5a3.
 const SUBSCRIPTIONS_HASH = "2675ad1d2b5068d47fc5d169156cf4859a9c21c0406ce63e3828e3b7320fddbf";
 const SUBSCRIPTIONS_SOURCE = "56de552a26a0f0af437c0ce5191b3309741cc596";
+// Mainnet's Subscriptions at its 438440823 deployment, program-v0.5.0; OtterSec verifies these
+// bytes from source. https://verify.osec.io/status/De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44
+const SUBSCRIPTIONS_MAINNET_HASH = "af3cefa5947173e03298361b3f461e2a314382a7206c084f77ad9a40c8b18d3a";
+const SUBSCRIPTIONS_MAINNET_SOURCE = "364a41976c33347d092902443bbec2def9227e75";
 // One mainnet epoch. Features can change at the next boundary, so each launch captures again.
 const VALIDITY = 432_000;
 
 const bytes = (key: string) => Array.from(getAddressEncoder().encode(key as Address));
 
+// One verified build: its padded payload hash, the source it was built from, and how.
+type Build = { hash: string; source: string; buildToolchain: string };
 type Program = {
   id: string;
   name: string;
-  hash: string;
-  source: string;
+  builds: Build[];
   protocol: string;
   schema: { uri: string; revision: string };
   adapter: string;
   adapterVersion: string;
-  buildToolchain: string;
   // SPL Token is required; the others are recorded only where the cluster runs the verified build.
   required: boolean;
 };
@@ -38,38 +42,55 @@ const PROGRAMS: Program[] = [
   {
     id: TOKEN_PROGRAM,
     name: "SPL Token",
-    hash: PROGRAM_HASH,
-    source: `solana-program/token@${TOKEN_SOURCE}`,
+    builds: [
+      {
+        hash: PROGRAM_HASH,
+        source: `solana-program/token@${TOKEN_SOURCE}`,
+        buildToolchain: `solana-verify; https://verify.osec.io/status/${TOKEN_PROGRAM}`,
+      },
+    ],
     protocol: "spl-token",
     schema: { uri: "https://docs.rs/spl-token-interface/3.0.0", revision: "3.0.0" },
     adapter: "spl.rs",
     adapterVersion: "0.1",
-    buildToolchain: `solana-verify; https://verify.osec.io/status/${TOKEN_PROGRAM}`,
     required: true,
   },
   {
     id: TOKEN_2022_PROGRAM,
     name: "Token-2022",
-    hash: TOKEN_2022_HASH,
-    source: `solana-program/token-2022@${TOKEN_2022_SOURCE}`,
+    builds: [
+      {
+        hash: TOKEN_2022_HASH,
+        source: `solana-program/token-2022@${TOKEN_2022_SOURCE}`,
+        buildToolchain: `solana-verify; https://verify.osec.io/status/${TOKEN_2022_PROGRAM}`,
+      },
+    ],
     protocol: "token-2022",
     schema: { uri: "https://docs.rs/spl-token-2022-interface/3.1.2", revision: "3.1.2" },
     adapter: "token2022.rs",
     adapterVersion: "0.1",
-    buildToolchain: `solana-verify; https://verify.osec.io/status/${TOKEN_2022_PROGRAM}`,
     required: false,
   },
   {
     id: SUBSCRIPTIONS_PROGRAM,
     name: "Solana Subscriptions",
-    hash: SUBSCRIPTIONS_HASH,
-    source: `solana-foundation/subscriptions@${SUBSCRIPTIONS_SOURCE}`,
+    builds: [
+      {
+        hash: SUBSCRIPTIONS_HASH,
+        source: `solana-foundation/subscriptions@${SUBSCRIPTIONS_SOURCE}`,
+        buildToolchain:
+          "solana-verify 0.5.2; Agave 3.1.10; platform-tools v1.52; https://github.com/solana-foundation/subscriptions/actions/runs/37008589067",
+      },
+      {
+        hash: SUBSCRIPTIONS_MAINNET_HASH,
+        source: `solana-foundation/subscriptions@${SUBSCRIPTIONS_MAINNET_SOURCE}`,
+        buildToolchain: `solana-verify; https://verify.osec.io/status/${SUBSCRIPTIONS_PROGRAM}`,
+      },
+    ],
     protocol: "subscriptions",
     schema: { uri: "https://docs.rs/subscriptions/0.5.0", revision: "0.5.0" },
     adapter: "subscriptions.rs",
     adapterVersion: "0.3",
-    buildToolchain:
-      "solana-verify 0.5.2; Agave 3.1.10; platform-tools v1.52; https://github.com/solana-foundation/subscriptions/actions/runs/37008589067",
     required: false,
   },
 ];
@@ -125,21 +146,29 @@ export async function tokenCatalogAsync(
 
 function accept(program: Program, raw: string | undefined, rpcUrl: string, revision: string): Json[] {
   const capture = raw === undefined ? undefined : object(readJson(raw));
+  const build = program.builds.find((build) => text(capture?.version) === `sha256:${build.hash}`);
   const problem =
     capture === undefined
       ? `Capturing ${program.name} failed.`
-      : text(capture.version) !== `sha256:${program.hash}`
-        ? `This cluster runs ${program.name} ${text(capture.version)}, not the verified build.`
+      : !build
+        ? `This cluster runs ${program.name} ${text(capture.version)}, not a verified build.`
         : undefined;
   if (problem) {
     if (program.required) throw new Error(problem);
     console.warn(`${problem} Its approvals are listed but not verified.`);
     return [];
   }
-  return [record(program, raw!, capture!, rpcUrl, revision)];
+  return [record(program, build!, raw!, capture!, rpcUrl, revision)];
 }
 
-function record(program: Program, raw: string, capture: ObjectValue, rpcUrl: string, revision: string): Json {
+function record(
+  program: Program,
+  build: Build,
+  raw: string,
+  capture: ObjectValue,
+  rpcUrl: string,
+  revision: string,
+): Json {
   const deployed = Number(integer(capture.deployment_slot));
   const observed = Number(integer(capture.observed_slot));
   const programdata = array(capture.programdata_address).map((byte) => Number(integer(byte)));
@@ -167,8 +196,8 @@ function record(program: Program, raw: string, capture: ObjectValue, rpcUrl: str
     executable: {
       programdata_address: programdata,
       observed_slot: observed,
-      source_revision: program.source,
-      build_toolchain: program.buildToolchain,
+      source_revision: build.source,
+      build_toolchain: build.buildToolchain,
       identity: capture.identity!,
       runtime: capture.runtime!,
     },
