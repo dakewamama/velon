@@ -70,7 +70,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
             let snapshot = observe_catalogued(&client, scope, &catalog).await?;
             let record = journal.ingest(snapshot, &catalog).await?;
-            println!("{}", serde_json::to_string(&record)?);
+            // The record is journaled and read back through the API; printing its megabytes of
+            // program bytes here would only be parsed again for these three fields.
+            println!(
+                "{}",
+                serde_json::json!({
+                    "id": record.id,
+                    "scope_id": record.snapshot.scope_id()?,
+                    "targets": record.snapshot.targets,
+                })
+            );
         }
         [command, catalog_path, snapshot_path] if command == "import" => {
             let versions: Vec<ProgramVersion> =
