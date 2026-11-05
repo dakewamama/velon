@@ -1076,8 +1076,14 @@ fn missing_clock_plan_and_current_wallet_evidence_fail_closed() {
         sdk::compile_state(&DelegationAdapter, &state, &context),
         Err(Error::InvalidState(_))
     ));
+    // A plan owner or puller held by a program signs through it; a token multisig account does not.
     let mut state = self::state(&accounts(step, "after"), START, 0);
     state.source.authorities[2].1.owner = SUBSCRIPTIONS_ID;
+    state.source.authorities[2].1.data = vec![1; 64];
+    assert!(sdk::compile_state(&DelegationAdapter, &state, &context).is_ok());
+    state.source.authorities[2].1.owner = token::ID;
+    state.source.authorities[2].1.data =
+        vec![0; <spl_token_interface::state::Multisig as solana_program_pack::Pack>::LEN];
     assert_eq!(
         sdk::compile_state(&DelegationAdapter, &state, &context),
         Err(Error::UnsupportedOperation)

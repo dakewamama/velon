@@ -19,7 +19,7 @@ use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
-use spl_token_interface::state::{Account as TokenAccount, Mint};
+use spl_token_interface::state::{Account as TokenAccount, Mint, Multisig};
 
 pub const PROGRAM_VERSION: &str =
     "sha256:a59467f0b2d0a0211b06ddf9a3f3141a90eaea6faeeaa3d19541288eaa082107";
@@ -28,6 +28,12 @@ pub const DEVNET_PROGRAM_VERSION: &str =
     "sha256:2675ad1d2b5068d47fc5d169156cf4859a9c21c0406ce63e3828e3b7320fddbf";
 pub const DEVNET_DEPLOYMENT: &str =
     "solana:loader-v3:HaYb5J9eXooZuNzN3z6TfuzVDcaTfiDdDPWCFtexFfMg:506642674";
+/// Mainnet's program-v0.5.0, verified by OtterSec from @364a4197 (sha256 056ca97c… unpadded).
+/// Its account layouts and revoke rules match the devnet build; that build only adds more.
+pub const MAINNET_PROGRAM_VERSION: &str =
+    "sha256:af3cefa5947173e03298361b3f461e2a314382a7206c084f77ad9a40c8b18d3a";
+pub const MAINNET_DEPLOYMENT: &str =
+    "solana:loader-v3:HaYb5J9eXooZuNzN3z6TfuzVDcaTfiDdDPWCFtexFfMg:438440823";
 
 pub const ADAPTER_VERSION: &str = "0.3";
 
@@ -226,6 +232,28 @@ fn principal(keys: impl IntoIterator<Item = Pubkey>) -> Principal {
     }
 }
 
+/// The program only requires a delegatee, plan owner or puller to sign. A wallet signs for itself
+/// and a program's address through its program, as SPL delegates do; an executable, or an account
+/// of multisig size owned by a token program, is not modelled.
+fn check_signer(state: &AuthorityState, key: Pubkey) -> Result<(), Error> {
+    let mut observations = state
+        .authorities
+        .iter()
+        .filter(|(address, _)| *address == key);
+    let (_, account) = observations.next().ok_or(Error::InsufficientEvidence)?;
+    if observations.next().is_some() {
+        return Err(Error::InvalidState(
+            "duplicate authority observation".into(),
+        ));
+    }
+    let token_program = account.owner == spl_token_interface::id()
+        || account.owner == spl_token_2022_interface::id();
+    if account.executable || (token_program && account.data.len() == Multisig::LEN) {
+        return Err(Error::UnsupportedOperation);
+    }
+    Ok(())
+}
+
 fn absent(account: &Account) -> bool {
     account.owner == Pubkey::default()
         && account.lamports == 0
@@ -391,7 +419,9 @@ impl Adapter for DelegationAdapter {
         native.protocol == "subscriptions"
             && matches!(
                 (native.deployment.as_str(), native.program_version.as_str()),
-                (DEPLOYMENT, PROGRAM_VERSION) | (DEVNET_DEPLOYMENT, DEVNET_PROGRAM_VERSION)
+                (DEPLOYMENT, PROGRAM_VERSION)
+                    | (DEVNET_DEPLOYMENT, DEVNET_PROGRAM_VERSION)
+                    | (MAINNET_DEPLOYMENT, MAINNET_PROGRAM_VERSION)
             )
             && native.adapter_version == ADAPTER_VERSION
     }
@@ -513,7 +543,7 @@ impl Adapter for DelegationAdapter {
                     check_authority(&state.source, header.delegator)?;
                     for key in [plan.owner].into_iter().chain(plan.data.pullers) {
                         if key != Pubkey::default() {
-                            check_authority(&state.source, key)?;
+                            check_signer(&state.source, key)?;
                         }
                     }
                     (authority_address, source.mint)
@@ -526,7 +556,7 @@ impl Adapter for DelegationAdapter {
                 return Err(Error::InvalidState("delegation binding".into()));
             }
             if !matches!(grant, Delegation::Subscription(_)) {
-                check_authority(&state.source, grant.header().delegatee)?;
+                check_signer(&state.source, grant.header().delegatee)?;
             }
         }
         let approved = Option::<Pubkey>::from(source.delegate) == Some(authority_address);
@@ -625,7 +655,7 @@ impl Adapter for DelegationAdapter {
         }
         if let Some(plan) = plan {
             let now = state.unix_timestamp.ok_or(Error::InsufficientEvidence)?;
-            check_authority(&state.source, plan.owner)?;
+            check_signer(&state.source, plan.owner)?;
             let mut administrative = technical;
             administrative.id = format!(
                 "{}:{}:{}:modify-authority",

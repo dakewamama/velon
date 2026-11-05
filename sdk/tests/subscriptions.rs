@@ -764,7 +764,22 @@ fn missing_or_ambiguous_controller_evidence_fails_closed() {
         Err(Error::InvalidState(_))
     ));
     state.source.authorities.pop();
+    // A delegatee held by a program signs through that program, as an SPL delegate does.
     state.source.authorities[1].1.owner = SUBSCRIPTIONS_ID;
+    state.source.authorities[1].1.data = vec![1; 64];
+    assert!(sdk::compile_state(&DelegationAdapter, &state, &context()).is_ok());
+    // A token program's multisig-sized account, or an executable, is still not modelled.
+    state.source.authorities[1].1.owner = token::ID;
+    state.source.authorities[1].1.data =
+        vec![0; <spl_token_interface::state::Multisig as solana_program_pack::Pack>::LEN];
+    assert_eq!(
+        sdk::compile_state(&DelegationAdapter, &state, &context()),
+        Err(Error::UnsupportedOperation)
+    );
+    state.source.authorities[1].1 = Account {
+        executable: true,
+        ..self::state(&accounts(2)).source.authorities[1].1.clone()
+    };
     assert_eq!(
         sdk::compile_state(&DelegationAdapter, &state, &context()),
         Err(Error::UnsupportedOperation)
@@ -861,4 +876,37 @@ fn unknown_versions_and_malformed_native_state_fail_closed() {
         sdk::compile_state(&DelegationAdapter, &state, &self::context()),
         Err(Error::InvalidState(_))
     ));
+}
+
+#[test]
+fn only_verified_subscriptions_deployments_are_supported() {
+    use catalyst_sdk::subscriptions::{
+        DelegationAdapter, ADAPTER_VERSION, DEVNET_DEPLOYMENT, DEVNET_PROGRAM_VERSION,
+        MAINNET_DEPLOYMENT, MAINNET_PROGRAM_VERSION,
+    };
+    let native = |deployment: &str, version: &str| arm::NativeContext {
+        protocol: "subscriptions".into(),
+        deployment: deployment.into(),
+        program_version: version.into(),
+        adapter_version: ADAPTER_VERSION.into(),
+    };
+    for (deployment, version) in [
+        (DEVNET_DEPLOYMENT, DEVNET_PROGRAM_VERSION),
+        (MAINNET_DEPLOYMENT, MAINNET_PROGRAM_VERSION),
+    ] {
+        assert!(catalyst_sdk::Adapter::supports(
+            &DelegationAdapter,
+            &native(deployment, version)
+        ));
+    }
+    // A pinned hash is only trusted at the deployment it was verified for.
+    for (deployment, version) in [
+        (MAINNET_DEPLOYMENT, DEVNET_PROGRAM_VERSION),
+        (DEVNET_DEPLOYMENT, MAINNET_PROGRAM_VERSION),
+    ] {
+        assert!(!catalyst_sdk::Adapter::supports(
+            &DelegationAdapter,
+            &native(deployment, version)
+        ));
+    }
 }
