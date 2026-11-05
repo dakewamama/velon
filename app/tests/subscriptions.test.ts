@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { getAddressDecoder, getAddressEncoder, type Address } from "@solana/addresses";
-import { delegation, plan } from "../scripts/subscriptions.ts";
+import { base58, delegation, event, EVENT_TAG, plan } from "../scripts/subscriptions.ts";
 
 // Accounts written field by field in the program's own order, so offsets are checked, not assumed.
 const keyOf = (byte: number) => getAddressDecoder().decode(new Uint8Array(32).fill(byte));
@@ -102,4 +102,76 @@ test("a plan lists its owner, terms and only the pullers in use", () => {
     periodHours: 720n,
     pullers: [keyOf(6), keyOf(7)],
   });
+});
+
+const tagged = (kind: number, body: Uint8Array) => Uint8Array.from([...EVENT_TAG, kind, ...body]);
+
+test("a subscription pull names its receiver account and the puller that signed", () => {
+  const body = writer()
+    .key(1)
+    .key(2)
+    .key(3)
+    .key(4)
+    .u64(1_000_000_000n)
+    .i64(10n)
+    .i64(20n)
+    .u64(1_000_000_000n)
+    .key(5)
+    .key(6)
+    .key(7)
+    .done();
+  expect(body.length).toBe(256);
+  expect(event(tagged(2, body))).toEqual({
+    kind: "pull",
+    delegation: keyOf(1),
+    delegator: keyOf(3),
+    mint: keyOf(4),
+    amount: 1_000_000_000n,
+    receiver: keyOf(5),
+    receiverTokenAccount: keyOf(6),
+    puller: keyOf(7),
+  });
+  // The layout from before those fields existed leaves them absent.
+  expect(event(tagged(2, body.subarray(0, 192)))).toMatchObject({
+    receiverTokenAccount: undefined,
+    puller: undefined,
+  });
+});
+
+test("a fixed pull is signed by its delegatee and pays the receiver after the remaining amount", () => {
+  const body = writer().key(1).key(2).key(3).key(4).u64(10n).u64(90n).key(5).key(6).done();
+  expect(body.length).toBe(208);
+  expect(event(tagged(3, body))).toMatchObject({
+    delegation: keyOf(1),
+    delegator: keyOf(2),
+    puller: keyOf(3),
+    amount: 10n,
+    receiver: keyOf(5),
+    receiverTokenAccount: keyOf(6),
+  });
+});
+
+test("lifecycle events and unknown lengths", () => {
+  const created = writer().key(1).key(2).key(3).i64(42n).key(4).done();
+  expect(event(tagged(0, created))).toEqual({
+    kind: "created",
+    plan: keyOf(1),
+    subscriber: keyOf(2),
+    at: 42n,
+    payer: keyOf(4),
+  });
+  expect(event(tagged(1, writer().key(1).key(2).i64(9n).done()))).toMatchObject({
+    kind: "cancelled",
+    expiresAt: 9n,
+  });
+  expect(event(tagged(2, new Uint8Array(255)))).toBeUndefined();
+  expect(event(tagged(6, new Uint8Array(201)))).toBeUndefined();
+  expect(event(Uint8Array.from([0, ...created]))).toBeUndefined();
+});
+
+test("base58 reads what the address encoder writes, leading zeros included", () => {
+  for (const byte of [0, 1, 5, 255])
+    expect(base58(keyOf(byte))).toEqual(Uint8Array.from(getAddressEncoder().encode(keyOf(byte) as Address)));
+  expect(base58("11")).toEqual(new Uint8Array(2));
+  expect(base58("0OIl")).toBeUndefined();
 });

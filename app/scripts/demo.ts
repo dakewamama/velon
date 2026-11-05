@@ -16,7 +16,7 @@ import {
 } from "../src/wire.ts";
 import { DEVNET_GENESIS, MAINNET_GENESIS, type Control } from "../src/control.ts";
 import { SUBSCRIPTIONS_PROGRAM, tokenCatalog, tokenCatalogAsync } from "./catalog.ts";
-import { DELEGATOR_OFFSET, delegation, plan, type Delegation } from "./subscriptions.ts";
+import { base58, DELEGATOR_OFFSET, delegation, event, plan, type Delegation } from "./subscriptions.ts";
 import type { Live } from "../src/server.ts";
 
 const root = resolve(import.meta.dir, "..");
@@ -473,6 +473,91 @@ if (process.env.RPC_URL) {
       };
     });
   };
+  // A delegation's past charges and lifecycle, from the cluster's finalized transactions. Only events
+  // the Subscriptions program emitted, in transactions that succeeded, for this delegation are kept.
+  const HISTORY = 25;
+  const histories = new Map<string, { at: number; read: Promise<Json> }>();
+  const readHistory = async (address: string): Promise<Json> => {
+    const info = array(
+      object(await rpc("getMultipleAccounts", [[address], { encoding: "base64", commitment: "finalized" }]))
+        .value,
+    )[0];
+    const found = info ? delegation(subscriptionData(info) ?? new Uint8Array()) : undefined;
+    if (!found) return { error: "Not a Subscriptions delegation." };
+    const signatures = array(
+      await rpc("getSignaturesForAddress", [address, { limit: HISTORY, commitment: "finalized" }]),
+    ).map(object);
+    const events: (Record<string, Json> & { slot: number; outer: number; inner: number })[] = [];
+    const settled = signatures.filter((entry) => entry.err === null).map((entry) => text(entry.signature));
+    for (let start = 0; start < settled.length; start += 4)
+      await Promise.all(
+        settled.slice(start, start + 4).map(async (signature) => {
+          const tx = object(
+            await rpc("getTransaction", [
+              signature,
+              { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "finalized" },
+            ]),
+          );
+          const meta = object(tx.meta);
+          if (meta.err !== null) return;
+          const loaded = object(meta.loadedAddresses ?? {});
+          const keys = [
+            ...array(object(object(tx.transaction).message).accountKeys),
+            ...array(loaded.writable ?? []),
+            ...array(loaded.readonly ?? []),
+          ].map(text);
+          for (const group of array(meta.innerInstructions ?? []).map(object))
+            array(group.instructions).forEach((item, inner) => {
+              const instruction = object(item);
+              if (keys[Number(instruction.programIdIndex)] !== SUBSCRIPTIONS_PROGRAM) return;
+              const value = event(base58(text(instruction.data)) ?? new Uint8Array());
+              const ours =
+                value?.kind === "pull"
+                  ? value.delegation === address
+                  : value !== undefined &&
+                    found.kind === "subscription" &&
+                    value.plan === found.plan &&
+                    value.subscriber === found.delegator;
+              if (!value || !ours) return;
+              events.push({
+                ...Object.fromEntries(
+                  Object.entries(value).map(([field, data]) => [
+                    field,
+                    typeof data === "bigint" ? String(data) : data,
+                  ]),
+                ),
+                signature,
+                slot: Number(tx.slot),
+                time: tx.blockTime == null ? null : Number(tx.blockTime),
+                outer: Number(group.index),
+                inner,
+              });
+            });
+        }),
+      );
+    events.sort((a, b) => b.slot - a.slot || b.outer - a.outer || b.inner - a.inner);
+    // Fewer signatures than asked for means the account's whole history was read.
+    return { delegation: address, kind: found.kind, complete: signatures.length < HISTORY, events };
+  };
+  const history: Live["history"] = async (address) => {
+    const now = Date.now();
+    for (const [key, value] of histories) if (now - value.at > 30000) histories.delete(key);
+    let cached = histories.get(address);
+    if (!cached) {
+      cached = { at: now, read: readHistory(address) };
+      histories.set(address, cached);
+      cached.read.catch(() => histories.delete(address));
+    }
+    try {
+      const body = object(await cached.read);
+      return Response.json(body, {
+        status: body.error ? 404 : 200,
+        headers: { "Cache-Control": "no-store" },
+      });
+    } catch {
+      return Response.json({ error: "The delegation's history could not be read." }, { status: 502 });
+    }
+  };
   const owned: Live["owned"] = async (owner) => {
     try {
       const [{ entries, skipped }, subscriptions] = await Promise.all([
@@ -719,7 +804,7 @@ if (process.env.RPC_URL) {
       return Response.json({ error: "Token names could not be read." }, { status: 502 });
     }
   };
-  live = { observe, owned, holdings, metadata };
+  live = { observe, owned, holdings, history, metadata };
   // Public clusters refuse browser-origin RPC, so a local console relays the methods it needs.
   // The hosted bench does the same in deploy/gateway.ts; keep the two lists in step.
   if (process.env.RPC_RELAY === "1") {

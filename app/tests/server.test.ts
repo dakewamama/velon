@@ -297,6 +297,27 @@ test("the wallet endpoint takes one owner address and an observe header", async 
   expect((await fetch(new URL("/api/live/wallet", server.url))).status).toBe(405);
 });
 
+test("a delegation's history is read only for one valid address with the observe header", async () => {
+  const upstream = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("{}") });
+  const asked: string[] = [];
+  const history = async (delegation: string) => (asked.push(delegation), Response.json({ events: [] }));
+  const server = createServer(String(upstream.url), [], 0, "127.0.0.1", null, { history });
+  servers.push(upstream, server);
+  const delegation = "11111111111111111111111111111111";
+  const post = (body: unknown, action = "observe") =>
+    fetch(new URL("/api/live/history", server.url), {
+      method: "POST",
+      headers: { "X-Velon-Action": action, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  expect(await (await post({ delegation })).json()).toEqual({ events: [] });
+  expect(asked).toEqual([delegation]);
+  expect((await post({ delegation: "invalid" })).status).toBe(400);
+  expect((await post({ owner: delegation })).status).toBe(400);
+  expect((await post({ delegation }, "revoke")).status).toBe(403);
+  expect((await fetch(new URL("/api/live/history", server.url))).status).toBe(405);
+});
+
 test("token names are looked up for at most 80 valid mints with the observe header", async () => {
   const upstream = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("{}") });
   const asked: string[][] = [];

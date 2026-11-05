@@ -107,7 +107,8 @@ function where(grant: ObjectValue, facts: Facts): { place: string; mine: boolean
   return facts.yours ? { place: "your wallet", mine: true } : { place: "this wallet", mine: false };
 }
 
-function amount(units: bigint, token?: Token): string {
+/// An amount in the token's own units when its decimals are known, else in its smallest units.
+export function amount(units: bigint, token?: Token): string {
   if (token?.decimals === undefined) return `${units.toLocaleString("en-US")} of this token's smallest units`;
   return `${decimal(units, token.decimals)} ${listed(token) ?? "of this token"}`;
 }

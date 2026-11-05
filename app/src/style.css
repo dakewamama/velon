@@ -3383,3 +3383,47 @@ dialog .action-button {
     display: none;
   }
 }
+
+/* What a subscription has charged: the last charge under its amount, every one under Details. */
+.last-charge {
+  display: block;
+  margin-top: 2px;
+  color: var(--body);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.charges {
+  margin-top: 16px;
+}
+.charges h4 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 14px;
+}
+.charges ol {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.charges li {
+  display: grid;
+  grid-template-columns: 9em minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 12px;
+  color: var(--body);
+  font-size: 14px;
+}
+.charges .charge-date {
+  color: var(--body);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 760px) {
+  .charges li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .charges .charge-date {
+    grid-column: 1 / -1;
+  }
+}

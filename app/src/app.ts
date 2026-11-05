@@ -35,6 +35,8 @@ import {
   sentence,
   status as rate,
   allowance as allowanceCell,
+  amount as quantity,
+  when,
   subscriptionsAuthority,
   UNVERIFIED,
   who,
@@ -431,6 +433,15 @@ function card(
   const panel = technical(grant, availability, rating);
   panel.id = `${title.id}-details`;
   if (list) panel.prepend(said);
+  // A subscription or delegation shows what it has actually charged, read from finalized transactions.
+  const delegation = revokeKey(grant);
+  if (
+    control &&
+    text(object(grant.native_context).protocol) === "subscriptions" &&
+    object(grant.authority_kind).kind === "derived" &&
+    delegation
+  )
+    charges(row, panel, delegation, known.token);
   const button = node("button", list ? "Details" : "Technical details", "link-button");
   button.type = "button";
   button.setAttribute("aria-expanded", "false");
@@ -520,6 +531,90 @@ function revokeKey(grant: ObjectValue): string | undefined {
     rest.length === 0
     ? delegation
     : undefined;
+}
+
+// Past charges are read a few at a time, so a wallet with many subscriptions doesn't flood the RPC.
+let reading = 0;
+const queued: (() => void)[] = [];
+async function oneOf<T>(work: () => Promise<T>): Promise<T> {
+  if (reading >= 3) await new Promise<void>((resolve) => queued.push(resolve));
+  reading++;
+  try {
+    return await work();
+  } finally {
+    reading--;
+    queued.shift()?.();
+  }
+}
+
+// Amounts arrive as decimal strings, so a u64 survives JSON; anything else is refused.
+const amountOf = (value: Json | undefined) => {
+  const digits = text(value);
+  if (!/^\d{1,20}$/.test(digits) || BigInt(digits) > UNLIMITED) throw new Error("Malformed amount.");
+  return BigInt(digits);
+};
+const day = (seconds: Json | undefined) =>
+  seconds == null
+    ? "an unknown date"
+    : (when(integer(seconds))?.split(",").slice(0, 2).join(",") ?? "an unknown date");
+
+// The last charge goes on the row; every charge and change, with its transaction, goes under Details.
+function charges(row: HTMLElement, panel: HTMLElement, delegation: string, token: Facts["token"]) {
+  const line = node("span", "Reading past charges…", "last-charge");
+  (row.querySelector(".row-amount") ?? row.querySelector(".delegate") ?? row).append(line);
+  void oneOf(async () => {
+    const response = await call("/api/live/history", {
+      method: "POST",
+      headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
+      body: JSON.stringify({ delegation }),
+    });
+    if (response.status === 404) return undefined;
+    if (!response.ok) throw new Error("History unavailable");
+    return object(readJson(await response.text()));
+  })
+    .then((body) => {
+      if (!body) return line.remove();
+      const events = array(body.events).map(object);
+      const pulls = events.filter((entry) => entry.kind === "pull");
+      const last = pulls[0];
+      line.textContent = last
+        ? `Last charged ${quantity(amountOf(last.amount), token)} on ${day(last.time)}`
+        : "No charges yet";
+      const section = node("section", "", "charges");
+      section.append(node("h4", "Charges and changes"));
+      const list = node("ol");
+      for (const entry of events) {
+        const item = node("li");
+        const said =
+          entry.kind === "pull"
+            ? `Charged ${quantity(amountOf(entry.amount), token)}, paid to ${short(text(entry.receiver))}${entry.puller ? `, by ${short(text(entry.puller))}` : ""}`
+            : entry.kind === "created"
+              ? "Subscribed"
+              : entry.kind === "cancelled"
+                ? `Cancelled; it ends on ${day(entry.expiresAt)}`
+                : "Resumed";
+        const open = node("a", "Transaction", "link-button");
+        open.href = explorer("tx", text(entry.signature));
+        open.target = "_blank";
+        open.rel = "noreferrer";
+        item.append(node("span", day(entry.time), "charge-date"), node("span", said), open);
+        list.append(item);
+      }
+      section.append(
+        events.length ? list : node("p", "No charges or changes yet.", "muted"),
+        node(
+          "p",
+          body.complete === true
+            ? "Read from every finalized transaction for this permission."
+            : "Read from its 25 most recent finalized transactions; older ones aren't shown.",
+          "muted",
+        ),
+      );
+      panel.append(section);
+    })
+    .catch(() => {
+      line.textContent = "Velon couldn't read past charges.";
+    });
 }
 
 // Who holds the permission, named from what the chain says the key is. The card's sentence is

@@ -13,6 +13,8 @@ export type Live = {
   devnet?: () => Response;
   /// Lists one wallet's delegated token accounts, as the RPC's owner index reports them.
   owned?: (owner: string) => Promise<Response>;
+  /// A Subscriptions delegation's past charges and lifecycle, from the cluster's finalized transactions.
+  history?: (delegation: string) => Promise<Response>;
   /// The wallet's SOL balance and every token account, as the RPC reports them. Display only.
   holdings?: (owner: string) => Promise<Response>;
   /// Names, symbols and logos for up to 80 mints (one request body), as their creators published them.
@@ -62,6 +64,7 @@ export function createServer(
       const fund = url.pathname === "/api/test/account" ? live?.fund : undefined;
       const owned = url.pathname === "/api/live/spl/owned" ? live?.owned : undefined;
       const holdings = url.pathname === "/api/live/wallet" ? live?.holdings : undefined;
+      const history = url.pathname === "/api/live/history" ? live?.history : undefined;
       const metadata = url.pathname === "/api/live/tokens" ? live?.metadata : undefined;
       const discover = url.pathname === "/api/live/spl/delegated" ? live?.discover : undefined;
       const approve = url.pathname === "/api/live/spl/approve" ? live?.approve : undefined;
@@ -82,6 +85,7 @@ export function createServer(
           !fund &&
           !owned &&
           !holdings &&
+          !history &&
           !metadata &&
           !discover &&
           !approve &&
@@ -92,7 +96,9 @@ export function createServer(
       )
         return new Response("Not found", { status: 404 });
       const method =
-        action || observePath || approve || fund || owned || holdings || metadata || relay ? "POST" : "GET";
+        action || observePath || approve || fund || owned || holdings || history || metadata || relay
+          ? "POST"
+          : "GET";
       if (request.method !== method)
         return new Response("Method not allowed", { status: 405, headers: { Allow: method } });
       if (scenariosPath) return Response.json(scenarios);
@@ -134,14 +140,14 @@ export function createServer(
           ? new Response("Test approval takes no input", { status: 400 })
           : approve();
       if (
-        (verify || observePath || fund || owned || holdings) &&
+        (verify || observePath || fund || owned || holdings || history) &&
         request.headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase() !== "application/json"
       )
         return new Response("JSON body required", { status: 415 });
-      if (observePath || fund || owned || holdings) {
+      if (observePath || fund || owned || holdings || history) {
         // Only a validated address leaves this handler; the launcher builds everything else.
         // An observation names one account, or a batch of a wallet's accounts observed together.
-        const keys = fund || owned || holdings ? ["owner"] : ["source", "sources"];
+        const keys = history ? ["delegation"] : fund || owned || holdings ? ["owner"] : ["source", "sources"];
         let address: unknown;
         let key: string | undefined;
         try {
@@ -168,6 +174,7 @@ export function createServer(
         if (typeof address !== "string" || !isAddress(address))
           return new Response("Address required", { status: 400 });
         if (holdings) return holdings(address);
+        if (history) return history(address);
         return fund ? fund(address) : owned ? owned(address) : observe!([address]);
       }
       const body = action ? await request.arrayBuffer() : undefined;

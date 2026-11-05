@@ -66,3 +66,91 @@ export function plan(data: Uint8Array): Plan | undefined {
     pullers: [0, 1, 2, 3].map((index) => key(data, 235 + index * 32)).filter((puller) => puller !== NONE),
   };
 }
+
+/// The self-CPI tag every Subscriptions event starts with, then one byte for its kind.
+export const EVENT_TAG = Uint8Array.from([0xe4, 0x45, 0xa5, 0x2e, 0x51, 0xcb, 0x9a, 0x1d]);
+
+export type Event =
+  | { kind: "created"; plan: Address; subscriber: Address; at: bigint; payer?: Address }
+  | { kind: "cancelled"; plan: Address; subscriber: Address; expiresAt: bigint }
+  | { kind: "resumed"; plan: Address; subscriber: Address; at: bigint }
+  | {
+      kind: "pull";
+      delegation: Address;
+      delegator: Address;
+      mint: Address;
+      amount: bigint;
+      receiver: Address;
+      /// Absent from events emitted before subscriptions@2d7b45b, never guessed.
+      receiverTokenAccount?: Address;
+      /// The plan puller that signed, or the delegatee, which signs every fixed and recurring pull.
+      puller?: Address;
+    };
+
+// Each event's payload length as the pinned builds emit it, and the shorter one from before
+// subscriptions@2d7b45b; any other length is not read.
+const LENGTHS: Record<number, [number, number?]> = {
+  0: [32 * 4 + 8, 32 * 3 + 8],
+  1: [32 * 2 + 8],
+  2: [32 * 7 + 8 * 4, 32 * 5 + 8 * 4],
+  3: [32 * 6 + 8 * 2, 32 * 5 + 8 * 2],
+  4: [32 * 6 + 8 * 4, 32 * 5 + 8 * 4],
+  5: [32 * 2 + 8],
+};
+
+/// One emitted event, read from an inner instruction's data.
+export function event(raw: Uint8Array): Event | undefined {
+  if (raw.length < 9 || EVENT_TAG.some((byte, index) => raw[index] !== byte)) return undefined;
+  const kind = raw[8]!;
+  const p = raw.subarray(9);
+  const [current, earlier] = LENGTHS[kind] ?? [];
+  if (current === undefined || (p.length !== current && p.length !== earlier)) return undefined;
+  const newer = (offset: number) => (p.length === current ? key(p, offset) : undefined);
+  switch (kind) {
+    case 0:
+      return { kind: "created", plan: key(p, 0), subscriber: key(p, 32), at: i64(p, 96), payer: newer(104) };
+    case 1:
+      return { kind: "cancelled", plan: key(p, 0), subscriber: key(p, 32), expiresAt: i64(p, 64) };
+    case 5:
+      return { kind: "resumed", plan: key(p, 0), subscriber: key(p, 32), at: i64(p, 64) };
+    case 2:
+      return {
+        kind: "pull",
+        delegation: key(p, 0),
+        delegator: key(p, 64),
+        mint: key(p, 96),
+        amount: u64(p, 128),
+        receiver: key(p, 160),
+        receiverTokenAccount: newer(192),
+        puller: newer(224),
+      };
+    default:
+      // Fixed (3) and recurring (4) pulls share their head; the receiver follows the amounts.
+      return {
+        kind: "pull",
+        delegation: key(p, 0),
+        delegator: key(p, 32),
+        mint: key(p, 96),
+        amount: u64(p, 128),
+        receiver: key(p, kind === 3 ? 144 : 160),
+        receiverTokenAccount: newer(kind === 3 ? 176 : 192),
+        puller: key(p, 64),
+      };
+  }
+}
+
+const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+/// Inner instruction data as RPC JSON encodes it; anything that isn't base58 is not read.
+export function base58(text: string): Uint8Array | undefined {
+  let value = 0n;
+  for (const char of text) {
+    const digit = ALPHABET.indexOf(char);
+    if (digit < 0) return undefined;
+    value = value * 58n + BigInt(digit);
+  }
+  const bytes: number[] = [];
+  for (; value > 0n; value >>= 8n) bytes.unshift(Number(value & 255n));
+  const zeros = text.length - text.replace(/^1+/, "").length;
+  return Uint8Array.from([...new Array<number>(zeros).fill(0), ...bytes]);
+}
