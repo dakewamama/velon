@@ -15,6 +15,8 @@ export type Live = {
   owned?: (owner: string) => Promise<Response>;
   /// A Subscriptions delegation's past charges and lifecycle, from the cluster's finalized transactions.
   history?: (delegation: string) => Promise<Response>;
+  /// What subscribing to a Subscriptions plan allows, read from the plan account at finality.
+  plan?: (plan: string) => Promise<Response>;
   /// The wallet's SOL balance and every token account, as the RPC reports them. Display only.
   holdings?: (owner: string) => Promise<Response>;
   /// Names, symbols and logos for up to 80 mints (one request body), as their creators published them.
@@ -65,6 +67,7 @@ export function createServer(
       const owned = url.pathname === "/api/live/spl/owned" ? live?.owned : undefined;
       const holdings = url.pathname === "/api/live/wallet" ? live?.holdings : undefined;
       const history = url.pathname === "/api/live/history" ? live?.history : undefined;
+      const planRead = url.pathname === "/api/live/plan" ? live?.plan : undefined;
       const metadata = url.pathname === "/api/live/tokens" ? live?.metadata : undefined;
       const discover = url.pathname === "/api/live/spl/delegated" ? live?.discover : undefined;
       const approve = url.pathname === "/api/live/spl/approve" ? live?.approve : undefined;
@@ -86,6 +89,7 @@ export function createServer(
           !owned &&
           !holdings &&
           !history &&
+          !planRead &&
           !metadata &&
           !discover &&
           !approve &&
@@ -96,7 +100,16 @@ export function createServer(
       )
         return new Response("Not found", { status: 404 });
       const method =
-        action || observePath || approve || fund || owned || holdings || history || metadata || relay
+        action ||
+        observePath ||
+        approve ||
+        fund ||
+        owned ||
+        holdings ||
+        history ||
+        planRead ||
+        metadata ||
+        relay
           ? "POST"
           : "GET";
       if (request.method !== method)
@@ -140,14 +153,20 @@ export function createServer(
           ? new Response("Test approval takes no input", { status: 400 })
           : approve();
       if (
-        (verify || observePath || fund || owned || holdings || history) &&
+        (verify || observePath || fund || owned || holdings || history || planRead) &&
         request.headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase() !== "application/json"
       )
         return new Response("JSON body required", { status: 415 });
-      if (observePath || fund || owned || holdings || history) {
+      if (observePath || fund || owned || holdings || history || planRead) {
         // Only a validated address leaves this handler; the launcher builds everything else.
         // An observation names one account, or a batch of a wallet's accounts observed together.
-        const keys = history ? ["delegation"] : fund || owned || holdings ? ["owner"] : ["source", "sources"];
+        const keys = history
+          ? ["delegation"]
+          : planRead
+            ? ["plan"]
+            : fund || owned || holdings
+              ? ["owner"]
+              : ["source", "sources"];
         let address: unknown;
         let key: string | undefined;
         try {
@@ -175,6 +194,7 @@ export function createServer(
           return new Response("Address required", { status: 400 });
         if (holdings) return holdings(address);
         if (history) return history(address);
+        if (planRead) return planRead(address);
         return fund ? fund(address) : owned ? owned(address) : observe!([address]);
       }
       const body = action ? await request.arrayBuffer() : undefined;

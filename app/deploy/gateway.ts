@@ -68,7 +68,8 @@ function kind(method: string, path: string, rpc: boolean): Kind | undefined {
     path === "/api/live/spl/owned" ||
     path === "/api/live/wallet" ||
     path === "/api/live/tokens" ||
-    path === "/api/live/history"
+    path === "/api/live/history" ||
+    path === "/api/live/plan"
   )
     return "read";
   return undefined;

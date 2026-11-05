@@ -53,17 +53,39 @@ export function delegation(data: Uint8Array): Delegation | undefined {
   return undefined;
 }
 
-export type Plan = { owner: Address; mint: Address; amount: bigint; periodHours: bigint; pullers: Address[] };
+export type Plan = {
+  owner: Address;
+  /// Open (1) takes new subscribers; sunset (0) takes none, and existing ones run to the end date.
+  open: boolean;
+  mint: Address;
+  amount: bigint;
+  periodHours: bigint;
+  /// Unix seconds, or 0 for no end.
+  endTs: bigint;
+  /// Where charges may be paid. Empty means the program doesn't limit it.
+  destinations: Address[];
+  pullers: Address[];
+  /// Whatever the merchant wrote; never verified.
+  metadataUri: string;
+};
 
-/// A merchant's plan: who owns it, the token and terms, and the pullers allowed to charge.
+/// A merchant's plan: who owns it, the token and terms, where charges may go and who may charge.
 export function plan(data: Uint8Array): Plan | undefined {
-  if (data[0] !== 1 || data.length !== 491) return undefined;
+  if (data[0] !== 1 || data.length !== 491 || (data[34] !== 0 && data[34] !== 1)) return undefined;
+  const keys = (offset: number) =>
+    [0, 1, 2, 3].map((index) => key(data, offset + index * 32)).filter((entry) => entry !== NONE);
+  const uri = data.subarray(363, 491);
+  const end = uri.indexOf(0);
   return {
     owner: key(data, 1),
+    open: data[34] === 1,
     mint: key(data, 43),
     amount: u64(data, 75),
     periodHours: u64(data, 83),
-    pullers: [0, 1, 2, 3].map((index) => key(data, 235 + index * 32)).filter((puller) => puller !== NONE),
+    endTs: i64(data, 99),
+    destinations: keys(107),
+    pullers: keys(235),
+    metadataUri: new TextDecoder("utf-8", { fatal: false }).decode(end < 0 ? uri : uri.subarray(0, end)),
   };
 }
 

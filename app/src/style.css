@@ -3427,3 +3427,33 @@ dialog .action-button {
     grid-column: 1 / -1;
   }
 }
+
+/* A plan's page: what subscribing allows, why wallets warn, and the facts behind both. */
+.plan-name {
+  margin: 0;
+  color: var(--body);
+  font-size: 15px;
+}
+.plan-lead {
+  margin: 0;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 560;
+}
+.plan-why,
+.plan-facts {
+  margin: 0 0 16px;
+  padding: 20px 24px;
+  color: var(--body);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+.plan-why h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.plan-why p {
+  max-width: 72ch;
+  margin: 0 0 8px;
+}

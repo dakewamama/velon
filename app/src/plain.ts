@@ -385,3 +385,48 @@ export const GLOSSARY: [string, string][] = [
     "A name or logo the token's creator chose. Anyone can choose any name, so Velon marks it.",
   ],
 ];
+
+/// A plan's terms as the plan account holds them.
+export type PlanTerms = {
+  amount: bigint;
+  periodHours: bigint;
+  endTs: bigint;
+  destinations: string[];
+};
+
+/// What subscribing to a plan lets it charge, in one sentence.
+export function planSentence(terms: PlanTerms, token?: Token): string {
+  const until = terms.endTs === 0n ? "" : `, until ${date(terms.endTs)}`;
+  const paid = terms.destinations.length
+    ? `, paid only to ${terms.destinations.map((key) => short(key)).join(" or ")}`
+    : "";
+  return `Subscribing lets this plan charge up to ${amount(terms.amount, token)} every ${periodName(terms.periodHours * 3_600n)} from your wallet${until}${paid}.`;
+}
+
+/// Why a wallet shows the first subscribe as able to take any amount, and what limits it.
+export function planApproval(terms: PlanTerms, token?: Token): string[] {
+  const name = listed(token) ?? "this token";
+  return [
+    `The first time you subscribe with ${name}, your wallet is asked to approve Solana Subscriptions on your ${name} account. That approval carries no amount, so wallets show it as able to take any amount.`,
+    `The program only moves ${name} through it for subscriptions and delegations you signed, each within its own terms. For this plan that is up to ${amount(terms.amount, token)} every ${periodName(terms.periodHours * 3_600n)}.`,
+  ];
+}
+
+/// What the merchant can still change once you subscribe; the program fixes the rest.
+export function planChanges(terms: PlanTerms): string {
+  return terms.destinations.length
+    ? "The price and period are fixed, and so is where payments go. The merchant can change who may charge, the end date, and whether the plan takes new subscribers."
+    : "The price and period are fixed. The plan doesn't limit where payments go, and the merchant can change who may charge, the end date, and whether the plan takes new subscribers.";
+}
+
+/// The name a merchant gave its plan, if its metadata is the `{"n": name}` form the Foundation's
+/// app writes. It is the merchant's own word, so it is always shown as unverified.
+export function planName(metadata: string): string | undefined {
+  try {
+    const value: unknown = JSON.parse(metadata);
+    const name = value && typeof value === "object" ? (value as Record<string, unknown>).n : undefined;
+    return typeof name === "string" && name.trim() && name.length <= 64 ? name.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}

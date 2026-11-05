@@ -318,6 +318,26 @@ test("a delegation's history is read only for one valid address with the observe
   expect((await fetch(new URL("/api/live/history", server.url))).status).toBe(405);
 });
 
+test("a plan is read only for one valid address with the observe header", async () => {
+  const upstream = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("{}") });
+  const asked: string[] = [];
+  const plan = async (address: string) => (asked.push(address), Response.json({ plan: address }));
+  const server = createServer(String(upstream.url), [], 0, "127.0.0.1", null, { plan });
+  servers.push(upstream, server);
+  const address = "11111111111111111111111111111111";
+  const post = (body: unknown, action = "observe") =>
+    fetch(new URL("/api/live/plan", server.url), {
+      method: "POST",
+      headers: { "X-Velon-Action": action, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  expect(await (await post({ plan: address })).json()).toEqual({ plan: address });
+  expect(asked).toEqual([address]);
+  expect((await post({ plan: "invalid" })).status).toBe(400);
+  expect((await post({ delegation: address })).status).toBe(400);
+  expect((await post({ plan: address }, "revoke")).status).toBe(403);
+});
+
 test("token names are looked up for at most 80 valid mints with the observe header", async () => {
   const upstream = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("{}") });
   const asked: string[][] = [];

@@ -35,6 +35,10 @@ import {
   sentence,
   status as rate,
   allowance as allowanceCell,
+  planApproval,
+  planChanges,
+  planName,
+  planSentence,
   amount as quantity,
   when,
   subscriptionsAuthority,
@@ -367,6 +371,9 @@ function factsFor(grant: ObjectValue, view: ObjectValue, viewer: Viewer): Facts 
   };
 }
 
+// Plan names from the wallet listing, keyed by subscription. The merchant chose them; display only.
+const planNames = new Map<string, string>();
+
 // Numbers each card so its buttons can point at its own sentence and token.
 let cardCount = 0;
 
@@ -428,6 +435,14 @@ function card(
       list,
     ),
   );
+  // A subscription's charging keys are named by the plan's own name, marked as the merchant's.
+  const merchant = planNames.get(revokeKey(grant) ?? "");
+  if (merchant && object(grant.authority_kind).kind === "derived") {
+    const line = row.querySelector(".delegate");
+    line?.querySelector("strong")?.replaceChildren(merchant);
+    line?.querySelector(".muted")?.replaceChildren("Plan name set by the merchant");
+    line?.setAttribute("title", `${merchant}: plan name set by the merchant, not verified`);
+  }
   if (list) row.append(node("span", allowanceCell(grant, known.token), "row-amount"));
   const actions = node("div", "", "permission-actions");
   const panel = technical(grant, availability, rating);
@@ -727,6 +742,11 @@ async function scan(historical = false, refresh = false) {
           kind ? refused[kind]! : "The RPC did not answer. It may be rate limiting; try again in a minute.",
           true,
         );
+        return;
+      }
+      // A plan isn't anyone's permission yet; it is shown as what subscribing to it would allow.
+      if (subscription && (await showPlan(address))) {
+        scanButton.disabled = false;
         return;
       }
       if (kind === "wallet") {
@@ -1392,8 +1412,11 @@ async function scanWallet(
   const reported = array(Array.isArray(answer) ? answer : object(answer).accounts!)
     .map(object)
     .filter((entry) => entry.owner === owner);
-  for (const entry of reported)
+  for (const entry of reported) {
     if (typeof entry.decimals === "number") decimals.set(text(entry.source), entry.decimals);
+    if (entry.program === "subscriptions" && typeof entry.planName === "string")
+      planNames.set(text(entry.source), entry.planName);
+  }
   // Every delegated account, SPL Token or Token-2022, is observed through the runtime.
   const owned = reported;
   // Accounts the runtime observed but could not model exactly, with the reason it gave.
@@ -2450,6 +2473,79 @@ function link(title: string, signature: string): HTMLElement {
 // A row from another cluster is shown as its RPC reports it. This console holds evidence only
 // for its own cluster, so nothing here is presented as a verified permission or revocable.
 let publicNet: "devnet" | "mainnet" = "devnet";
+// What subscribing to a plan allows, read from the plan account. An integrator can link a checkout
+// here, so the wallet's "any amount" warning comes with the plan's real limits next to it.
+async function showPlan(planKey: string): Promise<boolean> {
+  const response = await call("/api/live/plan", {
+    method: "POST",
+    headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
+    body: JSON.stringify({ plan: planKey }),
+  }).catch(() => undefined);
+  if (!response?.ok) return false;
+  const body = object(readJson(await response.text()));
+  const mint = text(body.mint);
+  await nameTokens([mint]).catch(() => undefined);
+  const named = tokenName(mint);
+  const decimals =
+    TOKENS[mint]?.decimals ?? (body.decimals == null ? undefined : Number(integer(body.decimals)));
+  const token = { ...named, decimals };
+  const terms = {
+    amount: amountOf(body.amount),
+    periodHours: amountOf(body.periodHours),
+    endTs: integer(readJson(text(body.endTs))),
+    destinations: array(body.destinations).map(text),
+  };
+  const content = document.createDocumentFragment();
+  const lead = node("section", "", "wallet-summary");
+  const name = planName(text(body.metadataUri));
+  lead.append(
+    node("h2", "What subscribing to this plan allows"),
+    ...(name ? [node("p", `“${name}”, a name set by the merchant and not verified`, "plan-name")] : []),
+    tokenChip(mint, "plan-token"),
+    node("p", planSentence(terms, token), "plan-lead"),
+    node("p", planChanges(terms), "muted"),
+  );
+  const why = node("section", "", "plan-why");
+  why.append(node("h3", "Why your wallet may say it can take any amount"));
+  for (const line of planApproval(terms, token)) why.append(node("p", line));
+  const facts = node("dl", "", "facts plan-facts");
+  facts.append(
+    address("Merchant (plan owner)", text(body.owner), "merchant"),
+    ...array(body.pullers).map((key) => address("Can also charge", text(key), "puller")),
+    ...(terms.destinations.length
+      ? terms.destinations.map((key) => address("Payments go to", key, "destination"))
+      : [field("Payments go to", "Any wallet; the plan doesn't limit it")]),
+    field(
+      "New subscribers",
+      body.open === true ? "Open" : "Closed; existing subscriptions run to the end date",
+    ),
+    field("Ends", terms.endTs === 0n ? "No end date" : (when(terms.endTs) ?? "Unknown")),
+    field("Subscribers on chain", String(integer(body.subscribers))),
+    field(
+      "Program",
+      body.verifiedBuild
+        ? `Solana Subscriptions, a build Velon verified from ${text(body.verifiedBuild)}`
+        : "Solana Subscriptions, not a build Velon has verified",
+    ),
+    body.upgradeAuthority
+      ? address("Can upgrade the program", text(body.upgradeAuthority), "upgrade authority")
+      : field("Can upgrade the program", "No one; it is immutable"),
+  );
+  if (text(body.metadataUri) && !name)
+    facts.append(field("Merchant's own description (not verified)", text(body.metadataUri)));
+  const share = node("p", `Link to this page: ${location.origin}/#${planKey}`, "muted");
+  content.append(lead, why, facts, share);
+  mode = "scan";
+  diff.hidden = true;
+  receipts.hidden = true;
+  results.hidden = false;
+  notice.replaceChildren();
+  compareTab(false);
+  results.replaceChildren(content);
+  badge(network().label);
+  return true;
+}
+
 function showMainnet(entry: ObjectValue) {
   const net = publicNet;
   const name = net === "devnet" ? "Devnet" : "Mainnet";

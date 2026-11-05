@@ -2,7 +2,13 @@ import { resolve } from "node:path";
 import { mkdir, rename, unlink } from "node:fs/promises";
 import { lookup } from "node:dns/promises";
 import { isIPv4 } from "node:net";
-import { getAddressEncoder, getProgramDerivedAddress, isAddress, type Address } from "@solana/addresses";
+import {
+  getAddressDecoder,
+  getAddressEncoder,
+  getProgramDerivedAddress,
+  isAddress,
+  type Address,
+} from "@solana/addresses";
 import {
   array,
   grants,
@@ -17,6 +23,7 @@ import {
 import { DEVNET_GENESIS, MAINNET_GENESIS, type Control } from "../src/control.ts";
 import { SUBSCRIPTIONS_PROGRAM, tokenCatalog, tokenCatalogAsync } from "./catalog.ts";
 import { base58, DELEGATOR_OFFSET, delegation, event, plan, type Delegation } from "./subscriptions.ts";
+import { planName } from "../src/plain.ts";
 import type { Live } from "../src/server.ts";
 
 const root = resolve(import.meta.dir, "..");
@@ -439,6 +446,7 @@ if (process.env.RPC_URL) {
       const merchant = value.kind === "subscription" ? plans.get(value.plan) : undefined;
       return {
         address,
+        name: merchant ? planName(merchant.metadataUri) : undefined,
         delegate: merchant ? merchant.owner : value.delegatee,
         mint: value.kind === "subscription" ? merchant?.mint : value.mint,
         amount: value.amount,
@@ -458,7 +466,7 @@ if (process.env.RPC_URL) {
         return [key, decimals ? Number(object(decimals).decimals) : undefined];
       }),
     );
-    return terms.map(({ address, delegate, mint, amount }) => {
+    return terms.map(({ address, name, delegate, mint, amount }) => {
       const decimals = mint ? scale.get(mint) : undefined;
       return {
         program: "subscriptions",
@@ -470,6 +478,7 @@ if (process.env.RPC_URL) {
         ui: decimals === undefined ? amount.toString() : decimal(amount, decimals),
         decimals,
         extensions: [] as string[],
+        ...(name ? { planName: name } : {}),
       };
     });
   };
@@ -590,6 +599,90 @@ if (process.env.RPC_URL) {
   // The wallet as its RPC reports it: SOL and every token account with any delegate. Display only;
   // permissions shown as verified still come from observing each account through the runtime.
   const LISTED = 500;
+  // What subscribing to a plan allows, read from the plan account at finality, with how many
+  // subscribe to it, whether the program build is one Velon verified, and who can upgrade it.
+  const plans = new Map<string, { at: number; read: Promise<Json> }>();
+  const readPlan = async (address: string): Promise<Json> => {
+    const info = array(
+      object(await rpc("getMultipleAccounts", [[address], { encoding: "base64", commitment: "finalized" }]))
+        .value,
+    )[0];
+    const terms = info ? plan(subscriptionData(info) ?? new Uint8Array()) : undefined;
+    if (!terms) return { error: "Not a Solana Subscriptions plan." };
+    const [programdata] = await getProgramDerivedAddress({
+      programAddress: "BPFLoaderUpgradeab1e11111111111111111111111" as Address,
+      seeds: [encoder.encode(SUBSCRIPTIONS_PROGRAM as Address)],
+    });
+    const [mintInfo, subscribers, loaderInfo] = await Promise.all([
+      rpc("getAccountInfo", [terms.mint, { encoding: "jsonParsed", commitment: "finalized" }]),
+      // A subscription keeps its plan where every delegation keeps its delegatee.
+      rpc("getProgramAccounts", [
+        SUBSCRIPTIONS_PROGRAM,
+        {
+          encoding: "base64",
+          commitment: "finalized",
+          dataSlice: { offset: 0, length: 0 },
+          filters: [{ dataSize: 155 }, { memcmp: { offset: 35, bytes: address } }],
+        },
+      ]),
+      rpc("getAccountInfo", [
+        programdata,
+        { encoding: "base64", commitment: "finalized", dataSlice: { offset: 0, length: 45 } },
+      ]),
+    ]);
+    const mint = object(object(mintInfo).value ?? {});
+    const parsed =
+      mint.data && !Array.isArray(mint.data) ? object(object(object(mint.data).parsed).info) : undefined;
+    // ProgramData holds its kind, the deployment slot, then an optional upgrade authority.
+    const head = object(loaderInfo).value ? array(object(object(loaderInfo).value).data) : [];
+    const loader = head.length
+      ? Uint8Array.from(atob(text(head[0])), (c) => c.charCodeAt(0))
+      : new Uint8Array();
+    const upgradeAuthority =
+      loader.length === 45 && loader[12] === 1 ? getAddressDecoder().decode(loader.subarray(13)) : null;
+    const build = array(readJson(await Bun.file(catalog!).text()))
+      .map(object)
+      .find(
+        (version) =>
+          version.cluster === cluster &&
+          array(version.program_id).map(integer).join() === bytes(SUBSCRIPTIONS_PROGRAM).join(),
+      );
+    return {
+      plan: address,
+      owner: terms.owner,
+      open: terms.open,
+      mint: terms.mint,
+      decimals: parsed ? Number(parsed.decimals) : null,
+      amount: terms.amount.toString(),
+      periodHours: terms.periodHours.toString(),
+      endTs: terms.endTs.toString(),
+      destinations: terms.destinations,
+      pullers: terms.pullers,
+      metadataUri: terms.metadataUri,
+      subscribers: array(subscribers).length,
+      verifiedBuild: build ? text(object(build.executable).source_revision) : null,
+      upgradeAuthority,
+    };
+  };
+  const planInfo: Live["plan"] = async (address) => {
+    const now = Date.now();
+    for (const [key, value] of plans) if (now - value.at > 60000) plans.delete(key);
+    let cached = plans.get(address);
+    if (!cached) {
+      cached = { at: now, read: readPlan(address) };
+      plans.set(address, cached);
+      cached.read.catch(() => plans.delete(address));
+    }
+    try {
+      const body = object(await cached.read);
+      return Response.json(body, {
+        status: body.error ? 404 : 200,
+        headers: { "Cache-Control": "no-store" },
+      });
+    } catch {
+      return Response.json({ error: "The plan could not be read." }, { status: 502 });
+    }
+  };
   const holdings: Live["holdings"] = async (owner) => {
     try {
       const account = object(
@@ -804,7 +897,7 @@ if (process.env.RPC_URL) {
       return Response.json({ error: "Token names could not be read." }, { status: 502 });
     }
   };
-  live = { observe, owned, holdings, history, metadata };
+  live = { observe, owned, holdings, history, plan: planInfo, metadata };
   // Public clusters refuse browser-origin RPC, so a local console relays the methods it needs.
   // The hosted bench does the same in deploy/gateway.ts; keep the two lists in step.
   if (process.env.RPC_RELAY === "1") {

@@ -9,6 +9,10 @@ import {
   HISTORICAL,
   reported,
   type Holder,
+  planApproval,
+  planChanges,
+  planName,
+  planSentence,
   sentence,
   status,
   UNVERIFIED,
@@ -384,4 +388,34 @@ test("a wallet row's amount names a listed token only, and says smallest units w
     "Up to 2.5",
   );
   expect(allowance(limit(spl(), 25n))).toBe("Up to 25 smallest units");
+});
+
+test("a plan says what it can charge, where it pays, and why the wallet warns", () => {
+  const terms = {
+    amount: 49_000_000n,
+    periodHours: 720n,
+    endTs: 0n,
+    destinations: [DELEGATE],
+  };
+  expect(planSentence(terms, USDC)).toBe(
+    `Subscribing lets this plan charge up to 49 USDC every 30 days from your wallet, paid only to ${short(DELEGATE)}.`,
+  );
+  // A creator-set symbol never enters the sentence; no destinations means no limit is claimed.
+  const open = { ...terms, destinations: [] };
+  expect(planSentence(open, { symbol: "USDC", verified: false, decimals: 6 })).toBe(
+    "Subscribing lets this plan charge up to 49 of this token every 30 days from your wallet.",
+  );
+  expect(planChanges(open)).toContain("doesn't limit where payments go");
+  expect(planChanges(terms)).toContain("so is where payments go");
+  const [why, limit] = planApproval(terms, USDC);
+  expect(why).toContain("That approval carries no amount, so wallets show it as able to take any amount.");
+  expect(limit).toContain("For this plan that is up to 49 USDC every 30 days.");
+});
+
+test("a plan's name is read only from its merchant's {n} metadata", () => {
+  expect(planName('{"n":"Helius Business (Monthly)"}')).toBe("Helius Business (Monthly)");
+  expect(planName("https://example.com/plan.json")).toBeUndefined();
+  expect(planName('{"n":""}')).toBeUndefined();
+  expect(planName(`{"n":"${"x".repeat(65)}"}`)).toBeUndefined();
+  expect(planName('{"name":"Other"}')).toBeUndefined();
 });

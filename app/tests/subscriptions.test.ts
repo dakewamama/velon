@@ -75,7 +75,8 @@ test("any other kind, version or length is not read", () => {
   expect(delegation(Uint8Array.from(fixed, (byte, index) => (index === 0 ? 5 : byte)))).toBeUndefined();
 });
 
-test("a plan lists its owner, terms and only the pullers in use", () => {
+test("a plan lists its owner, status, terms, destinations, pullers and the merchant's link", () => {
+  const uri = new TextEncoder().encode("https://example.com/plan");
   const data = writer()
     .byte(1)
     .key(9)
@@ -86,22 +87,30 @@ test("a plan lists its owner, terms and only the pullers in use", () => {
     .u64(49_000_000n)
     .u64(720n)
     .i64(1n)
-    .i64(0n)
-    .zeros(128)
+    .i64(1_900_000_000n)
+    .key(8)
+    .zeros(96)
     .key(6)
     .zeros(32)
     .key(7)
     .zeros(32)
-    .zeros(128)
     .done();
-  expect(data.length).toBe(491);
-  expect(plan(data)).toEqual({
+  const full = Uint8Array.from([...data, ...uri, ...new Uint8Array(128 - uri.length)]);
+  expect(full.length).toBe(491);
+  expect(plan(full)).toEqual({
     owner: keyOf(9),
+    open: true,
     mint: keyOf(5),
     amount: 49_000_000n,
     periodHours: 720n,
+    endTs: 1_900_000_000n,
+    destinations: [keyOf(8)],
     pullers: [keyOf(6), keyOf(7)],
+    metadataUri: "https://example.com/plan",
   });
+  // A sunset plan reads as closed; an unknown status is not read.
+  expect(plan(Uint8Array.from(full, (byte, index) => (index === 34 ? 0 : byte)))?.open).toBe(false);
+  expect(plan(Uint8Array.from(full, (byte, index) => (index === 34 ? 2 : byte)))).toBeUndefined();
 });
 
 const tagged = (kind: number, body: Uint8Array) => Uint8Array.from([...EVENT_TAG, kind, ...body]);
