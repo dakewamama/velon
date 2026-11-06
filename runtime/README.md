@@ -164,6 +164,18 @@ Success also requires storing the receipt and both snapshot references. The retu
 `verification_id` is the SHA256 of that retained evidence. Repeating the same evidence
 keeps the same ID; a different later observation produces a separate historical record.
 
+A running Solana subscription can be cancelled through the same three steps under
+`actions/cancel/{delegation}`: simulate on a retained record or the scope's current bank,
+then verify. Only the subscriber signs CancelSubscription (discriminator 12) with the plan,
+the subscription, the program's event authority and the program, in that order, under the
+same 10,000-unit budget and priority fee as a revoke. Simulation requires the observed
+bank and the provider's bank to change nothing but the subscription's end (bytes 147..155),
+and the SDK's declared change to match it. An ended or already cancelled subscription has
+no Cancel and returns 422. Verification requires the exact reviewed message and, in the
+later observation, the reviewed subscription with exactly the reviewed end; only the
+period's usage may differ, because a charge can land in between. The reported change is the
+one reviewed. Cancel receipts are retained with their kind; revoke evidence keeps its bytes.
+
 `GET /verifications/revoke/{verification_id}` retrieves and replays that verification
 without RPC access. It checks the evidence digest, replays both snapshots with their
 recorded SDK/runtime provenance, rechecks native signatures and the canonical action,

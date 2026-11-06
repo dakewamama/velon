@@ -168,6 +168,10 @@ impl Scope {
                     keys.extend([*delegation, *authority, *source, *mint]);
                     keys.extend(*plan);
                     keys.insert(subscriptions::DelegationAdapter.protocol().program_id);
+                    // Cancel names the program's event authority, so it is read with the plan.
+                    if plan.is_some() {
+                        keys.insert(EVENT_AUTHORITY);
+                    }
                 }
             }
         }
@@ -294,14 +298,48 @@ async fn observe_keys(
     })
 }
 
-// The fixed budget prevents wallet-added fees from changing the reviewed message.
+// The fixed budget prevents wallet-added fees from changing the reviewed message. Each action's
+// price is set so its priority fee is the same 10,000 lamports.
 const REVOKE_UNIT_LIMIT: u32 = 10_000;
-const REVOKE_UNIT_PRICE: u64 = 1_000_000;
+// Measured at 1,943 units with its event on the pinned build; the same budget as a revoke.
+const CANCEL_UNIT_LIMIT: u32 = 10_000;
+const PRIORITY_FEE_MICRO_LAMPORTS: u64 = 10_000 * 1_000_000;
 
-fn revoke_transaction(action: &sdk::Action, payer: Pubkey) -> Transaction {
+/// The reviewed action a request simulates or verifies. Only a subscription can be cancelled.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    #[default]
+    Revoke,
+    Cancel,
+}
+
+impl Kind {
+    fn is_revoke(&self) -> bool {
+        *self == Self::Revoke
+    }
+
+    fn action(self) -> ActionKind {
+        match self {
+            Self::Revoke => ActionKind::Revoke,
+            Self::Cancel => ActionKind::Cancel,
+        }
+    }
+
+    fn unit_limit(self) -> u32 {
+        match self {
+            Self::Revoke => REVOKE_UNIT_LIMIT,
+            Self::Cancel => CANCEL_UNIT_LIMIT,
+        }
+    }
+}
+
+fn action_transaction(kind: Kind, action: &sdk::Action, payer: Pubkey) -> Transaction {
     let mut instructions = vec![
-        ComputeBudgetInstruction::set_compute_unit_limit(REVOKE_UNIT_LIMIT),
-        ComputeBudgetInstruction::set_compute_unit_price(REVOKE_UNIT_PRICE),
+        ComputeBudgetInstruction::set_compute_unit_limit(kind.unit_limit()),
+        ComputeBudgetInstruction::set_compute_unit_price(
+            PRIORITY_FEE_MICRO_LAMPORTS / u64::from(kind.unit_limit()),
+        ),
     ];
     instructions.extend_from_slice(&action.instructions);
     Transaction::new_with_payer(&instructions, Some(&payer))
@@ -309,6 +347,7 @@ fn revoke_transaction(action: &sdk::Action, payer: Pubkey) -> Transaction {
 
 #[derive(Serialize)]
 pub struct SimulatedRevoke {
+    pub kind: Kind,
     pub id: String,
     pub state_version: String,
     pub observation: Observation,
@@ -324,13 +363,24 @@ pub struct SimulatedRevoke {
     pub changes: Vec<AuthorizationChange>,
 }
 
-/// Simulate one canonical SPL revoke against the retained finalized bank.
+/// Simulate one canonical revoke against the retained finalized bank.
 /// The result is unsigned simulation evidence, never finalized journal state.
 pub async fn simulate_revoke(
     client: &RpcClient,
     journal: &Journal,
     id: &str,
     source: Pubkey,
+) -> Result<SimulatedRevoke, Error> {
+    simulate_action(client, journal, id, source, Kind::Revoke).await
+}
+
+/// Simulate one canonical revoke or cancel against the retained finalized bank.
+pub async fn simulate_action(
+    client: &RpcClient,
+    journal: &Journal,
+    id: &str,
+    source: Pubkey,
+    kind: Kind,
 ) -> Result<SimulatedRevoke, Error> {
     let record = journal.replay(id).await?;
     let snapshot = &record.snapshot;
@@ -346,12 +396,12 @@ pub async fn simulate_revoke(
         return Err(Error::Conflict);
     }
     let (context, token_version) = token.context(snapshot, &record.versions, &record.id)?;
-    let action = token.action(snapshot, (&context, &token_version), source)?;
+    let action = token.action(snapshot, (&context, &token_version), source, kind)?;
     let payer = token.payer(snapshot, source, &action)?;
-    let transaction = revoke_transaction(&action, payer);
+    let transaction = action_transaction(kind, &action, payer);
     let mut keys = execution_keys(&action);
-    // Revoke runs in the observed bank itself, so no provider bank has to coincide with it.
-    let executed = execute_revoke(snapshot, &action, &keys, token.program())?;
+    // The action runs in the observed bank itself, so no provider bank has to coincide with it.
+    let executed = execute_revoke(snapshot, &action, &keys, token.program(), kind)?;
     keys.push(sysvar::clock::id());
     let config = RpcSimulateTransactionConfig {
         sig_verify: false,
@@ -422,6 +472,9 @@ pub async fn simulate_revoke(
             // The delegate projection omits owner authority; require Revoke's full token-data change.
             let expected = revoked(source_data(snapshot, source)?, token)?;
             source_data(&after, source)? == expected.as_slice() && simulated[0].1.data == expected
+        }
+        Token::Subscription { delegation, .. } if kind == Kind::Cancel => {
+            cancel_agrees(snapshot, &executed, &simulated, delegation, payer)?
         }
         Token::Subscription { delegation, .. } => {
             // The provider's later bank must match every account but the fee payer's exactly,
@@ -504,6 +557,7 @@ pub async fn simulate_revoke(
         return Err(Error::Conflict);
     }
     Ok(SimulatedRevoke {
+        kind,
         id: simulation_id,
         state_version: record.id,
         observation: snapshot.observation.clone(),
@@ -606,14 +660,18 @@ impl Token {
         Ok((context, version))
     }
 
-    /// The owner-signed Revoke of the account's delegate, or the delegator-signed
-    /// RevokeDelegation of an ended subscription.
+    /// The owner-signed Revoke of the account's delegate, the delegator-signed RevokeDelegation of
+    /// an ended subscription, or the subscriber-signed CancelSubscription of a running one.
     fn action(
         self,
         snapshot: &Snapshot,
         (context, token_version): (&sdk::Context, &str),
         source: Pubkey,
+        kind: Kind,
     ) -> Result<sdk::Action, Error> {
+        if kind == Kind::Cancel && !matches!(self, Self::Subscription { .. }) {
+            return Err(AdapterError::UnsupportedOperation.into());
+        }
         match self {
             Self::Spl => {
                 let adapter = spl::DelegateAdapter;
@@ -637,7 +695,9 @@ impl Token {
                 // Actions list the owner's revoke first, then the delegate's own.
                 Ok(sdk::actions(&adapter, &authorization, &state, context)?.remove(0))
             }
-            Self::Subscription { delegation, .. } => {
+            Self::Subscription {
+                delegation, plan, ..
+            } => {
                 let adapter = subscriptions::DelegationAdapter;
                 let state = self.state(snapshot, token_version)?;
                 let authorization = sdk::compile_state(&adapter, &state, context)?
@@ -646,23 +706,41 @@ impl Token {
                         matches!(authorization.authority_kind, AuthorityKind::Derived { .. })
                     })
                     .ok_or(Error::NotFound)?;
-                // An active or not yet ended subscription can only be cancelled, which keeps
-                // the grant; only an ended one closes.
+                // A running subscription can only be cancelled, which keeps the grant until its
+                // paid period ends; only an ended one closes.
                 let action = sdk::actions(&adapter, &authorization, &state, context)?
                     .into_iter()
-                    .find(|action| action.kind == ActionKind::Revoke)
+                    .find(|action| action.kind == kind.action())
                     .ok_or(AdapterError::UnsupportedOperation)?;
-                match action.instructions.as_slice() {
-                    [instruction]
-                        if instruction.program_id == self.program()
+                let program = self.program();
+                let exact = match (kind, action.instructions.as_slice()) {
+                    (Kind::Revoke, [instruction]) => {
+                        instruction.program_id == program
                             && instruction.data == [REVOKE_DELEGATION]
                             && instruction.accounts.len() >= 2
                             && instruction.accounts[0].is_signer
-                            && instruction.accounts[1].pubkey == delegation =>
-                    {
-                        Ok(action)
+                            && instruction.accounts[1].pubkey == delegation
                     }
-                    _ => Err(AdapterError::DiffMismatch.into()),
+                    (Kind::Cancel, [instruction]) => {
+                        instruction.program_id == program
+                            && instruction.data == [CANCEL_SUBSCRIPTION]
+                            && matches!(
+                                instruction.accounts.as_slice(),
+                                [subscriber, reviewed_plan, subscription, events, own]
+                                    if subscriber.is_signer
+                                        && Some(reviewed_plan.pubkey) == plan
+                                        && subscription.pubkey == delegation
+                                        && subscription.is_writable
+                                        && events.pubkey == EVENT_AUTHORITY
+                                        && own.pubkey == program
+                            )
+                    }
+                    _ => false,
+                };
+                if exact {
+                    Ok(action)
+                } else {
+                    Err(AdapterError::DiffMismatch.into())
                 }
             }
         }
@@ -764,8 +842,62 @@ impl Token {
     }
 }
 
-/// RevokeDelegation's discriminator in the pinned Subscriptions program.
+/// RevokeDelegation's and CancelSubscription's discriminators in the pinned Subscriptions program.
 const REVOKE_DELEGATION: u8 = 3;
+const CANCEL_SUBSCRIPTION: u8 = 12;
+/// The program's event authority, PDA ["event_authority"]; Cancel emits its event through it.
+pub const EVENT_AUTHORITY: Pubkey =
+    solana_pubkey::pubkey!("3Hnj4BYoDgtpBuqXfiy7Y8cNa3jXaNd4oqgSXBzkMcH7");
+/// CancelSubscription writes one field: the subscription's end, an i64 at these bytes. A charge
+/// moves only the period's usage, the bytes just before it.
+const CANCEL_END: std::ops::Range<usize> = 147..155;
+const PERIOD_USAGE: std::ops::Range<usize> = 131..147;
+
+/// The same account, where a nonexistent one may carry the provider's rent-epoch sentinel.
+fn same(expected: &Account, actual: &Account) -> bool {
+    expected == actual || (is_closed(expected) && is_closed(actual))
+}
+
+/// The subscription after Cancel: every byte as observed but its end, which must now be set.
+fn only_end_changed(before: &Account, after: &Account) -> bool {
+    before.lamports == after.lamports
+        && before.owner == after.owner
+        && before.executable == after.executable
+        && before.data.len() == after.data.len()
+        && before.data.len() >= CANCEL_END.end
+        && before.data[..CANCEL_END.start] == after.data[..CANCEL_END.start]
+        && before.data[CANCEL_END.end..] == after.data[CANCEL_END.end..]
+        && before.data[CANCEL_END] == [0; 8]
+        && after.data[CANCEL_END] != [0; 8]
+}
+
+/// Cancel in the observed bank changes only the subscription's end, and the provider's later
+/// bank reaches the same bytes for every account but the fee payer's.
+fn cancel_agrees(
+    snapshot: &Snapshot,
+    executed: &[(Pubkey, Account)],
+    simulated: &[(Pubkey, Account)],
+    delegation: Pubkey,
+    payer: Pubkey,
+) -> Result<bool, Error> {
+    for (key, after) in executed {
+        let before = account(snapshot, *key)?;
+        let kept = if *key == delegation {
+            only_end_changed(before, after)
+        } else {
+            same(before, after)
+        };
+        if !kept {
+            return Ok(false);
+        }
+    }
+    Ok(executed
+        .iter()
+        .zip(simulated)
+        .all(|((key, executed), (simulated_key, simulated))| {
+            key == simulated_key && (*key == payer || same(executed, simulated))
+        }))
+}
 
 /// The accounts the reviewed instruction names, in order. Revoke reads nothing else.
 fn execution_keys(action: &sdk::Action) -> Vec<Pubkey> {
@@ -858,6 +990,7 @@ fn execute_revoke(
     action: &sdk::Action,
     keys: &[Pubkey],
     program: Pubkey,
+    kind: Kind,
 ) -> Result<Vec<(Pubkey, Account)>, Error> {
     let features = snapshot
         .features
@@ -873,8 +1006,8 @@ fn execute_revoke(
         .ok_or(AdapterError::InsufficientEvidence)?;
     let mut compute_budget =
         ComputeBudget::new_with_defaults(features.raise_cpi_nesting_limit_to_8);
-    // The transaction's two compute-budget instructions use 150 units each before Revoke runs.
-    compute_budget.compute_unit_limit = (REVOKE_UNIT_LIMIT - 2 * 150).into();
+    // The transaction's two compute-budget instructions use 150 units each before the action runs.
+    compute_budget.compute_unit_limit = (kind.unit_limit() - 2 * 150).into();
     let mut mollusk = Mollusk {
         compute_budget,
         ..Default::default()
@@ -912,6 +1045,17 @@ pub async fn simulate_current_revoke(
     scope_id: &str,
     source: Pubkey,
 ) -> Result<SimulatedRevoke, Error> {
+    simulate_current(client, journal, scope_id, source, Kind::Revoke).await
+}
+
+/// Observe the scope's finalized bank, then simulate one revoke or cancel in that same bank.
+pub async fn simulate_current(
+    client: &RpcClient,
+    journal: &Journal,
+    scope_id: &str,
+    source: Pubkey,
+    kind: Kind,
+) -> Result<SimulatedRevoke, Error> {
     for _ in 0..CURRENT_BANK_ATTEMPTS {
         let record = journal.latest(scope_id).await?.ok_or(Error::NotFound)?;
         let snapshot = record.snapshot;
@@ -936,7 +1080,7 @@ pub async fn simulate_current_revoke(
             current => current?,
         };
         let id = journal.ingest(current, &catalog).await?.id;
-        match simulate_revoke(client, journal, &id, source).await {
+        match simulate_action(client, journal, &id, source, kind).await {
             Err(Error::InvalidObservation("simulation/context slot mismatch")) => continue,
             result => return result,
         }
@@ -948,6 +1092,7 @@ pub async fn simulate_current_revoke(
 
 #[derive(Serialize)]
 pub struct VerifiedRevoke {
+    pub kind: Kind,
     pub verification_id: String,
     pub state_version: String,
     pub transaction: EncodedConfirmedTransactionWithStatusMeta,
@@ -958,6 +1103,9 @@ pub struct VerifiedRevoke {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RevokeEvidence {
+    // Absent on a revoke, so earlier receipts keep their exact bytes and ids.
+    #[serde(default, skip_serializing_if = "Kind::is_revoke")]
+    kind: Kind,
     state_version: String,
     observation_id: String,
     transaction: EncodedConfirmedTransactionWithStatusMeta,
@@ -998,16 +1146,24 @@ impl Journal {
             .decode()
             .and_then(|transaction| transaction.into_legacy_transaction())
             .ok_or(Error::ReplayMismatch)?;
-        let action = checked_revoke(&record, source, &signed).map_err(|_| Error::ReplayMismatch)?;
+        let action = checked_action(&record, source, &signed, evidence.kind)
+            .map_err(|_| Error::ReplayMismatch)?;
         check_receipt(
             &evidence.transaction,
             &signed,
             record.snapshot.observation.slot,
         )
         .map_err(|_| Error::ReplayMismatch)?;
-        let changes = revoke_changes(&record, &observation, &action, evidence.transaction.slot)
-            .map_err(|_| Error::ReplayMismatch)?;
+        let changes = applied_changes(
+            &record,
+            &observation,
+            &action,
+            evidence.transaction.slot,
+            evidence.kind,
+        )
+        .map_err(|_| Error::ReplayMismatch)?;
         Ok(VerifiedRevoke {
+            kind: evidence.kind,
             verification_id: id.into(),
             state_version: record.id,
             transaction: evidence.transaction,
@@ -1030,10 +1186,11 @@ pub(crate) async fn retained_revoke(
     })
 }
 
-fn checked_revoke(
+fn checked_action(
     record: &Record,
     source: Pubkey,
     signed: &Transaction,
+    kind: Kind,
 ) -> Result<sdk::Action, Error> {
     let snapshot = &record.snapshot;
     if snapshot.observation.origin != Origin::Finalized {
@@ -1044,13 +1201,13 @@ fn checked_revoke(
         .verify()
         .map_err(|_| Error::InvalidObservation("invalid transaction signature"))?;
     let (context, token_version) = token.context(snapshot, &record.versions, &record.id)?;
-    let action = token.action(snapshot, (&context, &token_version), source)?;
+    let action = token.action(snapshot, (&context, &token_version), source, kind)?;
     let payer = token.payer(snapshot, source, &action)?;
-    // Earlier receipts contain only Revoke; both historical formats remain exact.
-    let mut expected = if signed.message.instructions.len() == 1 {
+    // Earlier revoke receipts contain only Revoke; both historical formats remain exact.
+    let mut expected = if kind == Kind::Revoke && signed.message.instructions.len() == 1 {
         Transaction::new_with_payer(&action.instructions, Some(&payer))
     } else {
-        revoke_transaction(&action, payer)
+        action_transaction(kind, &action, payer)
     };
     expected.message.recent_blockhash = signed.message.recent_blockhash;
     if signed.message != expected.message {
@@ -1086,11 +1243,12 @@ fn check_receipt(
     Ok(())
 }
 
-fn revoke_changes(
+fn applied_changes(
     record: &Record,
     observation: &Record,
     action: &sdk::Action,
     transaction_slot: u64,
+    kind: Kind,
 ) -> Result<Vec<AuthorizationChange>, Error> {
     let snapshot = &record.snapshot;
     let after = &observation.snapshot;
@@ -1102,13 +1260,74 @@ fn revoke_changes(
     }
     let (source, token) = Token::source(&snapshot.targets)?;
     let (context, token_version) = token.context(snapshot, &record.versions, &record.id)?;
-    // The later observation is checked against the catalog the revoke was reviewed with.
+    // The later observation is checked against the catalog the action was reviewed with.
     let (after_context, after_version) = token.context(after, &record.versions, &observation.id)?;
+    if kind == Kind::Cancel {
+        return cancel_changes(
+            record,
+            after,
+            action,
+            token,
+            (&context, &token_version),
+            source,
+        );
+    }
     token.check_revoked(snapshot, after, source)?;
     token.changes(
         action,
         (snapshot, &context, &token_version),
         (after, &after_context, &after_version),
+        source,
+    )
+}
+
+/// A cancel keeps the subscription, so a charge can land between it and the later reading. The
+/// later subscription must be the reviewed one with exactly the reviewed end; only the period's
+/// usage may differ. The change reported is the one reviewed, from the bank it was reviewed in.
+fn cancel_changes(
+    record: &Record,
+    after: &Snapshot,
+    action: &sdk::Action,
+    token: Token,
+    (context, token_version): (&sdk::Context, &str),
+    source: Pubkey,
+) -> Result<Vec<AuthorizationChange>, Error> {
+    let snapshot = &record.snapshot;
+    let Token::Subscription { delegation, .. } = token else {
+        return Err(AdapterError::UnsupportedOperation.into());
+    };
+    let keys = execution_keys(action);
+    let executed = execute_revoke(snapshot, action, &keys, token.program(), Kind::Cancel)?;
+    let reviewed = executed
+        .iter()
+        .find(|(key, _)| *key == delegation)
+        .map(|(_, account)| account)
+        .ok_or(AdapterError::InsufficientEvidence)?;
+    let now = account(after, delegation)?;
+    let usage = PERIOD_USAGE.start..PERIOD_USAGE.end;
+    let landed = now.lamports == reviewed.lamports
+        && now.owner == reviewed.owner
+        && !now.executable
+        && now.data.len() == reviewed.data.len()
+        && now.data[..usage.start] == reviewed.data[..usage.start]
+        && now.data[usage.end..] == reviewed.data[usage.end..];
+    if !landed || !only_end_changed(account(snapshot, delegation)?, reviewed) {
+        return Err(AdapterError::DiffMismatch.into());
+    }
+    let mut expected = snapshot.clone();
+    for (key, value) in &executed {
+        if let Some(entry) = expected
+            .accounts
+            .iter_mut()
+            .find(|(address, _)| address == key)
+        {
+            entry.1 = value.clone();
+        }
+    }
+    token.changes(
+        action,
+        (snapshot, context, token_version),
+        (&expected, context, token_version),
         source,
     )
 }
@@ -1121,6 +1340,26 @@ pub async fn verify_revoke(
     id: &str,
     source: Pubkey,
     signed_transaction: &str,
+) -> Result<VerifiedRevoke, Error> {
+    verify_action(
+        client,
+        journal,
+        id,
+        source,
+        signed_transaction,
+        Kind::Revoke,
+    )
+    .await
+}
+
+/// Verify a finalized canonical revoke or cancel and a later scoped observation.
+pub async fn verify_action(
+    client: &RpcClient,
+    journal: &Journal,
+    id: &str,
+    source: Pubkey,
+    signed_transaction: &str,
+    kind: Kind,
 ) -> Result<VerifiedRevoke, Error> {
     let record = journal.replay(id).await?;
     let snapshot = &record.snapshot;
@@ -1143,7 +1382,7 @@ pub async fn verify_revoke(
     if supplied != canonical {
         return Err(Error::InvalidObservation("noncanonical signed transaction"));
     }
-    let action = checked_revoke(&record, source, &signed)?;
+    let action = checked_action(&record, source, &signed, kind)?;
     let catalog = Catalog::new(record.versions.clone()).map_err(|_| Error::ReplayMismatch)?;
     if client.get_genesis_hash().await?.to_string() != snapshot.observation.cluster {
         return Err(Error::InvalidObservation("cluster genesis mismatch"));
@@ -1175,7 +1414,7 @@ pub async fn verify_revoke(
     .await?;
     // Retain upgrades and incomplete evidence too, so stale grants stop being current.
     let observation = journal.ingest(after, &catalog).await?;
-    let changes = revoke_changes(&record, &observation, &action, transaction.slot)?;
+    let changes = applied_changes(&record, &observation, &action, transaction.slot, kind)?;
     if journal
         .latest(&snapshot.scope_id()?)
         .await?
@@ -1184,6 +1423,7 @@ pub async fn verify_revoke(
         return Err(Error::Conflict);
     }
     let evidence = RevokeEvidence {
+        kind,
         state_version: record.id,
         observation_id: observation.id.clone(),
         transaction,
@@ -1206,6 +1446,7 @@ pub async fn verify_revoke(
         return Err(Error::ReplayMismatch);
     }
     Ok(VerifiedRevoke {
+        kind,
         verification_id,
         state_version: evidence.state_version,
         transaction: evidence.transaction,
@@ -1222,23 +1463,88 @@ pub fn action_router(journal: Journal, client: RpcClient) -> Router {
             "/scopes/:scope_id/actions/revoke/:source",
             post(current_revoke),
         )
+        .route("/snapshots/:id/actions/cancel/:source", post(cancel))
+        .route(
+            "/snapshots/:id/actions/cancel/:source/verify",
+            post(verify_cancel),
+        )
+        .route(
+            "/scopes/:scope_id/actions/cancel/:source",
+            post(current_cancel),
+        )
         .with_state((journal, Arc::new(client)))
+}
+
+type Handled<T> = Result<Json<T>, (StatusCode, Json<serde_json::Value>)>;
+
+fn address(source: &str) -> Result<Pubkey, (StatusCode, Json<serde_json::Value>)> {
+    source.parse().map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "Invalid account address"})),
+        )
+    })
 }
 
 async fn current_revoke(
     State((journal, client)): State<(Journal, Arc<RpcClient>)>,
     Path((scope_id, source)): Path<(String, String)>,
-) -> Result<Json<SimulatedRevoke>, (StatusCode, Json<serde_json::Value>)> {
-    let source = source.parse().map_err(|_| {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "Invalid account address"})),
-        )
-    })?;
-    simulate_current_revoke(&client, &journal, &scope_id, source)
+) -> Handled<SimulatedRevoke> {
+    simulate_current(
+        &client,
+        &journal,
+        &scope_id,
+        address(&source)?,
+        Kind::Revoke,
+    )
+    .await
+    .map(Json)
+    .map_err(action_error)
+}
+
+async fn current_cancel(
+    State((journal, client)): State<(Journal, Arc<RpcClient>)>,
+    Path((scope_id, source)): Path<(String, String)>,
+) -> Handled<SimulatedRevoke> {
+    simulate_current(
+        &client,
+        &journal,
+        &scope_id,
+        address(&source)?,
+        Kind::Cancel,
+    )
+    .await
+    .map(Json)
+    .map_err(action_error)
+}
+
+async fn cancel(
+    State((journal, client)): State<(Journal, Arc<RpcClient>)>,
+    Path((id, source)): Path<(String, String)>,
+) -> Handled<SimulatedRevoke> {
+    simulate_action(&client, &journal, &id, address(&source)?, Kind::Cancel)
         .await
         .map(Json)
         .map_err(action_error)
+}
+
+async fn verify_cancel(
+    State((journal, client)): State<(Journal, Arc<RpcClient>)>,
+    Path((id, source)): Path<(String, String)>,
+    Json(request): Json<SignedRevoke>,
+) -> Handled<VerifiedRevoke> {
+    let source = address(&source)?;
+    verify_action(
+        &client,
+        &journal,
+        &id,
+        source,
+        &request.signed_transaction,
+        Kind::Cancel,
+    )
+    .await
+    .map(Json)
+    .map_err(action_error)
 }
 
 #[derive(Deserialize)]

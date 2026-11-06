@@ -529,3 +529,266 @@ async fn a_provider_reporting_the_closed_delegation_with_the_rent_sentinel_agree
         [AuthorizationChange::Removed { .. }]
     ));
 }
+
+// Cancel: the same composition, with the program's event authority read as the scope reads it.
+const CANCEL_UNIT_LIMIT: u64 = 10_000 - 2 * 150;
+// owner-pull-60 is mid-period at 1_800_000_000; its paid period ends an hour later.
+const CANCEL_END: i64 = 1_800_003_600;
+
+fn running() -> Snapshot {
+    let mut snapshot = snapshot(ACTIVE);
+    snapshot
+        .accounts
+        .push((rpc::EVENT_AUTHORITY, Account::default()));
+    snapshot
+}
+
+fn cancel_instruction(delegation: Pubkey, plan: Pubkey) -> Instruction {
+    let program = subscriptions::DelegationAdapter.protocol().program_id;
+    Instruction {
+        program_id: program,
+        accounts: vec![
+            AccountMeta::new_readonly(delegator(), true),
+            AccountMeta::new_readonly(plan, false),
+            AccountMeta::new(delegation, false),
+            AccountMeta::new_readonly(rpc::EVENT_AUTHORITY, false),
+            AccountMeta::new_readonly(program, false),
+        ],
+        data: vec![12],
+    }
+}
+
+fn ended(account: &Account) -> i64 {
+    i64::from_le_bytes(account.data[147..155].try_into().unwrap())
+}
+
+/// The subscription as Cancel leaves it: every byte as observed but its end.
+fn cancelled(snapshot: &Snapshot, delegation: Pubkey) -> Account {
+    let mut account = find(snapshot, delegation);
+    account.data[147..155].copy_from_slice(&CANCEL_END.to_le_bytes());
+    account
+}
+
+/// A provider reply for the reviewed addresses: subscriber, plan, subscription, event authority,
+/// program, Clock.
+fn cancel_simulation(snapshot: &Snapshot, subscription: &Account) -> Value {
+    let (_, plan) = targets(snapshot);
+    let program = subscriptions::DelegationAdapter.protocol().program_id;
+    json!({
+        "context": {"slot": SLOT},
+        "value": {
+            "err": null,
+            "logs": ["Program log: Instruction: CancelSubscription"],
+            "accounts": [
+                ui(&find(snapshot, delegator())),
+                ui(&find(snapshot, plan)),
+                ui(subscription),
+                Value::Null,
+                ui(&find(snapshot, program)),
+                ui(&find(snapshot, sysvar::clock::id())),
+            ],
+            "unitsConsumed": null,
+            "replacementBlockhash": {"blockhash": "5LyjeY4xs2T6RWFAYsxXX3mb3znxqEwSzX4hLyHZxsVE", "lastValidBlockHeight": 100}
+        }
+    })
+}
+
+#[test]
+fn cancel_subscription_sets_only_the_end_within_the_fixed_unit_limit() {
+    let before = running();
+    let (delegation, plan) = targets(&before);
+    let program = subscriptions::DelegationAdapter.protocol().program_id;
+    let features = before.features.as_ref().unwrap().runtime(SLOT).unwrap();
+    let mut compute_budget =
+        ComputeBudget::new_with_defaults(features.raise_cpi_nesting_limit_to_8);
+    compute_budget.compute_unit_limit = CANCEL_UNIT_LIMIT;
+    let mut mollusk = Mollusk {
+        compute_budget,
+        ..Default::default()
+    };
+    mollusk.program_cache = ProgramCache::new(&features, &mollusk.compute_budget, false);
+    mollusk.feature_set = features;
+    mollusk.sysvars.clock = bincode::deserialize(&find(&before, sysvar::clock::id()).data).unwrap();
+    let offset = UpgradeableLoaderState::size_of_programdata_metadata();
+    let programdata = find(&before, get_program_data_address(&program)).data;
+    mollusk.add_program_with_loader_and_elf(
+        &program,
+        &bpf_loader_upgradeable::id(),
+        &programdata[offset..],
+    );
+    let keys = [delegator(), plan, delegation, rpc::EVENT_AUTHORITY, program];
+    let accounts: Vec<_> = keys.iter().map(|key| (*key, find(&before, *key))).collect();
+    let result =
+        mollusk.process_instruction_chain(&[cancel_instruction(delegation, plan)], &accounts);
+    println!(
+        "CancelSubscription consumed {} of {CANCEL_UNIT_LIMIT} compute units",
+        result.compute_units_consumed
+    );
+    assert!(result.raw_result.is_ok() && result.program_result.is_ok());
+    assert!(result.compute_units_consumed <= CANCEL_UNIT_LIMIT);
+    for (key, account) in &result.resulting_accounts {
+        if *key == delegation {
+            assert_eq!(ended(&find(&before, delegation)), 0);
+            assert_eq!(*account, cancelled(&before, delegation));
+        } else {
+            assert_eq!(*account, find(&before, *key), "{key}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_running_subscription_cancels_with_the_subscriber_as_the_only_signer() {
+    let journal = Journal::open("sqlite::memory:").await.unwrap();
+    let observed = running();
+    let (delegation, plan) = targets(&observed);
+    let record = journal.ingest(observed.clone(), &catalog()).await.unwrap();
+    let reply = cancel_simulation(&observed, &cancelled(&observed, delegation));
+    let simulated = rpc::simulate_action(
+        &client(reply),
+        &journal,
+        &record.id,
+        delegation,
+        rpc::Kind::Cancel,
+    )
+    .await
+    .unwrap();
+    // The same budget and 10,000-lamport priority fee as a revoke.
+    let expected = Transaction::new_with_payer(
+        &[
+            ComputeBudgetInstruction::set_compute_unit_limit(10_000),
+            ComputeBudgetInstruction::set_compute_unit_price(1_000_000),
+            cancel_instruction(delegation, plan),
+        ],
+        Some(&delegator()),
+    );
+    assert_eq!(simulated.kind, rpc::Kind::Cancel);
+    assert_eq!(simulated.transaction.message, expected.message);
+    assert_eq!(
+        simulated.transaction.message.header.num_required_signatures,
+        1
+    );
+    let [AuthorizationChange::Changed { before, after }] = simulated.changes.as_slice() else {
+        panic!("{:?}", simulated.changes);
+    };
+    assert_eq!(before.id, after.id);
+    assert!(matches!(
+        after.authority_kind,
+        AuthorityKind::Derived { .. }
+    ));
+    assert_eq!(
+        serde_json::to_value(&after.lifecycle).unwrap()["valid_until"],
+        json!(CANCEL_END)
+    );
+}
+
+#[tokio::test]
+async fn a_provider_that_disagrees_with_the_cancel_is_refused() {
+    let observed = running();
+    let (delegation, plan) = targets(&observed);
+    let mut later_end = cancelled(&observed, delegation);
+    later_end.data[147..155].copy_from_slice(&(CANCEL_END + 1).to_le_bytes());
+    let mut charged = cancelled(&observed, delegation);
+    charged.data[131] ^= 1;
+    let mut plan_changed = cancel_simulation(&observed, &cancelled(&observed, delegation));
+    let mut changed = find(&observed, plan);
+    *changed.data.last_mut().unwrap() ^= 1;
+    plan_changed["value"]["accounts"][1] = ui(&changed);
+    for reply in [
+        cancel_simulation(&observed, &find(&observed, delegation)),
+        cancel_simulation(&observed, &later_end),
+        cancel_simulation(&observed, &charged),
+        plan_changed,
+    ] {
+        let journal = Journal::open("sqlite::memory:").await.unwrap();
+        let record = journal.ingest(observed.clone(), &catalog()).await.unwrap();
+        let result = rpc::simulate_action(
+            &client(reply),
+            &journal,
+            &record.id,
+            delegation,
+            rpc::Kind::Cancel,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(Error::Adapter(AdapterError::DiffMismatch))
+        ));
+    }
+}
+
+#[tokio::test]
+async fn a_cancelled_or_ended_subscription_is_not_cancelled_again() {
+    let mut pending = snapshot(CANCELLED);
+    // One second before the cancellation takes effect: cancelled, not yet ended.
+    pending.observation.unix_timestamp -= 1;
+    let clock = account(&mut pending, sysvar::clock::id());
+    let mut value: Clock = bincode::deserialize(&clock.data).unwrap();
+    value.unix_timestamp -= 1;
+    clock.data = bincode::serialize(&value).unwrap();
+    for mut observed in [snapshot(CANCELLED), pending] {
+        observed
+            .accounts
+            .push((rpc::EVENT_AUTHORITY, Account::default()));
+        let (delegation, _) = targets(&observed);
+        let journal = Journal::open("sqlite::memory:").await.unwrap();
+        let record = journal.ingest(observed, &catalog()).await.unwrap();
+        let result = rpc::simulate_action(
+            &RpcClient::new_mock("fails".into()),
+            &journal,
+            &record.id,
+            delegation,
+            rpc::Kind::Cancel,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(Error::Adapter(AdapterError::UnsupportedOperation))
+        ));
+        let app = rpc::action_router(journal, RpcClient::new_mock("fails".into()));
+        let response = app
+            .oneshot(
+                Request::post(format!(
+                    "/snapshots/{}/actions/cancel/{delegation}",
+                    record.id
+                ))
+                .body(Body::empty())
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+}
+
+#[tokio::test]
+async fn cancel_verification_requires_the_subscribers_signature() {
+    let journal = Journal::open("sqlite::memory:").await.unwrap();
+    let observed = running();
+    let (delegation, _) = targets(&observed);
+    let record = journal.ingest(observed.clone(), &catalog()).await.unwrap();
+    let simulated = rpc::simulate_action(
+        &client(cancel_simulation(
+            &observed,
+            &cancelled(&observed, delegation),
+        )),
+        &journal,
+        &record.id,
+        delegation,
+        rpc::Kind::Cancel,
+    )
+    .await
+    .unwrap();
+    let result = rpc::verify_action(
+        &RpcClient::new_mock("fails".into()),
+        &journal,
+        &record.id,
+        delegation,
+        &simulated.signing_transaction,
+        rpc::Kind::Cancel,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(Error::InvalidObservation("invalid transaction signature"))
+    ));
+}
