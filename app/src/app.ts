@@ -254,7 +254,7 @@ function metadata(view: ObjectValue, wallet?: { read: number; listed: number }):
   const checked =
     wallet && wallet.read < wallet.listed
       ? `Velon checked ${wallet.read} of the ${wallet.listed} token approvals and Solana Subscriptions the network lists for this wallet.`
-      : "Velon checked the token approvals and Solana Subscriptions the network lists for this wallet.";
+      : "Token approvals and Solana Subscriptions were checked.";
   block.append(
     node(
       "p",
@@ -1058,7 +1058,7 @@ function progressFor(owner: string): Progress {
 function failed(message: string, retry: () => void) {
   results.replaceChildren();
   const line = node("p", message, "error");
-  line.append(" ", act("Try again", "refresh", "link-button", retry));
+  line.append(" ", act("Try again", undefined, "link-button", retry));
   notice.replaceChildren(line);
 }
 
@@ -1999,31 +1999,16 @@ async function scanWallet(
       item.append(node("strong", String(count)), label);
       stats.append(item);
     };
-    // The same split as one bar: subscriptions, no limit, limited, and those only reported.
+    // One line of counts: what has no limit, what has one, and what can only be shown.
     const charging = cards.filter((row) => row.dataset.system === "subscriptions").length;
     const open = cards.filter(
       (row) => row.dataset.system !== "subscriptions" && row.dataset.amount === "∞",
     ).length;
-    const parts: [number, string][] = [
-      [charging, "sub"],
-      [open, "risk"],
-      [cards.length - charging - open, "limited"],
-      [reportedRows.length, "plain"],
-    ];
     stat(unlimited, "with no limit", "risk");
     stat(cards.length - charging - open, "with a limit", "limited");
     stat(subscriptions, subscriptions === 1 ? "subscription" : "subscriptions", "sub");
     stat(payments, payments === 1 ? "payment approval" : "payment approvals", "sub");
-    stat(cards.length, "checked by Velon", "ok");
-    stat(reportedRows.length, "shown as the network reports", "plain");
-    const bar = node("div", "", "composition");
-    bar.setAttribute("aria-hidden", "true");
-    for (const [count, kind] of parts)
-      if (count) {
-        const part = node("span", "", kind);
-        part.style.flexGrow = String(count);
-        bar.append(part);
-      }
+    stat(reportedRows.length, "can't be removed here yet", "plain");
     const observation = last ? object(last.observation) : undefined;
     lead.append(
       ...(observation
@@ -2036,8 +2021,6 @@ async function scanWallet(
           ]
         : []),
       title,
-      node("p", "Each one lets someone take tokens from it without asking again."),
-      bar,
       stats,
     );
     const removable = cards.filter((row) => row.dataset.removable);
@@ -2080,7 +2063,7 @@ async function scanWallet(
         : [
             node(
               "p",
-              "Velon checked the token approvals and Solana Subscriptions the network lists for this wallet and found none. Other kinds of permission aren't read yet.",
+              "Token approvals and Solana Subscriptions were checked. Other kinds of permission aren't read yet.",
               "muted",
             ),
           ]),
@@ -2165,7 +2148,7 @@ async function scanWallet(
       group(
         `Approvals on tokens Velon can't identify (${unknown.length})`,
         [
-          "Their names were chosen by whoever created them, so Velon marks them unverified. Unasked-for tokens often arrive with approvals like these.",
+          "Anyone can give a token any name, so these are unverified. Tokens you never asked for often arrive with approvals like these.",
         ],
         unknown,
         true,
@@ -2878,7 +2861,7 @@ async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "
             act("Back to the list", undefined, "link-button", () =>
               results.scrollIntoView({ behavior: "smooth", block: "start" }),
             ),
-            act("See receipts", "receipt", "link-button", () =>
+            act("See receipts", undefined, "link-button", () =>
               document.querySelector<HTMLButtonElement>("#receipts-tab")!.click(),
             ),
           );
@@ -2924,7 +2907,7 @@ async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "
 function recovery(): HTMLElement {
   const row = node("div", "", "next-actions");
   row.append(
-    act("Check the wallet again", "refresh", "link-button", () => {
+    act("Check the wallet again", undefined, "link-button", () => {
       if (!sendRequested) actionResult.hidden = true;
       void reload();
     }),
@@ -2936,8 +2919,8 @@ function recovery(): HTMLElement {
 // The ways to look again: the same wallet, another one, or a link to this answer.
 function again(owner: string): HTMLElement[] {
   if (!document.body.classList.contains("public"))
-    return [act("Check again", "refresh", "link-button", () => void reload())];
-  const share = act("Copy link", "link", "link-button", async () => {
+    return [act("Check again", undefined, "link-button", () => void reload())];
+  const share = act("Copy link", undefined, "link-button", async () => {
     const url = `${location.origin}${location.pathname}#${owner}`;
     const done = await navigator.clipboard?.writeText(url).then(
       () => true,
@@ -2946,8 +2929,8 @@ function again(owner: string): HTMLElement[] {
     tip(share, done ? "Link copied" : "Copy it from the address bar");
   });
   return [
-    act("Check again", "refresh", "link-button", () => checkWallet(owner, false)),
-    act("Check another wallet", "search", "link-button", anotherWallet),
+    act("Check again", undefined, "link-button", () => checkWallet(owner, false)),
+    act("Check another wallet", undefined, "link-button", anotherWallet),
     share,
   ];
 }
@@ -2990,34 +2973,12 @@ function lesson() {
     panel.append(
       node(
         "p",
-        `See who can take tokens from any ${network().label.toLowerCase()} wallet, how much, and what they have already charged. Looking signs nothing.`,
+        `Every token approval and subscription on a ${network().label.toLowerCase()} wallet: who holds it, how much it allows, what it has charged. Nothing to sign.`,
         "start-lead",
       ),
     );
     const recent = recentChecks();
     if (recent.length) panel.append(recentRow(recent));
-    // The whole journey up front, so no step comes as a surprise.
-    const how = node("ol", "", "how");
-    for (const [title, line] of [
-      ["Paste an address", "Velon reads the chain's final state. There is nothing to sign."],
-      [
-        "See who can take what",
-        "Every approval and subscription in plain words: who, how much, and what it has charged.",
-      ],
-      [
-        "Remove what you don't use",
-        "Connect the wallet and sign each removal. Velon proves it on chain and keeps a receipt.",
-      ],
-    ] as const) {
-      const item = node("li");
-      item.append(node("strong", title), node("span", line));
-      how.append(item);
-    }
-    const start = labelled(node("button", "Connect your wallet", "link-button"), "wallet");
-    start.type = "button";
-    start.onclick = () => connectButton.click();
-    how.lastElementChild!.append(start);
-    panel.append(how);
     results.append(panel);
   }
   badge(network().label);
@@ -3155,13 +3116,7 @@ async function showPlan(planKey: string): Promise<boolean> {
   );
   if (text(body.metadataUri) && !name)
     facts.append(field("Merchant's own description (not verified)", text(body.metadataUri)));
-  const next = nextPanel(
-    [
-      "If you subscribe, check your wallet here afterwards to see the subscription and every charge it makes.",
-    ],
-    again(planKey),
-  );
-  content.append(lead, why, facts, next);
+  content.append(lead, why, facts);
   mode = "scan";
   diff.hidden = true;
   receipts.hidden = true;

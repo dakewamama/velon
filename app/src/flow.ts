@@ -1,4 +1,4 @@
-// The calm parts of a wallet check: progress while it reads, what to do next, and doing it again.
+// The parts of a wallet check around the answer: progress while it reads, what to do next, and again.
 import { icon, type IconName } from "./icons.ts";
 import { short } from "./wire.ts";
 
@@ -88,9 +88,8 @@ export function progress(owner: string): Progress {
     steps.append(item);
     return item;
   });
-  const calm = el("p", "Read only. Nothing to sign, and you can check another wallet at any time.", "calm");
   const rows = el("div", "", "progress-rows");
-  panel.append(head, meter, steps, calm, rows);
+  panel.append(head, meter, steps, rows);
   const started = Date.now();
   const timer = setInterval(() => {
     if (!panel.isConnected && Date.now() - started > 2000) return clearInterval(timer);
@@ -117,7 +116,7 @@ export function progress(owner: string): Progress {
 // The answer's last word: what to do now, then the ways to look again.
 export function nextPanel(steps: string[], actions: HTMLElement[]): HTMLElement {
   const panel = el("section", "", "next");
-  panel.append(el("p", "What to do next", "eyebrow"));
+  panel.append(el("p", "Next", "eyebrow"));
   if (steps.length) {
     const list = el("ol", "", "next-steps");
     for (const line of steps) list.append(el("li", line));

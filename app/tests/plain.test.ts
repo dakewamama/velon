@@ -445,39 +445,30 @@ const quiet = {
   unread: false,
 };
 
-test("next steps say what to do after a check, at most three", () => {
-  expect(nextSteps(quiet)).toEqual([
-    "Nothing to do. Check again after you approve a new app, or check another wallet.",
-  ]);
+test("next steps are actions, at most three", () => {
+  expect(nextSteps(quiet)).toEqual(["Nothing to remove."]);
   const exposed = { ...quiet, total: 5, removable: 4, unlimitedRemovable: 3, reported: 1 };
-  const looking = nextSteps(exposed);
-  expect(looking).toHaveLength(3);
-  expect(looking[0]).toStartWith("Connect this wallet.");
-  expect(looking[1]).toBe(
-    "Remove the ones you don't use, starting with the 3 with no limit. Each is one signature and about 0.000015 SOL in fees.",
-  );
-  expect(looking[2]).toContain("receipt");
-  expect(nextSteps({ ...exposed, connected: true })).toEqual([
-    "Only this wallet's owner can remove these. Send them this page's link, or connect the owner's wallet.",
-    "Velon can't remove the one shown as the network reports yet. Details shows who holds it.",
+  // What can only be shown is counted in the summary; it isn't a step.
+  expect(nextSteps(exposed)).toEqual([
+    "Connect this wallet.",
+    "Remove the ones you don't use, starting with the 3 with no limit.",
   ]);
-  expect(nextSteps({ ...exposed, connected: true, owner: true })[0]).toStartWith(
-    "Review the 3 with no limit",
-  );
-  expect(nextSteps({ ...exposed, connected: true, owner: true, unlimitedRemovable: 1 })[0]).toStartWith(
-    "Choose Remove access",
+  expect(nextSteps({ ...exposed, connected: true })).toEqual([
+    "Only this wallet's owner can change these. Send them this page's link.",
+  ]);
+  expect(nextSteps({ ...exposed, connected: true, owner: true })[0]).toBe(
+    "Remove the ones you don't use, starting with the 3 with no limit.",
   );
   expect(nextSteps({ ...quiet, total: 1, running: 1 })).toEqual([
-    "Connect this wallet to cancel a subscription you don't want. It stops charging when the period already paid for ends, and can be removed here after that.",
+    "Connect this wallet.",
+    "Cancel any subscription you don't want. It stops charging when the period already paid for ends.",
   ]);
-  expect(nextSteps({ ...quiet, total: 1, running: 1, connected: true, owner: true })[0]).toStartWith(
-    "Choose Cancel subscription",
-  );
-  expect(nextSteps({ ...quiet, total: 1, running: 1, connected: true })).toEqual([
-    "Only this wallet's owner can cancel its subscriptions.",
+  expect(nextSteps({ ...quiet, total: 2, running: 2, connected: true, owner: true })).toEqual([
+    "Cancel any subscription you don't want. Each stops charging when the period already paid for ends.",
   ]);
   // A partial read says so first, and never claims there is nothing to do.
-  expect(nextSteps({ ...quiet, unread: true })[0]).toStartWith("Check again.");
-  expect(nextSteps({ ...quiet, unread: true })).toHaveLength(1);
-  expect(nextSteps({ ...exposed, mainnet: false })[1]).toEndWith("Each is one signature.");
+  expect(nextSteps({ ...quiet, unread: true })).toEqual([
+    "Check again. Some accounts couldn't be read this time.",
+  ]);
+  expect(nextSteps({ ...exposed, running: 1, unread: true })).toHaveLength(3);
 });

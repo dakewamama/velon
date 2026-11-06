@@ -657,85 +657,22 @@ a.network-option:hover {
     right: 30px;
   }
 }
-/* How the permissions split, at a glance; the chips below carry the same numbers in words. */
-.composition {
-  display: flex;
-  gap: 3px;
-  width: 100%;
-  max-width: 560px;
-  height: 8px;
-  margin-top: 4px;
-}
-.composition span {
-  min-width: 6px;
-  border-radius: 999px;
-}
-.composition .risk {
-  background: var(--coral);
-}
-.composition .limited {
-  background: var(--amber);
-}
-.composition .sub {
-  background: var(--violet);
-}
-.composition .plain {
-  background: repeating-linear-gradient(135deg, var(--t3) 0 3px, transparent 3px 6px);
-  opacity: 0.6;
-}
-@keyframes grow {
-  from {
-    transform: scaleX(0);
-  }
-}
-.stats .limited strong {
-  color: var(--amber);
-}
 .wallet-summary > p {
   max-width: 64ch;
   color: var(--t2);
 }
-.wallet-summary .action-button {
-  justify-self: start;
-  margin-top: 4px;
-}
-/* The bar's legend: a dot in the bar's colour, the count, and what it counts. */
+/* The summary's counts: one line of text, the number in colour only where it is a risk. */
 .stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 20px;
+  gap: 4px 18px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 .stats li {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
   color: var(--t2);
-  font-size: 13px;
-}
-.stats li::before {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--t3);
-  content: "";
-}
-.stats .risk::before {
-  background: var(--coral);
-}
-.stats .limited::before {
-  background: var(--amber);
-}
-.stats .sub::before {
-  background: var(--violet);
-}
-.stats .ok::before {
-  background: var(--mint);
-}
-.stats .plain::before {
-  background: repeating-linear-gradient(135deg, var(--t3) 0 2px, transparent 2px 4px);
+  font-size: 14px;
 }
 .stats strong {
   color: var(--t1);
@@ -743,6 +680,12 @@ a.network-option:hover {
 }
 .stats .risk strong {
   color: var(--coral);
+}
+.stats strong {
+  margin-right: 0.3em;
+}
+.stats .limited strong {
+  color: var(--amber);
 }
 .stats .sub strong {
   color: var(--violet);
@@ -782,7 +725,7 @@ details.approval-group > summary {
   justify-content: space-between;
   margin: 0;
   padding: 14px 18px;
-  border: 1px dashed var(--hair-2);
+  border: 1px solid var(--hair);
   border-radius: var(--r-m);
   background: var(--s1);
 }
@@ -815,7 +758,7 @@ details.approval-group[open] > summary {
   gap: 4px 20px;
 }
 .approvals-head {
-  padding: 0 18px 2px;
+  padding: 0 4px 2px;
   color: var(--t3);
   font-size: 13px;
   font-weight: 500;
@@ -830,12 +773,14 @@ details.approval-group[open] > summary {
     background 160ms;
 }
 .permission.compact {
-  padding: 13px 18px;
-  border-radius: var(--r-m);
+  padding: 14px 4px;
+  border: 0;
+  border-top: 1px solid var(--hair);
+  border-radius: 0;
+  background: none;
 }
-.permission.compact:hover {
-  border-color: var(--hair-2);
-  background: var(--s2);
+.permission.compact:last-child {
+  border-bottom: 1px solid var(--hair);
 }
 .permission.picked {
   border-color: var(--mint);
@@ -918,23 +863,11 @@ details.approval-group[open] > summary {
   grid-column: 2;
   grid-row: 1;
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  column-gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
-}
-.permission.compact > .delegate .avatar,
-.permission.compact > .delegate > svg {
-  grid-row: 1 / span 2;
-}
-.permission.compact > .delegate strong,
-.permission.compact > .delegate .muted {
-  grid-column: 2;
 }
 .permission.compact > .delegate .muted:empty {
   display: none;
-}
-.permission.compact > .delegate:has(> .muted:empty) > .avatar {
-  grid-row: auto;
 }
 .delegate .avatar,
 .delegate > svg {
@@ -952,8 +885,7 @@ details.approval-group[open] > summary {
 }
 .delegate .muted {
   overflow: hidden;
-  font-family: var(--mono);
-  font-size: 12px;
+  font-size: 12.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1106,7 +1038,7 @@ pre {
   margin-top: 12px;
 }
 
-/* Charges: a short timeline, newest first. */
+/* Charges: dated lines, newest first. */
 .charges {
   margin-top: 18px;
   padding-top: 16px;
@@ -1125,33 +1057,14 @@ pre {
   list-style: none;
 }
 .charges li {
-  position: relative;
   display: grid;
   grid-template-columns: 9.5em minmax(0, 1fr) auto;
   align-items: baseline;
   gap: 12px;
-  padding: 8px 0 8px 18px;
+  padding: 8px 0;
+  border-top: 1px solid var(--hair);
   color: var(--t2);
   font-size: 13.5px;
-}
-.charges li::before {
-  position: absolute;
-  top: 15px;
-  left: 2px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--violet);
-  content: "";
-}
-.charges li:not(:last-child)::after {
-  position: absolute;
-  top: 24px;
-  bottom: -8px;
-  left: 5px;
-  width: 1px;
-  background: var(--hair-2);
-  content: "";
 }
 .charge-date {
   color: var(--t3);
@@ -1278,19 +1191,11 @@ pre {
 }
 .holding-status {
   justify-self: end;
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: var(--s3);
-  color: var(--t2);
-  font-size: 12px;
-  font-weight: 500;
-}
-.holding-status.ok {
-  background: var(--mint-wash);
-  color: var(--mint);
+  color: var(--t3);
+  font-size: 13px;
+  text-align: right;
 }
 .holding-status.risk {
-  background: var(--coral-wash);
   color: var(--coral);
 }
 .holdings > .muted {
@@ -1380,13 +1285,12 @@ pre {
 }
 .plan-why {
   padding: 20px 22px;
-  border: 1px solid rgb(255 196 87 / 22%);
+  border: 1px solid var(--hair);
   border-radius: var(--r-l);
-  background: var(--amber-wash);
+  background: var(--s1);
 }
 .plan-why h3 {
   margin-bottom: 8px;
-  color: var(--amber);
   font-size: 15px;
 }
 .plan-why p {
@@ -2493,10 +2397,6 @@ input:focus {
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
-.progress-card .calm {
-  color: var(--t3);
-  font-size: 13px;
-}
 .progress-rows:empty {
   display: none;
 }
@@ -2599,49 +2499,8 @@ input:focus {
   color: var(--t3);
   font-size: 12.5px;
 }
-.how {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 32px;
-  margin: 56px 0 0;
-  padding: 28px 0 0;
-  border-top: 1px solid var(--hair);
-  list-style: none;
-  text-align: left;
-  counter-reset: how;
-}
-.how li {
-  display: grid;
-  align-content: start;
-  gap: 6px;
-  counter-increment: how;
-}
-.how strong {
-  color: var(--t1);
-  font-size: 15.5px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-.how strong::before {
-  color: var(--t3);
-  font-weight: 500;
-  content: counter(how) ". ";
-}
-.how span {
-  color: var(--t2);
-  font-size: 14px;
-  line-height: 1.55;
-}
-.how .link-button {
-  justify-self: start;
-  margin-top: 6px;
-}
 
 @media (max-width: 760px) {
-  .how {
-    grid-template-columns: 1fr;
-    gap: 22px;
-  }
   .progress-card > :not(.progress-rows) {
     margin: 0 18px;
   }
@@ -2686,4 +2545,18 @@ input:focus {
     transition-duration: 1ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ---- Plain marks: no generated gradients. ---- */
+.avatar:not(.token-logo),
+.delegate > svg {
+  display: none;
+}
+.avatar.token-logo {
+  background: var(--s3) !important;
+  box-shadow: none;
+}
+/* In the group of tokens no one can identify, saying "unverified" on every row is noise. */
+details.approval-group .token .unverified {
+  display: none;
 }
