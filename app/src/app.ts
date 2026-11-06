@@ -35,6 +35,7 @@ import {
   sentence,
   status as rate,
   allowance as allowanceCell,
+  exposure,
   planApproval,
   planChanges,
   planName,
@@ -61,6 +62,7 @@ import {
   publicKey,
   readJson,
   KINDS,
+  limitOf,
   semantic,
   short,
   system,
@@ -369,6 +371,10 @@ function factsFor(grant: ObjectValue, view: ObjectValue, viewer: Viewer): Facts 
   };
 }
 
+// What each token account holds, as the RPC reports it. Display only: it sets an approval against
+// the balance it could take, never decides what is verified.
+const balances = new Map<string, { amount: bigint; decimals: number }>();
+
 // Plan names from the wallet listing, keyed by subscription. The merchant chose them; display only.
 const planNames = new Map<string, string>();
 
@@ -407,6 +413,11 @@ function card(
   row.dataset.system = text(object(grant.native_context).protocol);
   const source = text(object(grant.resource).id);
   row.dataset.source = source;
+  const rowMint = assetMint(grant);
+  row.dataset.mint = rowMint ?? "";
+  if (rowMint && TOKENS[rowMint]) row.dataset.listed = "true";
+  const rowLimit = limitOf(grant);
+  if (rowLimit) row.dataset.limit = String(rowLimit.amount);
   row.classList.toggle("unlimited", left != null && integer(left) === UNLIMITED);
   const known = { ...factsFor(grant, view, viewer), then: availability === HISTORICAL };
   const rating = rate(grant, availability, known.now);
@@ -1205,6 +1216,11 @@ async function holdingsPanel(
   }
   if (wallet.kind !== "wallet") return undefined;
   const all = array(wallet.tokens).map(object);
+  for (const entry of all)
+    balances.set(text(entry.source), {
+      amount: BigInt(text(entry.amount)),
+      decimals: Number(entry.decimals),
+    });
   const shown = all
     .filter((entry) => entry.delegate !== null || text(entry.amount) !== "0")
     .sort(
@@ -1257,7 +1273,17 @@ async function holdingsPanel(
           : delegated >= 2n ** 63n
             ? "with no practical limit"
             : `up to ${units(delegated, scale)}`;
-      status = node("span", `${short(text(entry.delegate))} can take ${limit}`, "holding-status risk");
+      const key = text(entry.delegate);
+      const said = node("span", `${short(key)} can take ${limit}`, "holding-status risk");
+      // A known program, or an account one controls (such as the Subscriptions authority), is named.
+      if (control)
+        void describeDelegate(control.rpcUrl, key)
+          .then((found) => {
+            if (found.kind === "listed" || found.kind === "owned")
+              said.textContent = `${found.title} can take ${limit}`;
+          })
+          .catch(() => {});
+      status = said;
     }
     const label = tokenName(mint);
     const detail = `${label.name ?? "Unlisted token"}${label.verified || !label.name ? "" : " · unverified"}${entry.program === "spl-token-2022" ? " · Token-2022" : ""}`;
@@ -1402,12 +1428,17 @@ function reportedRow(entry: ObjectValue, said: string, link: string, extra: HTML
 }
 
 // A titled group of wallet rows, with the column names the rows line up under.
-function group(heading: string, about: string[], rows: HTMLElement[]): HTMLElement {
-  const block = node("section", "", "approval-group");
+function group(heading: string, about: string[], rows: HTMLElement[], folded = false): HTMLElement {
+  const block = node(folded ? "details" : "section", "", "approval-group");
   const head = node("div", "", "approvals-head");
   head.setAttribute("aria-hidden", "true");
   head.append(node("span", "Token"), node("span", "Who can take it"), node("span", "How much"));
-  block.append(node("h2", heading), ...about.map((line) => node("p", line, "group-note")), head, ...rows);
+  block.append(
+    node(folded ? "summary" : "h2", heading),
+    ...about.map((line) => node("p", line, "group-note")),
+    head,
+    ...rows,
+  );
   return block;
 }
 
@@ -1667,7 +1698,7 @@ async function scanWallet(
   // The panel is display only; if it cannot be read, the permissions still are.
   const holdings = await wallet.catch(() => undefined);
   if (signal.aborted) return false;
-  if (holdings) content.append(holdings);
+
   const reportedRows = unsupported.map(([entry, reason]) => ({
     reason,
     unlimited: text(entry.amount) === String(UNLIMITED),
@@ -1698,13 +1729,64 @@ async function scanWallet(
   // The answer first: how many, how many have no limit, and the one thing to do about it.
   const lead = node("section", "", "wallet-summary");
   if (total) {
+    lead.classList.add(unlimited ? "exposed" : "standing");
+    const title = node("h2");
+    title.append(
+      node("span", String(total), "count"),
+      ` ${total === 1 ? "permission" : "permissions"} can take tokens from ${whose}`,
+    );
+    const subscriptions = cards.filter(
+      (row) => row.dataset.system === "subscriptions" && row.classList.contains("derived"),
+    ).length;
+    const stats = node("ul", "", "stats");
+    const stat = (count: number, label: string, kind: string) => {
+      if (!count) return;
+      const item = node("li", "", kind);
+      item.append(node("strong", String(count)), label);
+      stats.append(item);
+    };
+    // The same split as one bar: subscriptions, no limit, limited, and those only reported.
+    const charging = cards.filter((row) => row.dataset.system === "subscriptions").length;
+    const open = cards.filter(
+      (row) => row.dataset.system !== "subscriptions" && row.dataset.amount === "∞",
+    ).length;
+    const parts: [number, string][] = [
+      [charging, "sub"],
+      [open, "risk"],
+      [cards.length - charging - open, "limited"],
+      [reportedRows.length, "plain"],
+    ];
+    stat(unlimited, "with no limit", "risk");
+    stat(cards.length - charging - open, "with a limit", "limited");
+    stat(subscriptions, subscriptions === 1 ? "subscription" : "subscriptions", "sub");
+    stat(cards.length, "checked by Velon", "ok");
+    stat(reportedRows.length, "shown as the network reports", "plain");
+    const bar = node("div", "", "composition");
+    bar.setAttribute("aria-hidden", "true");
+    for (const [count, kind] of parts)
+      if (count) {
+        const part = node("span", "", kind);
+        part.style.flexGrow = String(count);
+        bar.append(part);
+      }
+    const observation = last ? object(last.observation) : undefined;
     lead.append(
-      node("h2", `${total} approval${total === 1 ? "" : "s"} on ${whose}`),
+      ...(observation
+        ? [
+            node(
+              "p",
+              `Finalized slot ${integer(observation.slot).toLocaleString("en-US")}${observation.unix_timestamp == null ? "" : ` · ${when(integer(observation.unix_timestamp))}`}`,
+              "proof",
+            ),
+          ]
+        : []),
+      title,
       node(
         "p",
-        `Each one lets the address shown take that token from ${whose} without asking again${unlimited ? `. ${unlimited === total ? (total === 1 ? "It has" : "All of them have") : `${unlimited} of them ${unlimited === 1 ? "has" : "have"}`} no limit` : ""}. If you don't use the app behind one any more, remove it.`,
-        "muted",
+        "Each one lets someone take tokens without asking again. If you don't use the app behind one any more, remove it.",
       ),
+      bar,
+      stats,
     );
     const removable = cards.filter((row) => row.dataset.removable);
     const batch = cards.filter((row) => row.dataset.amount === "∞" && revocable.has(row));
@@ -1734,7 +1816,8 @@ async function scanWallet(
       };
       lead.append(all);
     }
-  } else
+  } else {
+    if (!unread && !skipped && !subscriptionsUnread) lead.classList.add("clear");
     lead.append(
       node(
         "h2",
@@ -1752,6 +1835,7 @@ async function scanWallet(
             ),
           ]),
     );
+  }
   content.append(lead);
   if (unread)
     content.append(
@@ -1777,10 +1861,41 @@ async function scanWallet(
         "notice",
       ),
     );
+  // Each row is set against what its account holds now, once the wallet's balances are in.
+  for (const row of cards) {
+    const held = balances.get(row.dataset.source ?? "");
+    const cell = row.querySelector(".row-amount");
+    if (!held || !cell || row.dataset.system === "subscriptions") continue;
+    const mint = row.dataset.mint ?? "";
+    const token = { ...tokenName(mint), decimals: TOKENS[mint]?.decimals ?? held.decimals };
+    const limit = row.dataset.limit ? BigInt(row.dataset.limit) : undefined;
+    cell.append(node("span", exposure(limit, held.amount, token), "exposure"));
+  }
   cards.sort((a, b) => Number(b.dataset.amount === "∞") - Number(a.dataset.amount === "∞"));
-  if (cards.length)
+  const charging = cards.filter((row) => row.dataset.system === "subscriptions");
+  const tokens = cards.filter((row) => row.dataset.system !== "subscriptions");
+  const known = tokens.filter((row) => row.dataset.listed);
+  const unknown = tokens.filter((row) => !row.dataset.listed);
+  if (charging.length) content.append(group(`Subscriptions and payments (${charging.length})`, [], charging));
+  const fold = unknown.length > 4;
+  if (known.length || (unknown.length && !fold))
     content.append(
-      group(reportedRows.length ? `Velon checked these (${cards.length})` : "Approvals", [], cards),
+      group(
+        `Token approvals (${known.length + (fold ? 0 : unknown.length)})`,
+        [],
+        fold ? known : [...known, ...unknown],
+      ),
+    );
+  if (fold)
+    content.append(
+      group(
+        `Approvals on tokens Velon can't identify (${unknown.length})`,
+        [
+          "Their names were chosen by whoever created them, so Velon marks them unverified. Unasked-for tokens often arrive with approvals like these.",
+        ],
+        unknown,
+        true,
+      ),
     );
   // "None found" is only true when every listed account was actually read and modelled.
   else if (!unread && !skipped && !subscriptionsUnread && control?.testBench)
@@ -1796,6 +1911,7 @@ async function scanWallet(
       ),
     );
   }
+  if (holdings) content.append(holdings);
   // The fine print comes last: what was read, what wasn't, and the words used.
   const footer = node("section", "", "wallet-footer");
   if (last) footer.append(metadata(last, { read: owned.length - unread, listed: owned.length }));
@@ -2502,12 +2618,19 @@ function lesson() {
     const start = labelled(node("button", "Connect your wallet", "action-button"), "wallet");
     start.onclick = () => connectButton.click();
     const panel = node("section", "", "start");
+    const promises = node("ul", "", "promises");
+    for (const line of [
+      "Reads the chain's final state",
+      "Token approvals and Solana Subscriptions",
+      "Removes access with proof",
+    ])
+      promises.append(node("li", line));
     panel.append(
-      node("h2", "Check what can take tokens from a Solana wallet"),
       node(
         "p",
-        `Paste any wallet address above to see its token approvals and Solana Subscriptions on ${network().label.toLowerCase()}: who holds each one, how much it allows, and what it has charged. Looking signs nothing.`,
+        `Paste any wallet address to see who can take its tokens on ${network().label.toLowerCase()}, how much, and what they have already charged. Looking signs nothing.`,
       ),
+      promises,
       node(
         "p",
         "To remove one, connect the wallet that owns it. You approve every change in your wallet.",
@@ -2869,7 +2992,15 @@ try {
     selectScenario();
   }
   if (control?.network === "localnet") void watch();
-  void watchMainnet();
+  // The public console has no drawer to feed, so it doesn't poll for recent approvals.
+  if (!document.body.classList.contains("public")) void watchMainnet();
+  // A wallet or plan link pasted into an open console opens like a fresh one.
+  addEventListener("hashchange", () => {
+    const next = decodeURIComponent(location.hash.slice(1));
+    if (!isAddress(next) || !document.body.classList.contains("public")) return;
+    input.value = next;
+    setMode("scan", true);
+  });
 } catch (error) {
   status(error instanceof Error ? error.message : "Observations are unavailable.", true);
 }

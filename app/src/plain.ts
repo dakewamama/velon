@@ -449,3 +449,13 @@ export function planName(metadata: string): string | undefined {
     return undefined;
   }
 }
+
+/// What an approval could take from its account right now, set against what the account holds.
+/// Balances are the RPC's display figures; the approval itself is the verified fact.
+export function exposure(limit: bigint | undefined, balance: bigint, token?: Token): string {
+  if (balance === 0n) return "None of it is here now";
+  if (limit === undefined) return `${amount(balance, token)} here now`;
+  if (limit >= NEAR_MAX) return `All ${amount(balance, token)} here now, and anything sent later`;
+  if (limit >= balance) return `All ${amount(balance, token)} here now`;
+  return `${amount(limit, token)} of the ${amount(balance, token)} here now`;
+}

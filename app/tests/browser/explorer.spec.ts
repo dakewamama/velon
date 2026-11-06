@@ -70,7 +70,7 @@ test("large native amount, partial coverage and SPL reuse", async ({ page }, inf
   await expect(page.locator(".state-meta summary")).toHaveCSS("color", ON_FOREST);
   await expect(page.locator(".state-meta .eyebrow")).toHaveCSS("color", ON_FOREST_2);
   // The raw evidence sits on a light wash, so it keeps the cards' dark text.
-  await expect(page.locator(".state-meta pre")).toHaveCSS("color", "rgb(47, 64, 56)");
+  await expect(page.locator(".state-meta pre")).toHaveCSS("color", ON_FOREST_2);
   // Availability is the runtime's evaluation; only a conditional grant reads as in force, and
   // the summary never counts one as active.
   await expect(page.locator("#results .availability")).toHaveText("In force");

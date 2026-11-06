@@ -5,6 +5,7 @@ import {
   allowance,
   assetMint,
   decimal,
+  exposure,
   GLOSSARY,
   HISTORICAL,
   reported,
@@ -418,4 +419,15 @@ test("a plan's name is read only from its merchant's {n} metadata", () => {
   expect(planName('{"n":""}')).toBeUndefined();
   expect(planName(`{"n":"${"x".repeat(65)}"}`)).toBeUndefined();
   expect(planName('{"name":"Other"}')).toBeUndefined();
+});
+
+test("exposure sets an approval against what its account holds now", () => {
+  expect(exposure(UNLIMITED, 109_172_600n, USDC)).toBe("All 109.1726 USDC here now, and anything sent later");
+  expect(exposure(500_000_000n, 109_172_600n, USDC)).toBe("All 109.1726 USDC here now");
+  expect(exposure(25_000_000n, 109_172_600n, USDC)).toBe("25 USDC of the 109.1726 USDC here now");
+  expect(exposure(UNLIMITED, 0n, USDC)).toBe("None of it is here now");
+  // A creator-set symbol stays out, as everywhere else.
+  expect(exposure(UNLIMITED, 5_000_000n, { symbol: "USDC", verified: false, decimals: 6 })).toBe(
+    "All 5 of this token here now, and anything sent later",
+  );
 });
