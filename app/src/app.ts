@@ -17,6 +17,16 @@ import {
 } from "@solana/transactions";
 import { avatar, icon, solana, type IconName } from "./icons.ts";
 import {
+  button as act,
+  forgetChecks,
+  nextPanel,
+  progress as checkingCard,
+  recentChecks,
+  rememberCheck,
+  tip,
+  type Progress,
+} from "./flow.ts";
+import {
   PROGRAMS,
   TOKENS,
   describeDelegate,
@@ -36,6 +46,7 @@ import {
   status as rate,
   allowance as allowanceCell,
   exposure,
+  nextSteps,
   planApproval,
   planChanges,
   planName,
@@ -146,16 +157,20 @@ function address(title: string, value: string, noun = title.toLowerCase()): HTML
   copy.title = "Copy address";
   copy.setAttribute("aria-label", `Copy ${noun} address`);
   copy.append(icon("copy"));
+  const shown = node("span", value, "mono");
   copy.onclick = async () => {
     const done = await navigator.clipboard?.writeText(value).then(
       () => true,
       () => false,
     );
-    copied.textContent = done ? "Address copied" : "Couldn't copy the address";
+    // Without clipboard access the address is selected instead, ready for the keyboard.
+    if (!done) getSelection()?.selectAllChildren(shown);
+    copied.textContent = done ? "Address copied" : "Address selected. Press Ctrl+C to copy it.";
+    tip(copy, done ? "Copied" : "Selected. Press Ctrl+C");
     copy.replaceChildren(icon(done ? "check" : "copy"));
     setTimeout(() => copy.replaceChildren(icon("copy")), 1200);
   };
-  cell.append(avatar(value), node("span", value, "mono"), copy);
+  cell.append(avatar(value), shown, copy);
   return row;
 }
 
@@ -169,6 +184,7 @@ function labelled<T extends HTMLElement>(element: T, name: IconName): T {
 function badge(label: string, chain = true) {
   const target = document.querySelector<HTMLElement>(".header-links .badge")!;
   target.replaceChildren(...(chain && control ? [solana()] : []), label);
+  target.title = chain && control ? `Velon reads Solana ${label.toLowerCase()}` : "";
 }
 
 // What was read, in one plain line; the slot, origin and provenance wait under Technical details.
@@ -735,7 +751,11 @@ async function scan(historical = false, refresh = false) {
     return;
   }
   scanButton.disabled = true;
-  status("Loading the selected observation...");
+  // A public lookup shows its progress in place; the recorded bench keeps its status line.
+  if (document.body.classList.contains("public")) {
+    notice.replaceChildren();
+    results.replaceChildren(progressFor(address).panel);
+  } else status("Loading the selected observation...");
   try {
     const scenario = currentScenario();
     const live = scenario.live;
@@ -756,6 +776,7 @@ async function scan(historical = false, refresh = false) {
       subscription = kind === "other" && found!.wallet!.program === SUBSCRIPTIONS;
       if (kind === undefined || (refused[kind] && !subscription)) {
         scanButton.disabled = false;
+        results.replaceChildren();
         status(
           kind ? refused[kind]! : "The RPC did not answer. It may be rate limiting; try again in a minute.",
           true,
@@ -769,7 +790,7 @@ async function scan(historical = false, refresh = false) {
       }
       if (kind === "wallet") {
         scanButton.disabled = false;
-        status("Reading the wallet's token accounts...");
+        if (!document.body.classList.contains("public")) status("Reading the wallet's token accounts...");
         // A wallet is never re-read as a single token account.
         await scanWallet(address, found!.wallet);
         return;
@@ -856,13 +877,28 @@ async function scan(historical = false, refresh = false) {
       row.toggleAttribute("aria-current", row.dataset.source === address);
     return true;
   } catch (error) {
-    if (!signal.aborted) {
-      results.replaceChildren();
-      status(error instanceof Error ? error.message : "Unable to read the observation.", true);
-    }
+    if (!signal.aborted)
+      failed(error instanceof Error ? error.message : "Unable to read the observation.", () =>
+        setMode("scan", true),
+      );
   } finally {
     if (!signal.aborted) scanButton.disabled = false;
   }
+}
+
+// The progress panel for the wallet being checked; a new address gets a fresh one.
+let meter: Progress | undefined;
+function progressFor(owner: string): Progress {
+  if (meter?.owner === owner && meter.panel.isConnected) return meter;
+  return (meter = checkingCard(owner));
+}
+
+// A failed check says what happened and offers the way on: the same check again.
+function failed(message: string, retry: () => void) {
+  results.replaceChildren();
+  const line = node("p", message, "error");
+  line.append(" ", act("Try again", "refresh", "link-button", retry));
+  notice.replaceChildren(line);
 }
 
 async function showDiff() {
@@ -1457,6 +1493,10 @@ async function scanWallet(
   const wallet = holdingsPanel(owner, signal, prefetched);
   // Display only: a panel that cannot be read must not surface as an unhandled rejection.
   void wallet.catch(() => undefined);
+  const meter = progressFor(owner);
+  meter.step(0);
+  if (!meter.panel.isConnected) results.replaceChildren(meter.panel);
+  notice.replaceChildren();
   // Only a ledger we started can be enumerated; public clusters answer per owner.
   const listed =
     control?.network === "localnet"
@@ -1468,18 +1508,12 @@ async function scanWallet(
           signal,
         });
   if (!listed.ok) {
-    const retry = node("button", "Try again", "link-button");
-    retry.type = "button";
-    retry.onclick = () => void scanWallet(owner);
-    const message = node(
-      "p",
+    failed(
       listed.status === 429
-        ? "Too many requests right now. Wait a minute, then try again. "
-        : "The wallet's token accounts could not be read. ",
-      "error",
+        ? "Too many requests right now. Wait a minute, then try again."
+        : "The wallet's token accounts could not be read.",
+      () => void scanWallet(owner),
     );
-    message.append(retry);
-    notice.replaceChildren(message);
     return false;
   }
   mode = "scan";
@@ -1515,7 +1549,7 @@ async function scanWallet(
       node("span", "", "checking-token"),
       node("span", `${delegate.slice(0, 4)}…${delegate.slice(-4)}`, "checking-who"),
       node("span", text(entry.amount) === String(UNLIMITED) ? "any amount" : "limited", "checking-amount"),
-      node("span", "Checking…", "checking-state"),
+      node("span", "Checking", "checking-state"),
     );
     checking.append(row);
     return row;
@@ -1526,21 +1560,20 @@ async function scanWallet(
       const token = tokenName(mint);
       const name = token.symbol ?? token.name;
       // A creator's name is marked here too, before the cards are built.
-      rows[index]!.querySelector(".checking-token")!.textContent = name
-        ? `${name}${token.verified ? "" : " (unverified)"}`
-        : `${mint.slice(0, 4)}…${mint.slice(-4)}`;
+      const cell = rows[index]!.querySelector(".checking-token")!;
+      cell.replaceChildren(name ?? short(mint));
+      if (name && !token.verified) cell.append(node("span", "unverified", "unverified"));
     });
   label();
-  const heading = node("p", "", "approvals-summary");
-  if (owned.length) results.replaceChildren(heading, checking);
+  if (owned.length) meter.list(checking);
   const mark = (index: number, view: [ObjectValue, string] | undefined) => {
     const projection = view ? object(view[0].projection) : undefined;
     const [state, kind] = !projection
       ? ["Couldn't read", "unread"]
       : projection.status !== "compiled"
-        ? ["Not verified", "reported"]
+        ? ["As reported", "reported"]
         : array(projection.authorizations ?? []).length
-          ? ["Verified", "verified"]
+          ? ["Checked", "verified"]
           : ["No approval", "clear"];
     rows[index]!.className = kind;
     rows[index]!.querySelector(".checking-state")!.textContent = state;
@@ -1618,11 +1651,11 @@ async function scanWallet(
     }
     let done = 0;
     const progress = () => {
-      const verified = checking.querySelectorAll(".verified").length;
-      const reported = checking.querySelectorAll(".reported").length;
-      heading.textContent = `Checked ${done} of ${owned.length}${verified ? ` · ${verified} verified` : ""}${reported ? ` · ${reported} not verified` : ""}`;
+      meter.step(1, `${done} of ${owned.length}`);
+      meter.share(0.12 + (0.8 * done) / owned.length);
     };
     if (owned.length) progress();
+    else meter.step(2);
     // A batch that still fails after its retries is split in half, down to single accounts, so a
     // provider's rate limit costs time rather than the rows of a whole batch.
     const check = async (indexes: number[]): Promise<void> => {
@@ -1656,6 +1689,7 @@ async function scanWallet(
       for (let batch = nextBatch++; batch < batches.length; batch = nextBatch++) await check(batches[batch]!);
     };
     await Promise.all(Array.from({ length: Math.min(2, batches.length) }, worker));
+    meter.step(2);
     unread = views.filter((view) => !view).length;
     views.forEach((view, index) => {
       const projection = view ? object(view[0].projection) : undefined;
@@ -1690,7 +1724,10 @@ async function scanWallet(
     }
   } catch (error) {
     if (!signal.aborted)
-      status(error instanceof Error ? error.message : "Your wallet could not be read.", true);
+      failed(
+        error instanceof Error ? error.message : "Your wallet could not be read.",
+        () => void scanWallet(owner),
+      );
     return false;
   }
   if (signal.aborted) return false;
@@ -1728,6 +1765,7 @@ async function scanWallet(
   const whose = yours ? "your wallet" : "this wallet";
   // The answer first: how many, how many have no limit, and the one thing to do about it.
   const lead = node("section", "", "wallet-summary");
+  const primary: HTMLElement[] = [];
   if (total) {
     lead.classList.add(unlimited ? "exposed" : "standing");
     const title = node("h2");
@@ -1781,10 +1819,7 @@ async function scanWallet(
           ]
         : []),
       title,
-      node(
-        "p",
-        "Each one lets someone take tokens without asking again. If you don't use the app behind one any more, remove it.",
-      ),
+      node("p", "Each one lets someone take tokens from it without asking again."),
       bar,
       stats,
     );
@@ -1797,16 +1832,8 @@ async function scanWallet(
       );
       start.type = "button";
       start.onclick = () => connectButton.click();
-      lead.append(start);
-    } else if (connected && removable.some((row) => row.dataset.removable !== connected!.account.address))
-      lead.append(
-        node(
-          "p",
-          `Only the owner of this wallet, ${short(owner)}, can remove these. Connect it to do so.`,
-          "muted",
-        ),
-      );
-    else if (batch.length > 1) {
+      primary.push(start);
+    } else if (batch.length > 1) {
       const all = labelled(node("button", `Review all ${batch.length} unlimited`, "action-button"), "revoke");
       all.type = "button";
       all.onclick = () => {
@@ -1814,7 +1841,7 @@ async function scanWallet(
         queue = rest;
         first!();
       };
-      lead.append(all);
+      primary.push(all);
     }
   } else {
     if (!unread && !skipped && !subscriptionsUnread) lead.classList.add("clear");
@@ -1836,6 +1863,24 @@ async function scanWallet(
           ]),
     );
   }
+  const removableRows = cards.filter((row) => row.dataset.removable);
+  lead.append(
+    nextPanel(
+      nextSteps({
+        total,
+        removable: removableRows.length,
+        unlimitedRemovable: removableRows.filter((row) => row.dataset.amount === "∞").length,
+        reported: reportedRows.length,
+        running: cards.filter((row) => row.dataset.system === "subscriptions" && !row.dataset.removable)
+          .length,
+        connected: connected !== undefined,
+        owner: connected?.account.address === owner,
+        mainnet: control?.network === "mainnet",
+        unread: Boolean(unread || skipped || subscriptionsUnread),
+      }),
+      [...primary, ...again(owner)],
+    ),
+  );
   content.append(lead);
   if (unread)
     content.append(
@@ -2249,6 +2294,8 @@ function setAction(state: ActionState, message: string) {
     steps.append(step);
   }
   actionResult.replaceChildren(steps, node("h2", title), node("p", message));
+  if (state === "PREPARING" || state === "FAILED")
+    actionResult.scrollIntoView({ behavior: "smooth", block: "nearest" });
   if (state === "VERIFIED") {
     guide(4);
     if (connected && control?.testBench)
@@ -2545,6 +2592,7 @@ async function prepare(scanned: ObjectValue, scope: string) {
               ),
             );
           // The next queued revoke opens only when the visitor asks for it.
+          const after = node("div", "", "next-actions");
           if (queue.length) {
             const next = labelled(
               node("button", `Review next · ${queue.length} left`, "action-button"),
@@ -2552,8 +2600,17 @@ async function prepare(scanned: ObjectValue, scope: string) {
             );
             next.type = "button";
             next.onclick = () => queue.shift()?.();
-            actionResult.append(next);
+            after.append(next);
           }
+          after.append(
+            act("Back to the list", undefined, "link-button", () =>
+              results.scrollIntoView({ behavior: "smooth", block: "start" }),
+            ),
+            act("See receipts", "receipt", "link-button", () =>
+              document.querySelector<HTMLButtonElement>("#receipts-tab")!.click(),
+            ),
+          );
+          actionResult.append(after);
           return;
         }
         throw new Error(
@@ -2570,6 +2627,7 @@ async function prepare(scanned: ObjectValue, scope: string) {
             : reason,
         );
         if (submittedSignature) actionResult.append(field("Transaction", submittedSignature));
+        actionResult.append(recovery());
       }
     };
   } catch (error) {
@@ -2584,7 +2642,46 @@ async function prepare(scanned: ObjectValue, scope: string) {
         ? "This subscription can't be removed yet. The Subscriptions program only allows it after the subscription is cancelled and its paid period has ended. Nothing was signed."
         : reason,
     );
+    actionResult.append(recovery());
   }
+}
+
+// A removal that stopped offers a fresh read. Once anything was sent, the outcome stays on screen.
+function recovery(): HTMLElement {
+  const row = node("div", "", "next-actions");
+  row.append(
+    act("Check the wallet again", "refresh", "link-button", () => {
+      if (!sendRequested) actionResult.hidden = true;
+      void reload();
+    }),
+  );
+  if (!sendRequested) row.append(act("Close", undefined, "link-button", () => (actionResult.hidden = true)));
+  return row;
+}
+
+// The ways to look again: the same wallet, another one, or a link to this answer.
+function again(owner: string): HTMLElement[] {
+  if (!document.body.classList.contains("public"))
+    return [act("Check again", "refresh", "link-button", () => void reload())];
+  const share = act("Copy link", "link", "link-button", async () => {
+    const url = `${location.origin}${location.pathname}#${owner}`;
+    const done = await navigator.clipboard?.writeText(url).then(
+      () => true,
+      () => false,
+    );
+    tip(share, done ? "Link copied" : "Copy it from the address bar");
+  });
+  return [
+    act("Check again", "refresh", "link-button", () => checkWallet(owner, false)),
+    act("Check another wallet", "search", "link-button", anotherWallet),
+    share,
+  ];
+}
+
+function anotherWallet() {
+  lookupInput.value = "";
+  scrollTo({ top: 0, behavior: "smooth" });
+  lookupInput.focus({ preventScroll: true });
 }
 review.addEventListener("cancel", invalidateReview);
 // A dismissed review hands focus back to the card it came from, or to the list if it is gone.
@@ -2615,32 +2712,99 @@ function lesson() {
   // On a public cluster, looking needs nothing; removing needs the owner's wallet.
   if (control && !control.testBench && !connected) {
     document.body.classList.toggle("first-screen", !kept().length);
-    const start = labelled(node("button", "Connect your wallet", "action-button"), "wallet");
-    start.onclick = () => connectButton.click();
     const panel = node("section", "", "start");
-    const promises = node("ul", "", "promises");
-    for (const line of [
-      "Reads the chain's final state",
-      "Token approvals and Solana Subscriptions",
-      "Removes access with proof",
-    ])
-      promises.append(node("li", line));
     panel.append(
       node(
         "p",
-        `Paste any wallet address to see who can take its tokens on ${network().label.toLowerCase()}, how much, and what they have already charged. Looking signs nothing.`,
+        `See who can take tokens from any ${network().label.toLowerCase()} wallet, how much, and what they have already charged. Looking signs nothing.`,
+        "start-lead",
       ),
-      promises,
-      node(
-        "p",
-        "To remove one, connect the wallet that owns it. You approve every change in your wallet.",
-        "muted",
-      ),
-      start,
     );
+    const recent = recentChecks();
+    if (recent.length) panel.append(recentRow(recent));
+    // The whole journey up front, so no step comes as a surprise.
+    const how = node("ol", "", "how");
+    for (const [title, line] of [
+      ["Paste an address", "Velon reads the chain's final state. There is nothing to sign."],
+      [
+        "See who can take what",
+        "Every approval and subscription in plain words: who, how much, and what it has charged.",
+      ],
+      [
+        "Remove what you don't use",
+        "Connect the wallet and sign each removal. Velon proves it on chain and keeps a receipt.",
+      ],
+    ] as const) {
+      const item = node("li");
+      item.append(node("strong", title), node("span", line));
+      how.append(item);
+    }
+    const start = labelled(node("button", "Connect your wallet", "link-button"), "wallet");
+    start.type = "button";
+    start.onclick = () => connectButton.click();
+    how.lastElementChild!.append(start);
+    panel.append(how);
     results.append(panel);
   }
   badge(network().label);
+}
+
+// Wallets checked in this browser, one click from being checked again.
+function recentRow(addresses: string[]): HTMLElement {
+  const row = node("div", "", "recent");
+  row.append(node("span", "Recent", "eyebrow"));
+  for (const address of addresses) {
+    const chip = node("button", "", "recent-chip");
+    chip.type = "button";
+    chip.title = address;
+    chip.append(avatar(address), short(address));
+    chip.onclick = () => checkWallet(address);
+    row.append(chip);
+  }
+  row.append(
+    act("Clear", undefined, "link-button", () => {
+      forgetChecks();
+      refreshRecent();
+      row.remove();
+    }),
+  );
+  return row;
+}
+
+function refreshRecent() {
+  document.querySelector("#recent-wallets")?.replaceChildren(
+    ...recentChecks().map((address) => {
+      const option = node("option");
+      option.value = address;
+      return option;
+    }),
+  );
+}
+
+// The address in the URL is the one on screen, so a check can be linked, shared and gone back to.
+let routed = "";
+function checkWallet(address: string, push = true) {
+  lookupInput.value = address;
+  if (document.body.classList.contains("public")) {
+    if (push && routed !== address) history.pushState(null, "", `#${address}`);
+    routed = address;
+    rememberCheck(address);
+    refreshRecent();
+  }
+  openLive(address);
+}
+
+// Back to the first screen, with nothing left running.
+function home() {
+  request?.abort();
+  lookupInput.value = "";
+  input.value = "";
+  notice.replaceChildren();
+  receipts.hidden = true;
+  results.hidden = false;
+  document.querySelector("#receipts-tab")!.classList.remove("selected");
+  document.querySelector("#scan-tab")!.classList.add("selected");
+  lesson();
 }
 
 // A signature the visitor can open on Solana Explorer.
@@ -2717,8 +2881,13 @@ async function showPlan(planKey: string): Promise<boolean> {
   );
   if (text(body.metadataUri) && !name)
     facts.append(field("Merchant's own description (not verified)", text(body.metadataUri)));
-  const share = node("p", `Link to this page: ${location.origin}/#${planKey}`, "muted");
-  content.append(lead, why, facts, share);
+  const next = nextPanel(
+    [
+      "If you subscribe, check your wallet here afterwards to see the subscription and every charge it makes.",
+    ],
+    again(planKey),
+  );
+  content.append(lead, why, facts, next);
   mode = "scan";
   diff.hidden = true;
   receipts.hidden = true;
@@ -2915,11 +3084,20 @@ form.onsubmit = (event) => {
 // On a public cluster the first thing a visitor can do is look up any wallet.
 const lookup = document.querySelector<HTMLFormElement>("#lookup")!;
 const lookupInput = document.querySelector<HTMLInputElement>("#lookup-address")!;
+lookup.noValidate = true;
 lookup.onsubmit = (event) => {
   event.preventDefault();
   const address = lookupInput.value.trim();
-  if (!isAddress(address)) return status("Enter a valid Solana address.", true);
-  openLive(address);
+  if (!address) {
+    lookupInput.focus();
+    return status("Paste a wallet address to check it.");
+  }
+  if (!isAddress(address))
+    return status(
+      "That isn't a Solana address. A wallet or token account address is 32 to 44 letters and numbers.",
+      true,
+    );
+  checkWallet(address);
 };
 select.onchange = selectScenario;
 document.querySelector<HTMLButtonElement>("#scan-tab")!.onclick = () => setMode("scan");
@@ -2977,6 +3155,9 @@ try {
     select.value = String(live);
     selectScenario();
     input.value = linked;
+    lookupInput.value = linked;
+    routed = linked;
+    rememberCheck(linked);
     setMode("scan", true);
   } else if (live >= 0) {
     select.value = String(live);
@@ -2994,13 +3175,17 @@ try {
   if (control?.network === "localnet") void watch();
   // The public console has no drawer to feed, so it doesn't poll for recent approvals.
   if (!document.body.classList.contains("public")) void watchMainnet();
-  // A wallet or plan link pasted into an open console opens like a fresh one.
-  addEventListener("hashchange", () => {
+  refreshRecent();
+  // A pasted link, Back and Forward all open the address the URL names, or the first screen.
+  const route = () => {
     const next = decodeURIComponent(location.hash.slice(1));
-    if (!isAddress(next) || !document.body.classList.contains("public")) return;
-    input.value = next;
-    setMode("scan", true);
-  });
+    if (next === routed || !document.body.classList.contains("public")) return;
+    routed = next;
+    if (isAddress(next)) checkWallet(next, false);
+    else home();
+  };
+  addEventListener("hashchange", route);
+  addEventListener("popstate", route);
 } catch (error) {
   status(error instanceof Error ? error.message : "Observations are unavailable.", true);
 }

@@ -459,3 +459,56 @@ export function exposure(limit: bigint | undefined, balance: bigint, token?: Tok
   if (limit >= balance) return `All ${amount(balance, token)} here now`;
   return `${amount(limit, token)} of the ${amount(balance, token)} here now`;
 }
+
+/// Where a wallet check left things, as counts the next steps are chosen from.
+export interface WalletState {
+  total: number;
+  /// Approvals the owner can remove here, now or once the wallet is connected.
+  removable: number;
+  unlimitedRemovable: number;
+  /// Shown as the network reports them; Velon can't remove these yet.
+  reported: number;
+  /// Subscriptions still running, which the program lets no one remove yet.
+  running: number;
+  connected: boolean;
+  owner: boolean;
+  mainnet: boolean;
+  unread: boolean;
+}
+
+/// What to do after a wallet check, most useful first and never more than three.
+export function nextSteps(state: WalletState): string[] {
+  const steps: string[] = [];
+  if (state.unread)
+    steps.push("Check again. Velon couldn't read everything this time, and a second look usually can.");
+  if (state.removable && !state.connected)
+    steps.push(
+      "Connect this wallet. Velon only ever asks it to sign removals, and a removal moves no tokens.",
+      `Remove the ones you don't use${state.unlimitedRemovable ? `, starting with the ${state.unlimitedRemovable === 1 ? "one" : state.unlimitedRemovable} with no limit` : ""}. Each is one signature${state.mainnet ? " and about 0.000015 SOL in fees" : ""}.`,
+    );
+  else if (state.removable && !state.owner)
+    steps.push(
+      "Only this wallet's owner can remove these. Send them this page's link, or connect the owner's wallet.",
+    );
+  else if (state.removable)
+    steps.push(
+      state.unlimitedRemovable > 1
+        ? `Review the ${state.unlimitedRemovable} with no limit, one at a time. You confirm each one in your wallet, and Cancel keeps it.`
+        : "Choose Remove access on one you don't use. You confirm it in your wallet, and Cancel keeps it.",
+    );
+  if (state.removable && (!state.connected || state.owner))
+    steps.push(
+      "After each removal is final, Velon reads the chain again to prove it and keeps a receipt in this browser.",
+    );
+  if (state.running)
+    steps.push(
+      "Velon can't remove a subscription or payment approval that is still running. A subscription can be removed here once it is cancelled and its paid period has ended.",
+    );
+  if (state.reported)
+    steps.push(
+      `Velon can't remove ${state.reported === 1 ? "the one" : `the ${state.reported}`} shown as the network reports yet. Details shows who holds ${state.reported === 1 ? "it" : "each one"}.`,
+    );
+  if (!state.total && !state.unread)
+    steps.push("Nothing to do. Check again after you approve a new app, or check another wallet.");
+  return steps.slice(0, 3);
+}

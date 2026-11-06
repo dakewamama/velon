@@ -6,6 +6,7 @@ import {
   assetMint,
   decimal,
   exposure,
+  nextSteps,
   GLOSSARY,
   HISTORICAL,
   reported,
@@ -430,4 +431,47 @@ test("exposure sets an approval against what its account holds now", () => {
   expect(exposure(UNLIMITED, 5_000_000n, { symbol: "USDC", verified: false, decimals: 6 })).toBe(
     "All 5 of this token here now, and anything sent later",
   );
+});
+
+const quiet = {
+  total: 0,
+  removable: 0,
+  unlimitedRemovable: 0,
+  reported: 0,
+  running: 0,
+  connected: false,
+  owner: false,
+  mainnet: true,
+  unread: false,
+};
+
+test("next steps say what to do after a check, at most three", () => {
+  expect(nextSteps(quiet)).toEqual([
+    "Nothing to do. Check again after you approve a new app, or check another wallet.",
+  ]);
+  const exposed = { ...quiet, total: 5, removable: 4, unlimitedRemovable: 3, reported: 1 };
+  const looking = nextSteps(exposed);
+  expect(looking).toHaveLength(3);
+  expect(looking[0]).toStartWith("Connect this wallet.");
+  expect(looking[1]).toBe(
+    "Remove the ones you don't use, starting with the 3 with no limit. Each is one signature and about 0.000015 SOL in fees.",
+  );
+  expect(looking[2]).toContain("receipt");
+  expect(nextSteps({ ...exposed, connected: true })).toEqual([
+    "Only this wallet's owner can remove these. Send them this page's link, or connect the owner's wallet.",
+    "Velon can't remove the one shown as the network reports yet. Details shows who holds it.",
+  ]);
+  expect(nextSteps({ ...exposed, connected: true, owner: true })[0]).toStartWith(
+    "Review the 3 with no limit",
+  );
+  expect(nextSteps({ ...exposed, connected: true, owner: true, unlimitedRemovable: 1 })[0]).toStartWith(
+    "Choose Remove access",
+  );
+  expect(nextSteps({ ...quiet, total: 1, running: 1 })).toEqual([
+    "Velon can't remove a subscription or payment approval that is still running. A subscription can be removed here once it is cancelled and its paid period has ended.",
+  ]);
+  // A partial read says so first, and never claims there is nothing to do.
+  expect(nextSteps({ ...quiet, unread: true })[0]).toStartWith("Check again.");
+  expect(nextSteps({ ...quiet, unread: true })).toHaveLength(1);
+  expect(nextSteps({ ...exposed, mainnet: false })[1]).toEndWith("Each is one signature.");
 });

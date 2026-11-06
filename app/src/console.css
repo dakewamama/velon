@@ -257,6 +257,13 @@ pre {
   width: 12px;
   height: 12px;
 }
+.header-links .badge {
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  color: var(--t3);
+  cursor: default;
+}
 .tag {
   padding: 2px 8px;
   border-radius: 6px;
@@ -440,10 +447,10 @@ pre {
 .first-screen .lookup-title {
   display: block;
   margin-bottom: 18px;
-  font-size: clamp(34px, 5.4vw, 56px);
-  font-weight: 650;
-  line-height: 1.04;
-  letter-spacing: -0.035em;
+  font-size: clamp(36px, 5.8vw, 64px);
+  font-weight: 600;
+  line-height: 1.02;
+  letter-spacing: -0.04em;
 }
 .first-screen .lookup-title em {
   color: var(--mint);
@@ -477,34 +484,6 @@ pre {
   margin-bottom: 22px;
   color: var(--t3);
   font-size: 14px;
-}
-.start .promises {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px 22px;
-  margin: 26px 0 30px;
-  padding: 0;
-  list-style: none;
-  color: var(--t2);
-  font-size: 13.5px;
-}
-.start .promises li::before {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin: 0 8px 2px 0;
-  border-radius: 50%;
-  background: var(--mint);
-  content: "";
-}
-.start .action-button {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--hair-2);
-  color: var(--t1);
-}
-.start .action-button:hover {
-  box-shadow: inset 0 0 0 1px var(--mint);
 }
 
 /* Tabs. */
@@ -598,7 +577,7 @@ pre {
 .wallet-summary h2 {
   max-width: 24ch;
   font-size: clamp(26px, 3.4vw, 36px);
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.1;
   letter-spacing: -0.03em;
 }
@@ -682,23 +661,43 @@ pre {
   justify-self: start;
   margin-top: 4px;
 }
+/* The bar's legend: a dot in the bar's colour, the count, and what it counts. */
 .stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 2px 0 0;
+  gap: 6px 20px;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 .stats li {
   display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 5px 12px;
-  border: 1px solid var(--hair-2);
-  border-radius: 999px;
+  align-items: center;
+  gap: 7px;
   color: var(--t2);
   font-size: 13px;
+}
+.stats li::before {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--t3);
+  content: "";
+}
+.stats .risk::before {
+  background: var(--coral);
+}
+.stats .limited::before {
+  background: var(--amber);
+}
+.stats .sub::before {
+  background: var(--violet);
+}
+.stats .ok::before {
+  background: var(--mint);
+}
+.stats .plain::before {
+  background: repeating-linear-gradient(135deg, var(--t3) 0 2px, transparent 2px 4px);
 }
 .stats strong {
   color: var(--t1);
@@ -1279,21 +1278,15 @@ pre {
 }
 
 /* While the chain is read: every account listed, each resolving as its batch returns. */
-.approvals-summary {
-  margin: 0;
-  color: var(--t2);
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-}
 .checking {
   display: grid;
+  max-height: 340px;
   margin: 0;
-  padding: 4px 18px;
-  overflow: hidden;
-  border: 1px solid var(--hair);
-  border-radius: var(--r-l);
-  background: var(--s1);
+  padding: 0 18px;
+  overflow-y: auto;
+  border-top: 1px solid var(--hair);
   list-style: none;
+  scrollbar-width: thin;
 }
 .checking li {
   display: grid;
@@ -1308,11 +1301,18 @@ pre {
   border-bottom: 0;
 }
 .checking-token {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   overflow: hidden;
   color: var(--t1);
   font-weight: 550;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.checking-token .unverified {
+  color: var(--t3);
+  font-size: 11.5px;
+  font-weight: 450;
 }
 .checking-who {
   color: var(--t3);
@@ -1334,6 +1334,9 @@ pre {
 }
 .checking .pending .checking-state {
   animation: breathe 1.4s ease-in-out infinite;
+}
+.checking .pending .checking-state::after {
+  content: "…";
 }
 .checking .verified .checking-state {
   background: var(--mint-wash);
@@ -2347,6 +2350,411 @@ input:focus {
   .console:not(.is-live):not(.public) .app {
     grid-template-columns: minmax(0, 1fr);
     width: calc(100% - 32px);
+  }
+}
+
+/* ---- The calm layer: progress, next steps, the journey, and the finish. ---- */
+
+/* A fine grain over the background, under every surface. */
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");
+  opacity: 0.05;
+  pointer-events: none;
+  content: "";
+}
+
+/* The public console's bar floats, inset from the edges. */
+.public .topbar {
+  top: 12px;
+  width: min(1180px, 100% - 24px);
+  height: 58px;
+  margin: 12px auto 0;
+  padding: 0 10px 0 16px;
+  border: 1px solid var(--hair);
+  border-radius: 18px;
+  background: rgb(8 24 19 / 70%);
+  box-shadow: 0 20px 40px -24px rgb(0 0 0 / 60%);
+}
+/* One bright button per screen: in the bar, connecting stays quiet. */
+.public #connect-wallet {
+  min-height: 38px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--hair-2);
+  color: var(--t1);
+}
+.public #connect-wallet:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 1px var(--mint);
+}
+
+/* A click that changes nothing else still answers, on the control itself. */
+[data-tip] {
+  position: relative;
+}
+[data-tip]::after {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  z-index: 5;
+  padding: 4px 9px;
+  border: 1px solid var(--hair-2);
+  border-radius: 8px;
+  background: var(--s3);
+  color: var(--t1);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  content: attr(data-tip);
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: tip-in 160ms var(--ease) both;
+}
+@keyframes tip-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+}
+
+/* The field forgets nothing visible: suggestions come from recent checks, without an arrow. */
+.lookup-row input::-webkit-calendar-picker-indicator {
+  display: none !important;
+}
+/* While a check runs, its button says so. */
+.console:has(.progress-card[aria-busy="true"]) .lookup-row button::before {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgb(4 36 26 / 30%);
+  border-top-color: var(--mint-ink);
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+  content: "";
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A check in progress: where it is, how long it has taken, and that nothing is asked of you. */
+.progress-card {
+  display: grid;
+  gap: 16px;
+  padding: 26px 0 0;
+  overflow: hidden;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-xl);
+  background: linear-gradient(180deg, var(--s2), var(--s1));
+  animation: rise 360ms var(--ease) both;
+}
+.progress-card > :not(.progress-rows) {
+  margin: 0 28px;
+}
+.progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.progress-head h2 {
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+.elapsed {
+  color: var(--t3);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.meter {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--s3);
+}
+.meter span {
+  display: block;
+  width: 4%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgb(63 224 165 / 55%), var(--mint));
+  transition: width 600ms var(--ease);
+}
+.progress-steps {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+.progress-steps li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--t3);
+  font-size: 14px;
+  counter-increment: step;
+}
+.progress-steps li::before {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--hair-2);
+  border-radius: 50%;
+  font-family: var(--mono);
+  font-size: 11px;
+  content: counter(step);
+}
+.progress-steps .now {
+  color: var(--t1);
+}
+.progress-steps .now::before {
+  border-color: var(--mint);
+  color: var(--mint);
+  animation: breathe 1.4s ease-in-out infinite;
+}
+.progress-steps .done {
+  color: var(--t2);
+}
+.progress-steps .done::before {
+  border-color: transparent;
+  background: var(--mint-wash);
+  color: var(--mint);
+  content: "✓";
+}
+.step-note {
+  color: var(--mint);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.progress-card .calm {
+  color: var(--t3);
+  font-size: 13px;
+}
+.progress-rows:empty {
+  display: none;
+}
+.progress-card:has(.progress-rows:empty) {
+  padding-bottom: 24px;
+}
+
+/* What to do next: numbered, in the hero, ending in the ways to look again. */
+.next {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 20px;
+  border-top: 1px solid var(--hair);
+}
+.eyebrow {
+  color: var(--t3);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.next-steps {
+  display: grid;
+  gap: 8px;
+  max-width: 72ch;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: next;
+}
+.next-steps li {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  color: var(--t1);
+  font-size: 14.5px;
+  counter-increment: next;
+}
+.next-steps li::before {
+  color: var(--mint);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.9;
+  content: "0" counter(next);
+}
+/* Outside the hero, the same panel stands as its own card. */
+#results > .next {
+  margin-top: 0;
+  padding: 22px 26px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-xl);
+  background: var(--s1);
+}
+.next-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 22px;
+  margin-top: 4px;
+}
+.next-actions .link-button svg {
+  width: 14px;
+  height: 14px;
+}
+.wallet-summary .next .action-button {
+  margin: 0 4px 0 0;
+}
+
+/* The first screen: one line, recent checks, then the whole journey in three steps. */
+.start .start-lead {
+  max-width: 54ch;
+  margin: 0 auto;
+  color: var(--t2);
+  font-size: 16px;
+}
+.recent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 10px;
+  margin: 22px auto 0;
+}
+.recent .eyebrow {
+  margin-right: 4px;
+}
+.recent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 6px;
+  border: 1px solid var(--hair-2);
+  border-radius: 999px;
+  background: var(--s1);
+  color: var(--t1);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  transition:
+    border-color 160ms,
+    background 160ms;
+}
+.recent-chip:hover {
+  border-color: var(--mint);
+  background: var(--s2);
+}
+.recent .link-button {
+  margin-left: 6px;
+  color: var(--t3);
+  font-size: 12.5px;
+}
+.how {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 56px 0 0;
+  padding: 0;
+  border-top: 1px dashed var(--hair-2);
+  border-bottom: 1px dashed var(--hair-2);
+  list-style: none;
+  text-align: left;
+  counter-reset: how;
+}
+.how li {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 26px 26px 30px;
+  counter-increment: how;
+}
+.how li + li {
+  border-left: 1px dashed var(--hair-2);
+}
+/* Blueprint nodes where the frame's lines meet. */
+.how li::after {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--t3);
+  content: "";
+}
+.how li:first-child::after {
+  display: none;
+}
+.how li::before {
+  color: var(--mint);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  content: "0" counter(how);
+}
+.how strong {
+  color: var(--t1);
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.how span {
+  color: var(--t2);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.how .link-button {
+  justify-self: start;
+  margin-top: 6px;
+}
+
+/* Results arrive in order, softly. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(8px);
+  }
+}
+#results > :is(.wallet-summary, .approval-group, .holdings, .wallet-footer, .notice) {
+  animation: rise 480ms var(--ease) both;
+}
+#results > :nth-child(2) {
+  animation-delay: 60ms;
+}
+#results > :nth-child(3) {
+  animation-delay: 120ms;
+}
+#results > :nth-child(n + 4) {
+  animation-delay: 180ms;
+}
+#action-result .next-actions {
+  margin-top: 2px;
+}
+
+@media (max-width: 760px) {
+  .how {
+    grid-template-columns: 1fr;
+  }
+  .how li + li {
+    border-top: 1px dashed var(--hair-2);
+    border-left: 0;
+  }
+  .how li::after {
+    display: none;
+  }
+  .progress-card > :not(.progress-rows) {
+    margin: 0 18px;
+  }
+  .public .topbar {
+    width: calc(100% - 16px);
+    height: 56px;
+    margin-top: 8px;
+    padding: 0 8px 0 12px;
+    flex-wrap: nowrap;
+  }
+  /* On a phone the bar keeps the brand and the wallet; the first screen names the network. */
+  .public .header-links {
+    display: none;
   }
 }
 
