@@ -358,3 +358,27 @@ test("token names are looked up for at most 80 valid mints with the observe head
   expect((await post({ mints: Array(81).fill(mint) })).status).toBe(400);
   expect((await post({ mints: [mint] }, "revoke")).status).toBe(403);
 });
+
+test("a cancel takes the same path as a revoke, under its own action header only", async () => {
+  const cancelPath = revokePath.replace("/actions/revoke/", "/actions/cancel/");
+  const received: string[] = [];
+  const upstream = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(request) {
+      received.push(request.method, new URL(request.url).pathname);
+      return new Response("{}");
+    },
+  });
+  const server = createServer(String(upstream.url), [], 0);
+  servers.push(upstream, server);
+  const as = (action: string) => ({ method: "POST", headers: { "X-Velon-Action": action } });
+  // A revoke's header can't send a cancel, and an unknown action has no route.
+  expect((await fetch(new URL(cancelPath, server.url), as("revoke"))).status).toBe(403);
+  expect((await fetch(new URL(revokePath, server.url), as("cancel"))).status).toBe(403);
+  expect(
+    (await fetch(new URL(revokePath.replace("/revoke/", "/resume/"), server.url), as("resume"))).status,
+  ).toBe(404);
+  expect((await fetch(new URL(cancelPath, server.url), as("cancel"))).status).toBe(200);
+  expect(received).toEqual(["POST", cancelPath.slice(4)]);
+});

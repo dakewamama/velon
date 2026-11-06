@@ -60,8 +60,8 @@ function kind(method: string, path: string, rpc: boolean): Kind | undefined {
   if (rpc) return "rpc";
   if (method !== "POST") return undefined;
   if (path === "/api/test/account" || path === "/api/live/spl/approve") return "grant";
-  if (/\/actions\/revoke\/[^/]+\/verify$/.test(path)) return "verify";
-  if (/\/actions\/revoke\//.test(path)) return "revoke";
+  if (/\/actions\/(revoke|cancel)\/[^/]+\/verify$/.test(path)) return "verify";
+  if (/\/actions\/(revoke|cancel)\//.test(path)) return "revoke";
   // Each observation runs the runtime and reads the cluster; each wallet read lists its accounts.
   if (path === "/api/live/spl/observe") return "observe";
   if (

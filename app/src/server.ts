@@ -55,8 +55,11 @@ export function createServer(
           url.pathname,
         );
       // Simulation follows the scope: a retained snapshot leaves its finalized bank within a slot.
-      const simulate = /^\/api\/scopes\/[a-f0-9]{64}\/actions\/revoke\/([^/]+)$/.exec(url.pathname);
-      const verify = /^\/api\/snapshots\/[a-f0-9]{64}\/actions\/revoke\/([^/]+)\/verify$/.exec(url.pathname);
+      // A revoke or, for a running subscription, a cancel: the same simulate-then-verify path.
+      const simulate = /^\/api\/scopes\/[a-f0-9]{64}\/actions\/(revoke|cancel)\/([^/]+)$/.exec(url.pathname);
+      const verify = /^\/api\/snapshots\/[a-f0-9]{64}\/actions\/(revoke|cancel)\/([^/]+)\/verify$/.exec(
+        url.pathname,
+      );
       const action = simulate ?? verify;
       const receipt = /^\/api\/verifications\/revoke\/[a-f0-9]{64}$/.test(url.pathname);
       const scenariosPath = url.pathname === "/api/scenarios";
@@ -96,7 +99,7 @@ export function createServer(
           !relay &&
           !mainnet) ||
         (match?.[4] && !isAddress(match[4])) ||
-        (action && !isAddress(action[1]!))
+        (action && !isAddress(action[2]!))
       )
         return new Response("Not found", { status: 404 });
       const method =
@@ -145,7 +148,7 @@ export function createServer(
       if (discover) return discover();
       if (mainnet) return mainnet();
       // Cross-origin browser requests cannot supply this header without a CORS preflight.
-      const intent = action ? "revoke" : approve || fund ? "test" : "observe";
+      const intent = action ? action[1]! : approve || fund ? "test" : "observe";
       if (request.method === "POST" && request.headers.get("X-Velon-Action") !== intent)
         return new Response("Action header required", { status: 403 });
       if (approve)

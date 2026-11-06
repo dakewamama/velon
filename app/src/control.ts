@@ -58,7 +58,8 @@ export async function action(
     {
       method: "POST",
       headers: {
-        "X-Velon-Action": "revoke",
+        // The header names the action the path takes, so a page can't send one for the other.
+        "X-Velon-Action": /\/actions\/cancel\//.test(path) ? "cancel" : "revoke",
         ...(signedTransaction ? { "Content-Type": "application/json" } : {}),
       },
       body: signedTransaction ? JSON.stringify({ signed_transaction: signedTransaction }) : undefined,
@@ -82,6 +83,23 @@ export async function result(response: Response): Promise<Json> {
   return readJson(raw);
 }
 
+export type ActionKind = "revoke" | "cancel";
+
+/// What a cancel must change: the same grant, still active, now ending after the observation.
+function cancels(change: ObjectValue, grant: ObjectValue, observedAt: bigint): boolean {
+  if (change.kind !== "changed" || writeJson(change.before!) !== writeJson(grant)) return false;
+  const before = object(change.before);
+  const after = object(change.after);
+  const lifecycle = object(after.lifecycle);
+  const kept = ["id", "subject", "principal", "resource", "capability", "constraints", "authority_kind"];
+  return (
+    kept.every((key) => writeJson(after[key] ?? null) === writeJson(before[key] ?? null)) &&
+    lifecycle.kind === "active" &&
+    lifecycle.valid_until != null &&
+    integer(lifecycle.valid_until) > observedAt
+  );
+}
+
 export function reviewRevoke(
   value: Json,
   view: ObjectValue,
@@ -89,10 +107,27 @@ export function reviewRevoke(
   owner: string,
   control: Control,
 ) {
+  return reviewAction(value, view, grant, owner, control, "revoke");
+}
+
+export function reviewAction(
+  value: Json,
+  view: ObjectValue,
+  grant: ObjectValue,
+  owner: string,
+  control: Control,
+  kind: ActionKind,
+) {
   const simulation = object(value);
   const observation = object(simulation.observation);
   const changes = array(simulation.changes);
   const change = object(changes[0]);
+  const expected =
+    kind === "cancel"
+      ? simulation.kind === "cancel" && cancels(change, grant, integer(observation.unix_timestamp))
+      : (simulation.kind ?? "revoke") === "revoke" &&
+        change.kind === "removed" &&
+        writeJson(change.authorization!) === writeJson(grant);
   if (
     simulation.state_version !== view.state_version ||
     simulation.arm_schema_version !== "0.1" ||
@@ -103,8 +138,7 @@ export function reviewRevoke(
     (control.network === "devnet" && observation.cluster !== DEVNET_GENESIS) ||
     (control.network === "mainnet" && observation.cluster !== MAINNET_GENESIS) ||
     changes.length !== 1 ||
-    change.kind !== "removed" ||
-    writeJson(change.authorization!) !== writeJson(grant)
+    !expected
   )
     throw new Error("Simulation does not match the permission under review.");
   const nativeResponse = object(simulation.response);
@@ -132,6 +166,8 @@ export function reviewRevoke(
       lastValidBlockHeight: integer(lifetime.lastValidBlockHeight),
     },
     evidence: simulation,
+    // A cancel's reviewed end: the subscription can charge until then, never after.
+    endsAt: kind === "cancel" ? integer(object(object(change.after).lifecycle).valid_until) : undefined,
   };
 }
 
@@ -141,6 +177,20 @@ export function verifiedRevoke(
   stateVersion: string,
   grantId: string,
   signedTransaction: string,
+) {
+  return verifiedAction(value, latestValue, stateVersion, grantId, signedTransaction, "revoke");
+}
+
+/// A removal leaves the grant in neither reading; a cancel leaves it in both, ending exactly
+/// when it was reviewed to.
+export function verifiedAction(
+  value: Json,
+  latestValue: Json,
+  stateVersion: string,
+  grantId: string,
+  signedTransaction: string,
+  kind: ActionKind,
+  endsAt?: bigint,
 ) {
   const verification = object(value);
   const receipt = object(verification.transaction);
@@ -163,9 +213,22 @@ export function verifiedRevoke(
     latest.id !== observed.id ||
     slot < 0n ||
     integer(observation.slot) < slot ||
-    grants(observed.projection).some((grant) => grant.id === grantId) ||
-    grants(latest.projection).some((grant) => grant.id === grantId)
+    (verification.kind ?? "revoke") !== kind ||
+    !settled(observed.projection, grantId, kind, endsAt) ||
+    !settled(latest.projection, grantId, kind, endsAt)
   )
     throw new Error("Finalized verification and current permissions do not agree.");
   return { id, slot, observationSlot: integer(observation.slot) };
+}
+
+function settled(projection: Json | undefined, grantId: string, kind: ActionKind, endsAt?: bigint): boolean {
+  const found = grants(projection).find((grant) => grant.id === grantId);
+  if (kind === "revoke") return found === undefined;
+  const lifecycle = object(found?.lifecycle);
+  return (
+    endsAt !== undefined &&
+    lifecycle.kind === "active" &&
+    lifecycle.valid_until != null &&
+    integer(lifecycle.valid_until) === endsAt
+  );
 }

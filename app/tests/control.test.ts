@@ -1,6 +1,13 @@
 import { expect, test } from "bun:test";
-import { DEVNET_GENESIS, otherConsoles, reviewRevoke, verifiedRevoke } from "../src/control.ts";
-import { object, type ObjectValue } from "../src/wire.ts";
+import {
+  DEVNET_GENESIS,
+  otherConsoles,
+  reviewAction,
+  reviewRevoke,
+  verifiedAction,
+  verifiedRevoke,
+} from "../src/control.ts";
+import { array, object, type ObjectValue } from "../src/wire.ts";
 import fixture from "./fixtures/spl-control.json";
 
 const devnet = { cluster: DEVNET_GENESIS, rpcUrl: "http://127.0.0.1:1", network: "devnet" } as const;
@@ -133,4 +140,74 @@ test("other consoles are read from PUBLIC_NETWORKS and never include this one or
     "devnet=",
   ])
     expect(otherConsoles(bad, "mainnet")).toEqual([]);
+});
+
+// A cancel keeps the grant and only sets its end, an hour after the reviewed observation.
+const NOW = 1_800_000_000;
+function cancelInput() {
+  const { grant, view, simulation } = input();
+  const observation = { ...view.observation, unix_timestamp: NOW };
+  const after = { ...grant, lifecycle: { kind: "active", valid_from: null, valid_until: NOW + 3600 } };
+  const cancel = {
+    ...simulation,
+    kind: "cancel",
+    observation,
+    changes: [{ kind: "changed", before: grant, after }],
+  };
+  return { grant, view: { ...view, observation }, cancel, simulation, after };
+}
+
+test("a cancel review binds the same grant, ending after the observation, and nothing else", () => {
+  const { grant, view, cancel, simulation } = cancelInput();
+  const owner = fixture.signing.owner;
+  expect(reviewAction(cancel, view, grant, owner, devnet, "cancel").endsAt).toBe(BigInt(NOW + 3600));
+  // A revoke's simulation is never reviewed as a cancel, nor a cancel as a revoke.
+  expect(() => reviewAction(simulation, view, grant, owner, devnet, "cancel")).toThrow();
+  expect(() => reviewAction(cancel, view, grant, owner, devnet, "revoke")).toThrow();
+  const after = (s: ObjectValue) => object(object(array(s.changes)[0]).after);
+  for (const mutate of [
+    (s: ObjectValue) => (object(after(s).lifecycle).valid_until = NOW),
+    (s: ObjectValue) => (object(after(s).lifecycle).valid_until = null),
+    (s: ObjectValue) => (object(after(s).lifecycle).kind = "revoked"),
+    (s: ObjectValue) => (after(s).principal = { kind: "identity", value: "someone-else" }),
+    (s: ObjectValue) => (after(s).constraints = { kind: "unlimited" }),
+    (s: ObjectValue) => (object(array(s.changes)[0]).before = { ...grant, id: "other" }),
+    (s: ObjectValue) => delete s.kind,
+  ]) {
+    const changed = structuredClone(cancel) as ObjectValue;
+    mutate(changed);
+    expect(() => reviewAction(changed, view, grant, owner, devnet, "cancel")).toThrow();
+  }
+});
+
+test("a verified cancel keeps the grant in both readings, ending exactly as reviewed", () => {
+  const { grant, view, latest, verification } = finalized();
+  const { after } = cancelInput();
+  const kept = { ...latest, projection: { status: "compiled", authorizations: [after] } };
+  const cancelled = { ...verification, kind: "cancel", observation: kept };
+  const end = BigInt(NOW + 3600);
+  const verify = (v: ObjectValue, current: ObjectValue, endsAt: bigint | undefined) =>
+    verifiedAction(v, current, view.state_version, String(grant.id), "signed-exactly", "cancel", endsAt);
+  expect(verify(cancelled, kept, end).id).toBe("c".repeat(64));
+  const later = {
+    ...kept,
+    projection: {
+      status: "compiled",
+      authorizations: [
+        { ...after, lifecycle: { kind: "active", valid_from: null, valid_until: NOW + 7200 } },
+      ],
+    },
+  };
+  for (const [v, current, endsAt] of [
+    [{ ...cancelled, observation: latest }, latest, end],
+    [cancelled, latest, end],
+    [{ ...cancelled, observation: later }, later, end],
+    [{ ...cancelled, kind: undefined }, kept, end],
+    [cancelled, kept, undefined],
+  ] as [ObjectValue, ObjectValue, bigint | undefined][])
+    expect(() => verify(v, current, endsAt)).toThrow();
+  // A revoke's verification is never read as a cancel's.
+  expect(() =>
+    verifiedRevoke(cancelled, kept, view.state_version, String(grant.id), "signed-exactly"),
+  ).toThrow();
 });

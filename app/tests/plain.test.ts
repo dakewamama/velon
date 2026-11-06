@@ -468,7 +468,13 @@ test("next steps say what to do after a check, at most three", () => {
     "Choose Remove access",
   );
   expect(nextSteps({ ...quiet, total: 1, running: 1 })).toEqual([
-    "Velon can't remove a subscription that is still running. It can be removed here once it is cancelled and its paid period has ended.",
+    "Connect this wallet to cancel a subscription you don't want. It stops charging when the period already paid for ends, and can be removed here after that.",
+  ]);
+  expect(nextSteps({ ...quiet, total: 1, running: 1, connected: true, owner: true })[0]).toStartWith(
+    "Choose Cancel subscription",
+  );
+  expect(nextSteps({ ...quiet, total: 1, running: 1, connected: true })).toEqual([
+    "Only this wallet's owner can cancel its subscriptions.",
   ]);
   // A partial read says so first, and never claims there is nothing to do.
   expect(nextSteps({ ...quiet, unread: true })[0]).toStartWith("Check again.");

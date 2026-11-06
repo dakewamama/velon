@@ -17,6 +17,9 @@ import { DEVNET_GENESIS } from "../../src/control.ts";
 import { short } from "../../src/wire.ts";
 
 const SUBSCRIPTIONS = "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44";
+const EVENT_AUTHORITY = "3Hnj4BYoDgtpBuqXfiy7Y8cNa3jXaNd4oqgSXBzkMcH7";
+// A subscription's target names its plan; a payment approval's has none.
+const PLAN = getAddressDecoder().decode(new Uint8Array(32).fill(9));
 // Technical and derived grants compiled by the SDK from the Mollusk-executed recurring subscription
 // (sdk/tests/fixtures/subscriptions-recurring.json). Node's JSON.rawJSON, not yet in TypeScript's
 // lib, keeps u64 amounts above 2^53 exact.
@@ -79,6 +82,21 @@ async function browserProvider(
       signatures: { [owner]: null },
     }),
   ).toString("base64");
+  // The subscriber-signed CancelSubscription: plan, subscription, event authority, program.
+  const cancelling = Buffer.from(
+    getTransactionEncoder().encode({
+      messageBytes: getCompiledTransactionMessageEncoder().encode({
+        ...message,
+        header: { numSignerAccounts: 1, numReadonlySignerAccounts: 0, numReadonlyNonSignerAccounts: 3 },
+        staticAccounts: [owner, delegation, PLAN, EVENT_AUTHORITY, SUBSCRIPTIONS] as Address[],
+        instructions: [
+          { programAddressIndex: 4, accountIndices: [0, 2, 1, 3, 4], data: new Uint8Array([12]) },
+        ],
+      }) as TransactionMessageBytes,
+      signatures: { [owner]: null },
+    }),
+  ).toString("base64");
+  const reviewedBytes = mode === "cancel" ? cancelling : signing;
   const scope = "a".repeat(64);
   const beforeId = fixture.view.state_version;
   const afterId = "b".repeat(64);
@@ -99,6 +117,9 @@ async function browserProvider(
   const afterObservation = { ...observation, slot: 12 };
   const coverage = { complete: false, accounts: [], targets: [] };
   const current = () => (changed ? { ...grant, usage: { ...grant.usage, remaining: 24 } } : grant);
+  // A cancelled subscription keeps its grant, ending an hour after the reviewed observation.
+  const cancelled = { ...grant, lifecycle: { ...grant.lifecycle, valid_until: ended + 3600 } };
+  const settled = () => (mode === "cancel" ? [cancelled] : []);
   const mint = spl.constraints.value.asset.id;
   const holder = {
     ...spl,
@@ -120,7 +141,7 @@ async function browserProvider(
     arm_schema_version: "0.1",
     projection: {
       status: "compiled",
-      authorizations: [...kept, ...(finalized ? [] : [current()])].map((authorization) => ({
+      authorizations: [...kept, ...(finalized ? settled() : [current()])].map((authorization) => ({
         authorization,
         availability: "conditional",
       })),
@@ -138,12 +159,15 @@ async function browserProvider(
               authority: bytes(parent.principal.value),
               source: bytes(grant.resource.id),
               mint: bytes(grant.constraints.value.asset.id),
-              plan: null,
+              plan: bytes(PLAN),
             },
           ]
         : [],
     },
-    projection: { status: "compiled", authorizations: [...kept, ...(finalized ? [] : [grant])] },
+    projection: {
+      status: "compiled",
+      authorizations: [...kept, ...(finalized ? settled() : [grant])],
+    },
   });
   await page.addInitScript(
     ({ owner, pubkey, secret, mode }) => {
@@ -293,7 +317,7 @@ async function browserProvider(
       signed = request.params[0];
       const submitted = decoder.decode(new Uint8Array(Buffer.from(signed, "base64")));
       expect(submitted.messageBytes).toEqual(
-        decoder.decode(new Uint8Array(Buffer.from(signing, "base64"))).messageBytes,
+        decoder.decode(new Uint8Array(Buffer.from(reviewedBytes, "base64"))).messageBytes,
       );
       // A lost response leaves submission unknown; only finalized verification can settle it.
       if (mode === "unknown") return route.abort("connectionreset");
@@ -338,6 +362,44 @@ async function browserProvider(
         state_version: beforeId,
         transaction: { slot: 11, transaction: [signed, "base64"], meta: { err: null } },
         observation: after,
+      },
+    });
+  });
+  await page.route(`**/api/scopes/${scope}/actions/cancel/${key}`, (route) => {
+    expect(route.request().headers()["x-velon-action"]).toBe("cancel");
+    return route.fulfill({
+      json: {
+        kind: "cancel",
+        state_version: beforeId,
+        arm_schema_version: "0.1",
+        observation,
+        changes: [{ kind: "changed", before: current(), after: cancelled }],
+        signing_transaction: cancelling,
+        response: {
+          context: { slot: 10 },
+          value: {
+            err: null,
+            replacementBlockhash: { blockhash: fixture.signing.blockhash, lastValidBlockHeight: 100 },
+          },
+        },
+      },
+    });
+  });
+  await page.route("**/api/snapshots/*/actions/cancel/*/verify", (route) => {
+    polls++;
+    expect(new URL(route.request().url()).pathname).toBe(
+      `/api/snapshots/${beforeId}/actions/cancel/${key}/verify`,
+    );
+    expect(route.request().postDataJSON()).toEqual({ signed_transaction: signed });
+    if (polls === 1) return route.fulfill({ status: 404, json: { error: "not finalized" } });
+    finalized = true;
+    return route.fulfill({
+      json: {
+        kind: "cancel",
+        verification_id: "e".repeat(64),
+        state_version: beforeId,
+        transaction: { slot: 11, transaction: [signed, "base64"], meta: { err: null } },
+        observation: record(),
       },
     });
   });
@@ -472,6 +534,28 @@ test("an active subscription and its technical approval offer no revoke", async 
   await expect(card(page, technical.id)).toBeVisible();
   await expect(page.getByRole("button", { name: "Remove access", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /remove access/i })).toHaveCount(0);
+});
+
+test("a running subscription is cancelled, proved, and keeps its grant only until the paid period ends", async ({
+  page,
+}) => {
+  const provider = await browserProvider(page, "cancel", "active");
+  await page.goto("/app");
+  await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+  await expect(page.getByRole("button", { name: /remove access/i })).toHaveCount(0);
+  await card(page, derived.id).getByRole("button", { name: "Cancel subscription", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "You are cancelling" })).toBeInViewport();
+  await expect(page.getByRole("dialog")).toContainText("It can still charge until");
+  await expect(page.getByRole("dialog")).toContainText("After that it can't charge again");
+  await page.getByRole("button", { name: "Confirm in wallet" }).click();
+  await expect(page.getByRole("heading", { name: "Cancelled and verified", exact: true })).toBeVisible();
+  await expect(page.locator("#action-result")).toContainText("stops charging after");
+  await expect(page.locator("#action-result")).toContainText("e".repeat(64));
+  // The subscription stays listed, now with its end; the receipt says what it proves.
+  await expect(card(page, derived.id)).toHaveCount(1);
+  expect(provider.counts()).toEqual({ sends: 1, polls: 2, observes: 1 });
+  await page.getByRole("button", { name: "See receipts" }).click();
+  await expect(page.getByRole("heading", { name: "Subscription cancelled on devnet" })).toBeVisible();
 });
 
 test("a subscription simulation that changes the grant instead of removing it is refused", async ({

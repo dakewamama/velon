@@ -4,8 +4,9 @@ import {
   action,
   otherConsoles,
   result,
-  reviewRevoke,
-  verifiedRevoke,
+  reviewAction,
+  verifiedAction,
+  type ActionKind,
   type Control,
   type ActionState,
 } from "./control.ts";
@@ -512,7 +513,7 @@ const planNames = new Map<string, string>();
 // approval can be removed by its owner at any time; a subscription only once it has ended.
 const delegationKinds = new Map<string, string>();
 const paymentApproval = (grant: ObjectValue) =>
-  ["fixed", "recurring"].includes(delegationKinds.get(revokeKey(grant) ?? "") ?? "");
+  ["fixed", "recurring", "payment"].includes(delegationKinds.get(revokeKey(grant) ?? "") ?? "");
 
 // Numbers each card so its buttons can point at its own sentence and token.
 let cardCount = 0;
@@ -627,6 +628,7 @@ function card(
     object(grant.lifecycle).kind === "active" &&
     (protocol !== "subscriptions" || ended(grant, view) || paymentApproval(grant));
   if (scope && removable) row.dataset.removable = owner;
+  if (scope && cancellable(grant, view)) row.dataset.cancellable = "";
   if (
     control &&
     scope &&
@@ -652,6 +654,22 @@ function card(
     };
     revocable.set(row, start);
     actions.prepend(revoke);
+  } else if (
+    control &&
+    scope &&
+    connected &&
+    object(view.observation).origin === "finalized" &&
+    cancellable(grant, view) &&
+    object(grant.subject).value === connected.account.address
+  ) {
+    // A running subscription is cancelled first: it keeps charging only for the period already paid.
+    const cancel = labelled(node("button", "Cancel subscription", "action-button"), "revoke");
+    cancel.setAttribute("aria-describedby", about);
+    cancel.onclick = () => {
+      queue = [];
+      void prepare(grant, scope, "cancel");
+    };
+    actions.prepend(cancel);
   } else if (scope && grant.capability === "spend" && !list) {
     // A wallet's list says this once, above its rows.
     if (!connected) {
@@ -672,6 +690,21 @@ const SUBSCRIPTIONS = "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44";
 // A subscription grant whose cancellation has taken effect at this observation. Only then does the
 // program close its delegation; an active subscription can only be cancelled, and the technical
 // approval it rests on is direct and never closed here.
+// A subscription still running, which its subscriber can cancel; the runtime refuses one that is
+// already cancelled, and only it can tell that from a plan with an end date.
+function cancellable(grant: ObjectValue, view: ObjectValue): boolean {
+  return (
+    text(object(grant.native_context).protocol) === "subscriptions" &&
+    object(grant.authority_kind).kind === "derived" &&
+    grant.observability === "exact" &&
+    grant.capability === "spend" &&
+    object(grant.lifecycle).kind === "active" &&
+    object(grant.subject).kind === "identity" &&
+    !ended(grant, view) &&
+    delegationKinds.get(revokeKey(grant) ?? "") === "subscription"
+  );
+}
+
 function ended(grant: ObjectValue, view: ObjectValue): boolean {
   const lifecycle = object(grant.lifecycle);
   const now = object(view.observation).unix_timestamp;
@@ -940,6 +973,8 @@ async function scan(historical = false, refresh = false) {
           .find((target) => target.kind === "subscription" && publicKey(target.delegation) === address);
         if (!target) throw new Error("This Subscriptions account is not a subscription delegation.");
         drawsFrom.set(address, publicKey(target.source));
+        // Only a subscription has a plan; a fixed or recurring payment approval has none.
+        delegationKinds.set(address, target.plan == null ? "payment" : "subscription");
       }
     }
     badge(live ? network().label : "Recorded native evidence", live);
@@ -2007,9 +2042,15 @@ async function scanWallet(
     );
     const removable = cards.filter((row) => row.dataset.removable);
     const batch = cards.filter((row) => row.dataset.amount === "∞" && revocable.has(row));
-    if (!connected && removable.length) {
+    const cancelling = cards.some((row) => row.dataset.cancellable !== undefined);
+    if (!connected && (removable.length || cancelling)) {
+      const verb = removable.length ? "remove" : "cancel";
       const start = labelled(
-        node("button", yours ? "Connect wallet to remove" : "Connect this wallet to remove", "action-button"),
+        node(
+          "button",
+          yours ? `Connect wallet to ${verb}` : `Connect this wallet to ${verb}`,
+          "action-button",
+        ),
         "wallet",
       );
       start.type = "button";
@@ -2059,7 +2100,7 @@ async function scanWallet(
             row.dataset.system === "subscriptions" &&
             row.classList.contains("derived") &&
             row.dataset.payment === undefined &&
-            !row.dataset.removable,
+            row.dataset.cancellable !== undefined,
         ).length,
         connected: connected !== undefined,
         owner: connected?.account.address === owner,
@@ -2268,7 +2309,15 @@ grantButton.onclick = async () => {
 };
 
 // Receipts of verified revokes, kept in this browser and replayable from the journal.
-type Receipt = { id: string; signature: string; slot: string; source: string; network: string; at: string };
+type Receipt = {
+  id: string;
+  signature: string;
+  slot: string;
+  source: string;
+  network: string;
+  at: string;
+  kind?: ActionKind;
+};
 const receipts = document.querySelector<HTMLElement>("#receipts")!;
 const kept = (): Receipt[] => {
   try {
@@ -2295,7 +2344,11 @@ document.querySelector<HTMLButtonElement>("#receipts-tab")!.onclick = () => {
   receipts.replaceChildren(node("h2", "Your receipts"));
   if (!list.length)
     receipts.append(
-      node("p", "Each time Velon verifies a removal in this browser, its receipt appears here.", "empty"),
+      node(
+        "p",
+        "Each time Velon verifies a removal or a cancellation in this browser, its receipt appears here.",
+        "empty",
+      ),
     );
   for (const receipt of list) {
     const row = node("article", "", "permission");
@@ -2320,10 +2373,12 @@ document.querySelector<HTMLButtonElement>("#receipts-tab")!.onclick = () => {
         if (!response.ok) throw new Error();
         const body = await response.text();
         outcome.textContent =
-          "Replayed without the chain: the removal and the cleared approval still check out.";
+          receipt.kind === "cancel"
+            ? "Replayed without the chain: the cancellation and the subscription's new end still check out."
+            : "Replayed without the chain: the removal and the cleared approval still check out.";
         const save = node("a", "Download evidence", "link-button");
         save.href = URL.createObjectURL(new Blob([body], { type: "application/json" }));
-        save.download = `velon-revoke-${receipt.id.slice(0, 12)}.json`;
+        save.download = `velon-${receipt.kind ?? "revoke"}-${receipt.id.slice(0, 12)}.json`;
         actions.append(save);
       } catch {
         outcome.textContent = "Velon couldn't replay this receipt right now. Try again.";
@@ -2336,7 +2391,7 @@ document.querySelector<HTMLButtonElement>("#receipts-tab")!.onclick = () => {
     row.append(
       node(
         "h3",
-        `Access removed on ${{ mainnet: "mainnet", devnet: "devnet" }[receipt.network] ?? "the test chain"}`,
+        `${receipt.kind === "cancel" ? "Subscription cancelled" : "Access removed"} on ${{ mainnet: "mainnet", devnet: "devnet" }[receipt.network] ?? "the test chain"}`,
       ),
       node("p", new Date(receipt.at).toLocaleString(), "remaining"),
       facts,
@@ -2357,6 +2412,8 @@ const STATES: Record<ActionState, string> = {
 };
 // Once the helper reaches for sendTransaction, only finalized verification can settle the outcome.
 let sendRequested = false;
+// The action in progress: a removal, or the cancel of a running subscription.
+let actionKind: ActionKind = "revoke";
 // Whatever view is on screen knows how to load itself again after a revoke.
 let reload: () => Promise<boolean | undefined> = () => scan();
 let progress = 0;
@@ -2468,7 +2525,12 @@ function setAction(state: ActionState, message: string) {
   actionState = state;
   stage.dataset.state = state.toLowerCase();
   actionResult.hidden = false;
-  const title = state === "FAILED" && sendRequested ? "Unconfirmed" : STATES[state];
+  const title =
+    state === "FAILED" && sendRequested
+      ? "Unconfirmed"
+      : state === "VERIFIED" && actionKind === "cancel"
+        ? "Cancelled and verified"
+        : STATES[state];
   // Progress through the revoke; a failure leaves the bar where it stopped.
   const reached = [
     "PREPARING",
@@ -2542,7 +2604,7 @@ const batchScopes = new Set<string>();
 // The most accounts the server accepts in one observation (observeBatch in server.ts).
 const observeBatch = 25;
 
-async function prepare(scanned: ObjectValue, scope: string) {
+async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "revoke") {
   if (
     !control ||
     !connected ||
@@ -2557,6 +2619,8 @@ async function prepare(scanned: ObjectValue, scope: string) {
   const source = text(object(scanned.resource).id);
   const subscription = text(object(scanned.native_context).protocol) === "subscriptions";
   const key = revokeKey(scanned);
+  const cancelling = kind === "cancel";
+  actionKind = kind;
   stage.dataset.target = text(scanned.id);
   reviewed = text(scanned.id);
   draw();
@@ -2573,7 +2637,7 @@ async function prepare(scanned: ObjectValue, scope: string) {
       });
       scope = text(object(await result(observed)).scope_id);
     }
-    const response = await action(`scopes/${scope}/actions/revoke/${key}`, signal);
+    const response = await action(`scopes/${scope}/actions/${kind}/${key}`, signal);
     if (response.status === 409)
       throw new Error("The finalized state moved during simulation. Nothing was signed; try again.");
     const simulated = await result(response);
@@ -2586,10 +2650,11 @@ async function prepare(scanned: ObjectValue, scope: string) {
     if (!grant || writeJson(semantic(grant)) !== writeJson(semantic(scanned)))
       throw new Error("This permission changed after the scan. Scan and review again.");
     const stateVersion = text(view.state_version);
-    const path = `snapshots/${stateVersion}/actions/revoke/${key}/verify`;
-    const prepared = reviewRevoke(simulated, view, grant, session.account.address, config);
+    const path = `snapshots/${stateVersion}/actions/${kind}/${key}/verify`;
+    const prepared = reviewAction(simulated, view, grant, session.account.address, config, kind);
+    const endsAt = prepared.endsAt === undefined ? undefined : when(prepared.endsAt);
     setAction("SIMULATED", "Review what your wallet will sign.");
-    const title = node("h2", "You are removing");
+    const title = node("h2", cancelling ? "You are cancelling" : "You are removing");
     title.tabIndex = -1;
     const known = factsFor(grant, view, { address: session.account.address, yours: true });
     review.replaceChildren(
@@ -2626,11 +2691,13 @@ async function prepare(scanned: ObjectValue, scope: string) {
       ),
       field(
         "What changes",
-        subscription && paymentApproval(grant)
-          ? `The payment approval is closed, so ${who(grant, known, true)} can't take any more, and its SOL deposit goes back to whoever paid for it. The approval Solana Subscriptions holds on this account stays.`
-          : subscription
-            ? "The ended subscription's record is closed, and its SOL deposit goes back to whoever paid for it. The approval Solana Subscriptions holds on this account stays."
-            : `The approval for ${who(grant, known, true)} is cleared. Nothing else changes.`,
+        cancelling
+          ? `It can still charge until ${endsAt}, the end of the period already paid for. After that it can't charge again, and you can remove it here to get its SOL deposit back. Nothing else changes.`
+          : subscription && paymentApproval(grant)
+            ? `The payment approval is closed, so ${who(grant, known, true)} can't take any more, and its SOL deposit goes back to whoever paid for it. The approval Solana Subscriptions holds on this account stays.`
+            : subscription
+              ? "The ended subscription's record is closed, and its SOL deposit goes back to whoever paid for it. The approval Solana Subscriptions holds on this account stays."
+              : `The approval for ${who(grant, known, true)} is cleared. Nothing else changes.`,
       ),
       field("Network", network().label),
     );
@@ -2717,13 +2784,15 @@ async function prepare(scanned: ObjectValue, scope: string) {
             const status = await signatureStatus(config.rpcUrl, sent.signature, signal);
             if (status?.err)
               throw new Error(
-                `The network reports that the revoke failed (${JSON.stringify(status.err)}). Nothing was removed; the permission is still active.`,
+                cancelling
+                  ? `The network reports that the cancellation failed (${JSON.stringify(status.err)}). The subscription is unchanged.`
+                  : `The network reports that the revoke failed (${JSON.stringify(status.err)}). Nothing was removed; the permission is still active.`,
               );
             if (status && ["confirmed", "finalized"].includes(String(status.confirmationStatus))) {
               landed = true;
               setAction(
                 "FINALIZING",
-                `${sent.status === "unknown" ? "Velon didn't get a clear answer after sending, but the network reports that the removal landed. " : ""}Access removed. The removal is confirmed on ${network().label.toLowerCase()} at slot ${status.slot}. Velon is waiting for it to be final to verify it and issue the receipt.`,
+                `${sent.status === "unknown" ? `Velon didn't get a clear answer after sending, but the network reports that the ${cancelling ? "cancellation" : "removal"} landed. ` : ""}${cancelling ? `Cancelled. It stops charging after ${endsAt}. The cancellation` : "Access removed. The removal"} is confirmed on ${network().label.toLowerCase()} at slot ${status.slot}. Velon is waiting for it to be final to verify it and issue the receipt.`,
               );
               actionResult.append(link("Transaction", sent.signature));
             }
@@ -2747,17 +2816,21 @@ async function prepare(scanned: ObjectValue, scope: string) {
             await pause();
             continue;
           }
-          const checked = verifiedRevoke(
+          const checked = verifiedAction(
             verification,
             current,
             stateVersion,
             text(grant.id),
             sent.signedTransaction,
+            kind,
+            prepared.endsAt,
           );
-          // The revoked card leaves the page before the fresh state replaces it.
-          const gone = [...results.querySelectorAll<HTMLElement>(".permission")].find(
-            (item) => item.dataset.id === grant.id,
-          );
+          // The revoked card leaves the page before the fresh state replaces it; a cancelled one stays.
+          const gone = cancelling
+            ? undefined
+            : [...results.querySelectorAll<HTMLElement>(".permission")].find(
+                (item) => item.dataset.id === grant.id,
+              );
           gone?.classList.add("leaving");
           stage.dataset.state = "cut";
           if (gone) await new Promise<void>((resolve) => setTimeout(resolve, 1200));
@@ -2769,10 +2842,13 @@ async function prepare(scanned: ObjectValue, scope: string) {
             source: key,
             network: config.network,
             at: new Date().toISOString(),
+            ...(cancelling ? { kind } : {}),
           });
           setAction(
             "VERIFIED",
-            `Velon read the chain again once it was final: the access is gone on ${network().label.toLowerCase()}.`,
+            cancelling
+              ? `Velon read the chain again once it was final: the subscription stops charging after ${endsAt}. Remove it here after that to get its SOL deposit back.`
+              : `Velon read the chain again once it was final: the access is gone on ${network().label.toLowerCase()}.`,
           );
           actionResult.append(
             link("Transaction", sent.signature),
@@ -2783,7 +2859,7 @@ async function prepare(scanned: ObjectValue, scope: string) {
             actionResult.append(
               node(
                 "p",
-                "The removal is verified. The list couldn't be refreshed; check the wallet again to see it.",
+                `The ${cancelling ? "cancellation" : "removal"} is verified. The list couldn't be refreshed; check the wallet again to see it.`,
                 "notice",
               ),
             );
@@ -2835,7 +2911,9 @@ async function prepare(scanned: ObjectValue, scope: string) {
     setAction(
       "FAILED",
       subscription && reason === "UnsupportedOperation"
-        ? "This subscription can't be removed yet. The Subscriptions program only allows it after the subscription is cancelled and its paid period has ended. Nothing was signed."
+        ? kind === "cancel"
+          ? "This subscription can't be cancelled here: it is already cancelled or has ended. Nothing was signed."
+          : "This subscription can't be removed yet. The Subscriptions program only allows it after the subscription is cancelled and its paid period has ended. Nothing was signed."
         : reason,
     );
     actionResult.append(recovery());

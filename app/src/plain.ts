@@ -502,7 +502,11 @@ export function nextSteps(state: WalletState): string[] {
     );
   if (state.running)
     steps.push(
-      "Velon can't remove a subscription that is still running. It can be removed here once it is cancelled and its paid period has ended.",
+      !state.connected
+        ? `${state.removable ? "To cancel a subscription, connect this wallet too" : "Connect this wallet to cancel a subscription you don't want"}. It stops charging when the period already paid for ends, and can be removed here after that.`
+        : state.owner
+          ? "Choose Cancel subscription on one you don't want. It stops charging when the period already paid for ends, and Velon proves it and keeps a receipt."
+          : "Only this wallet's owner can cancel its subscriptions.",
     );
   if (state.reported)
     steps.push(
