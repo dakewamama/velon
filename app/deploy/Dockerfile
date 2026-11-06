@@ -5,6 +5,8 @@ FROM ubuntu:24.04 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential ca-certificates curl git nodejs npm pkg-config python3 unzip \
   && rm -rf /var/lib/apt/lists/*
+# Ubuntu's npm 9.2 can't read the lockfile's local override; use the npm that wrote it.
+RUN npm install -g npm@10.9.9 && npm --version
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.97.1
 ENV PATH=/root/.cargo/bin:$PATH
 # Bun is pinned by checksum; the supervisor checks it again at every start.
