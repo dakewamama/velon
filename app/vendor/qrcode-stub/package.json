@@ -1,0 +1,7 @@
+{
+  "name": "qrcode",
+  "version": "0.0.0-velon",
+  "description": "Stands in for qrcode. Velon never uses Solana Mobile's QR (remote) mode, and the real package's Node-only files break the browser build.",
+  "main": "index.js",
+  "license": "Apache-2.0"
+}

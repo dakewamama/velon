@@ -1,5 +1,6 @@
 import { copyFile, mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
+import { consoleCsp } from "./csp.ts";
 
 // Recorded evidence remains the default. Hosted control forwards to an independently running runtime.
 const root = resolve(import.meta.dir, "..");
@@ -120,11 +121,7 @@ module.exports = (request, response) => {
       {
         source: "/(.*)",
         headers: [
-          {
-            key: "Content-Security-Policy",
-            value:
-              "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests",
-          },
+          { key: "Content-Security-Policy", value: consoleCsp() },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "no-referrer" },
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },

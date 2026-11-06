@@ -1,7 +1,17 @@
 import { getAddressDecoder } from "@solana/addresses";
 import { getWallets } from "@wallet-standard/app";
-import type { StandardConnectFeature, StandardEventsFeature } from "@wallet-standard/features";
+import type {
+  StandardConnectFeature,
+  StandardDisconnectFeature,
+  StandardEventsFeature,
+} from "@wallet-standard/features";
 import type { SolanaSignTransactionFeature } from "@solana/wallet-standard-features";
+import {
+  createDefaultAuthorizationCache,
+  createDefaultChainSelector,
+  registerMwa,
+  SolanaMobileWalletAdapterWalletName,
+} from "@solana-mobile/wallet-standard-mobile";
 
 type RegisteredWallet = ReturnType<ReturnType<typeof getWallets>["get"]>[number];
 export type SigningWallet = RegisteredWallet & {
@@ -52,4 +62,27 @@ export async function testWallet(): Promise<SigningWallet> {
       },
     },
   } as unknown as SigningWallet;
+}
+
+/// The name Solana Mobile's protocol registers under; people see it as their phone's wallet app.
+export const PHONE_WALLET = SolanaMobileWalletAdapterWalletName;
+
+/// An Android browser reaches the phone's wallet apps through Solana Mobile's protocol. It joins
+/// as one more Wallet Standard wallet, so connecting, reviewing and exact signing stay one path.
+export function registerPhoneWallets(chain: `solana:${string}`, icon: string, notFound: () => void) {
+  if (!/android/i.test(navigator.userAgent)) return;
+  registerMwa({
+    appIdentity: { name: "Velon", uri: location.origin, icon },
+    authorizationCache: createDefaultAuthorizationCache(),
+    chains: [chain],
+    chainSelector: createDefaultChainSelector(),
+    onWalletNotFound: async () => notFound(),
+  });
+}
+
+/// After Disconnect, a wallet that keeps its own session forgets it too: a phone wallet would
+/// otherwise reconnect without asking.
+export async function forget(wallet: SigningWallet) {
+  const features = wallet.features as Partial<StandardDisconnectFeature>;
+  await features["standard:disconnect"]?.disconnect().catch(() => undefined);
 }

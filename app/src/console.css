@@ -76,10 +76,7 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    radial-gradient(1100px 520px at 50% -180px, rgb(63 224 165 / 9%), transparent 70%),
-    radial-gradient(900px 600px at 100% 0%, rgb(180 166 255 / 4%), transparent 70%), var(--bg);
-  background-attachment: fixed;
+  background: var(--bg);
   color: var(--t2);
   font-family: var(--sans);
   font-size: 15px;
@@ -171,14 +168,13 @@ pre {
   white-space: nowrap;
   transition:
     transform 160ms var(--ease),
-    box-shadow 200ms var(--ease),
     background 160ms;
 }
 .action-button:hover:not(:disabled),
 #connect-wallet:hover:not(:disabled),
 .lookup-row button:hover:not(:disabled),
 .button:hover:not(:disabled) {
-  box-shadow: 0 0 0 4px rgb(63 224 165 / 16%);
+  background: #6ee9bb;
 }
 .action-button:active:not(:disabled),
 .lookup-row button:active:not(:disabled) {
@@ -258,23 +254,24 @@ pre {
   height: 12px;
 }
 .header-links .badge {
+  display: inline-flex;
   gap: 8px;
   padding: 0;
   border: 0;
+  background: none;
   color: var(--t3);
   cursor: default;
 }
-.tag {
-  padding: 2px 8px;
-  border-radius: 6px;
-  color: var(--mint);
-  font-family: var(--mono);
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.brand .tag {
+  padding: 0;
+  border: 0;
+  color: var(--t3);
+  font-size: 17px;
+  font-weight: 450;
+  letter-spacing: -0.02em;
 }
 
-/* Top bar: translucent, always there, and quiet. */
+/* Top bar: solid, always there, and quiet. */
 .topbar {
   position: sticky;
   top: 0;
@@ -285,8 +282,7 @@ pre {
   height: 64px;
   padding: 0 24px;
   border-bottom: 1px solid var(--hair);
-  background: rgb(4 17 13 / 72%);
-  backdrop-filter: blur(14px) saturate(140%);
+  background: var(--bg);
 }
 .brand {
   display: inline-flex;
@@ -393,11 +389,9 @@ pre {
   display: none;
 }
 .lookup label {
-  color: var(--t3);
-  font-size: 12px;
+  color: var(--t2);
+  font-size: 14px;
   font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 .lookup-row {
   display: flex;
@@ -406,13 +400,10 @@ pre {
   border: 1px solid var(--hair-2);
   border-radius: 16px;
   background: var(--s1);
-  transition:
-    border-color 160ms,
-    box-shadow 200ms;
+  transition: border-color 160ms;
 }
 .lookup-row:focus-within {
-  border-color: rgb(63 224 165 / 55%);
-  box-shadow: 0 0 0 4px rgb(63 224 165 / 10%);
+  border-color: var(--t3);
 }
 .lookup-row input {
   flex: 1;
@@ -453,7 +444,6 @@ pre {
   letter-spacing: -0.04em;
 }
 .first-screen .lookup-title em {
-  color: var(--mint);
   font-style: normal;
 }
 .first-screen .lookup label {
@@ -462,7 +452,6 @@ pre {
 .first-screen .lookup-row {
   padding: 8px;
   border-radius: 18px;
-  box-shadow: 0 30px 80px -40px rgb(63 224 165 / 35%);
 }
 .first-screen .lookup-row input {
   font-size: 16px;
@@ -560,19 +549,7 @@ pre {
   overflow: hidden;
   border: 1px solid var(--hair);
   border-radius: var(--r-xl);
-  background: linear-gradient(180deg, var(--s2), var(--s1));
-}
-.wallet-summary.exposed {
-  border-color: rgb(255 132 102 / 22%);
-  background:
-    radial-gradient(600px 220px at 0% 0%, rgb(255 132 102 / 12%), transparent 70%),
-    linear-gradient(180deg, var(--s2), var(--s1));
-}
-.wallet-summary.clear {
-  border-color: rgb(63 224 165 / 20%);
-  background:
-    radial-gradient(600px 220px at 0% 0%, rgb(63 224 165 / 10%), transparent 70%),
-    linear-gradient(180deg, var(--s2), var(--s1));
+  background: var(--s1);
 }
 .wallet-summary h2 {
   max-width: 24ch;
@@ -593,22 +570,9 @@ pre {
 }
 /* The proof: the finalized slot and time the answer was read at. */
 .wallet-summary .proof {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
   color: var(--t3);
-  font-family: var(--mono);
-  font-size: 11.5px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.wallet-summary .proof::before {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--mint);
-  box-shadow: 0 0 0 3px rgb(63 224 165 / 18%);
-  content: "";
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 @media (min-width: 761px) {
   .wallet-summary .proof {
@@ -629,8 +593,6 @@ pre {
 .composition span {
   min-width: 6px;
   border-radius: 999px;
-  animation: grow 700ms var(--ease) both;
-  transform-origin: left;
 }
 .composition .risk {
   background: var(--coral);
@@ -779,10 +741,8 @@ details.approval-group[open] > summary {
 .approvals-head {
   padding: 0 18px 2px;
   color: var(--t3);
-  font-size: 11.5px;
-  font-weight: 550;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 500;
 }
 .permission {
   border: 1px solid var(--hair);
@@ -796,32 +756,10 @@ details.approval-group[open] > summary {
 .permission.compact {
   padding: 13px 18px;
   border-radius: var(--r-m);
-  animation: row-in 420ms var(--ease) both;
 }
 .permission.compact:hover {
   border-color: var(--hair-2);
   background: var(--s2);
-}
-.permission.compact:nth-child(2) {
-  animation-delay: 20ms;
-}
-.permission.compact:nth-child(3) {
-  animation-delay: 40ms;
-}
-.permission.compact:nth-child(4) {
-  animation-delay: 60ms;
-}
-.permission.compact:nth-child(5) {
-  animation-delay: 80ms;
-}
-.permission.compact:nth-child(n + 6) {
-  animation-delay: 100ms;
-}
-@keyframes row-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
 }
 .permission.picked {
   border-color: var(--mint);
@@ -1020,10 +958,8 @@ details.approval-group[open] > summary {
 .field dt {
   margin-bottom: 3px;
   color: var(--t3);
-  font-size: 11.5px;
-  font-weight: 550;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 500;
 }
 .field dd {
   margin: 0;
@@ -1332,9 +1268,6 @@ pre {
   font-size: 12px;
   text-align: center;
 }
-.checking .pending .checking-state {
-  animation: breathe 1.4s ease-in-out infinite;
-}
 .checking .pending .checking-state::after {
   content: "…";
 }
@@ -1466,14 +1399,9 @@ dialog {
   border-radius: var(--r-xl);
   background: var(--s2);
   color: var(--t2);
-  box-shadow: 0 40px 120px -30px rgb(0 0 0 / 80%);
-}
-dialog[open] {
-  animation: rise 260ms var(--ease);
 }
 dialog::backdrop {
-  background: rgb(2 9 7 / 72%);
-  backdrop-filter: blur(6px);
+  background: rgb(2 9 7 / 80%);
 }
 @keyframes rise {
   from {
@@ -1579,7 +1507,6 @@ dialog .link-button {
 .steps .now {
   border-color: var(--mint);
   color: var(--mint);
-  animation: breathe 1.4s ease-in-out infinite;
 }
 .steps[data-state="failed"] .now {
   border-color: var(--coral);
@@ -1825,10 +1752,8 @@ dt {
   display: block;
   margin-bottom: 8px;
   color: var(--muted);
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 500;
 }
 select {
   max-width: 100%;
@@ -2152,7 +2077,6 @@ input:focus {
 }
 .permission.picked {
   border-color: var(--accent);
-  box-shadow: 0 0 0 4px var(--accent-wash);
 }
 
 /* With a live chain the console is the diagram and the cards; everything else waits in a drawer. */
@@ -2353,40 +2277,18 @@ input:focus {
   }
 }
 
-/* ---- The calm layer: progress, next steps, the journey, and the finish. ---- */
+/* ---- Checking, next steps, the first screen and the phone bar. ---- */
 
-/* A fine grain over the background, under every surface. */
-body::before {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");
-  opacity: 0.05;
-  pointer-events: none;
-  content: "";
-}
-
-/* The public console's bar floats, inset from the edges. */
-.public .topbar {
-  top: 12px;
-  width: min(1180px, 100% - 24px);
-  height: 58px;
-  margin: 12px auto 0;
-  padding: 0 10px 0 16px;
-  border: 1px solid var(--hair);
-  border-radius: 18px;
-  background: rgb(8 24 19 / 70%);
-  box-shadow: 0 20px 40px -24px rgb(0 0 0 / 60%);
-}
 /* One bright button per screen: in the bar, connecting stays quiet. */
 .public #connect-wallet {
   min-height: 38px;
+  border: 1px solid var(--hair-2);
   background: transparent;
-  box-shadow: inset 0 0 0 1px var(--hair-2);
   color: var(--t1);
 }
 .public #connect-wallet:hover:not(:disabled) {
-  box-shadow: inset 0 0 0 1px var(--mint);
+  border-color: var(--t3);
+  background: var(--s1);
 }
 
 /* A click that changes nothing else still answers, on the control itself. */
@@ -2400,7 +2302,7 @@ body::before {
   z-index: 5;
   padding: 4px 9px;
   border: 1px solid var(--hair-2);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--s3);
   color: var(--t1);
   font-family: var(--sans);
@@ -2410,23 +2312,16 @@ body::before {
   content: attr(data-tip);
   pointer-events: none;
   transform: translateX(-50%);
-  animation: tip-in 160ms var(--ease) both;
-}
-@keyframes tip-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, 4px);
-  }
 }
 
-/* The field forgets nothing visible: suggestions come from recent checks, without an arrow. */
+/* Suggestions come from recent checks, without the browser's arrow. */
 .lookup-row input::-webkit-calendar-picker-indicator {
   display: none !important;
 }
 /* While a check runs, its button says so. */
 .console:has(.progress-card[aria-busy="true"]) .lookup-row button::before {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
   border: 2px solid rgb(4 36 26 / 30%);
   border-top-color: var(--mint-ink);
   border-radius: 50%;
@@ -2439,16 +2334,15 @@ body::before {
   }
 }
 
-/* A check in progress: where it is, how long it has taken, and that nothing is asked of you. */
+/* A check in progress: the step it is on, how far, how long, and that nothing is asked of you. */
 .progress-card {
   display: grid;
   gap: 16px;
-  padding: 26px 0 0;
+  padding: 24px 0 0;
   overflow: hidden;
   border: 1px solid var(--hair);
   border-radius: var(--r-xl);
-  background: linear-gradient(180deg, var(--s2), var(--s1));
-  animation: rise 360ms var(--ease) both;
+  background: var(--s1);
 }
 .progress-card > :not(.progress-rows) {
   margin: 0 28px;
@@ -2460,77 +2354,59 @@ body::before {
   gap: 16px;
 }
 .progress-head h2 {
-  font-size: 22px;
+  font-size: 20px;
   letter-spacing: -0.02em;
 }
 .elapsed {
   color: var(--t3);
-  font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 .meter {
-  height: 4px;
+  height: 3px;
   overflow: hidden;
-  border-radius: 999px;
   background: var(--s3);
 }
 .meter span {
   display: block;
   width: 4%;
   height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, rgb(63 224 165 / 55%), var(--mint));
+  background: var(--mint);
   transition: width 600ms var(--ease);
 }
 .progress-steps {
   display: grid;
-  gap: 10px;
+  gap: 8px;
+  margin: 0;
   padding: 0;
   list-style: none;
   counter-reset: step;
 }
 .progress-steps li {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 22px auto 1fr;
+  gap: 4px 6px;
+  align-items: baseline;
   color: var(--t3);
   font-size: 14px;
   counter-increment: step;
 }
 .progress-steps li::before {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--hair-2);
-  border-radius: 50%;
-  font-family: var(--mono);
-  font-size: 11px;
-  content: counter(step);
+  content: counter(step) ".";
 }
 .progress-steps .now {
   color: var(--t1);
-}
-.progress-steps .now::before {
-  border-color: var(--mint);
-  color: var(--mint);
-  animation: breathe 1.4s ease-in-out infinite;
 }
 .progress-steps .done {
   color: var(--t2);
 }
 .progress-steps .done::before {
-  border-color: transparent;
-  background: var(--mint-wash);
   color: var(--mint);
   content: "✓";
 }
 .step-note {
-  color: var(--mint);
-  font-family: var(--mono);
-  font-size: 12px;
+  color: var(--t2);
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 .progress-card .calm {
@@ -2541,51 +2417,38 @@ body::before {
   display: none;
 }
 .progress-card:has(.progress-rows:empty) {
-  padding-bottom: 24px;
+  padding-bottom: 22px;
 }
 
-/* What to do next: numbered, in the hero, ending in the ways to look again. */
+/* What to do next: a short numbered list, then the ways to look again. */
 .next {
   display: grid;
-  gap: 12px;
-  margin-top: 10px;
-  padding-top: 20px;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 18px;
   border-top: 1px solid var(--hair);
 }
 .eyebrow {
-  color: var(--t3);
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  color: var(--t1);
+  font-size: 14px;
+  font-weight: 600;
 }
 .next-steps {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   max-width: 72ch;
   margin: 0;
-  padding: 0;
-  list-style: none;
-  counter-reset: next;
-}
-.next-steps li {
-  display: grid;
-  grid-template-columns: 26px 1fr;
-  color: var(--t1);
+  padding: 0 0 0 1.4em;
+  color: var(--t2);
   font-size: 14.5px;
-  counter-increment: next;
 }
-.next-steps li::before {
-  color: var(--mint);
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.9;
-  content: "0" counter(next);
+.next-steps li::marker {
+  color: var(--t3);
 }
 /* Outside the hero, the same panel stands as its own card. */
 #results > .next {
   margin-top: 0;
-  padding: 22px 26px;
+  padding: 20px 26px;
   border: 1px solid var(--hair);
   border-radius: var(--r-xl);
   background: var(--s1);
@@ -2604,8 +2467,11 @@ body::before {
 .wallet-summary .next .action-button {
   margin: 0 4px 0 0;
 }
+#action-result .next-actions {
+  margin-top: 2px;
+}
 
-/* The first screen: one line, recent checks, then the whole journey in three steps. */
+/* The first screen: one line, recent checks, then the whole job in three steps. */
 .start .start-lead {
   max-width: 54ch;
   margin: 0 auto;
@@ -2622,6 +2488,8 @@ body::before {
 }
 .recent .eyebrow {
   margin-right: 4px;
+  color: var(--t3);
+  font-weight: 500;
 }
 .recent-chip {
   display: inline-flex;
@@ -2639,7 +2507,7 @@ body::before {
     background 160ms;
 }
 .recent-chip:hover {
-  border-color: var(--mint);
+  border-color: var(--t3);
   background: var(--s2);
 }
 .recent .link-button {
@@ -2648,48 +2516,21 @@ body::before {
   font-size: 12.5px;
 }
 .how {
-  position: relative;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 32px;
   margin: 56px 0 0;
-  padding: 0;
-  border-top: 1px dashed var(--hair-2);
-  border-bottom: 1px dashed var(--hair-2);
+  padding: 28px 0 0;
+  border-top: 1px solid var(--hair);
   list-style: none;
   text-align: left;
   counter-reset: how;
 }
 .how li {
-  position: relative;
   display: grid;
   align-content: start;
-  gap: 8px;
-  padding: 26px 26px 30px;
+  gap: 6px;
   counter-increment: how;
-}
-.how li + li {
-  border-left: 1px dashed var(--hair-2);
-}
-/* Blueprint nodes where the frame's lines meet. */
-.how li::after {
-  position: absolute;
-  top: -3px;
-  left: -3px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--t3);
-  content: "";
-}
-.how li:first-child::after {
-  display: none;
-}
-.how li::before {
-  color: var(--mint);
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  content: "0" counter(how);
 }
 .how strong {
   color: var(--t1);
@@ -2697,9 +2538,14 @@ body::before {
   font-weight: 600;
   letter-spacing: -0.01em;
 }
+.how strong::before {
+  color: var(--t3);
+  font-weight: 500;
+  content: counter(how) ". ";
+}
 .how span {
   color: var(--t2);
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.55;
 }
 .how .link-button {
@@ -2707,52 +2553,20 @@ body::before {
   margin-top: 6px;
 }
 
-/* Results arrive in order, softly. */
-@keyframes rise {
-  from {
-    opacity: 0;
-    filter: blur(4px);
-    transform: translateY(8px);
-  }
-}
-#results > :is(.wallet-summary, .approval-group, .holdings, .wallet-footer, .notice) {
-  animation: rise 480ms var(--ease) both;
-}
-#results > :nth-child(2) {
-  animation-delay: 60ms;
-}
-#results > :nth-child(3) {
-  animation-delay: 120ms;
-}
-#results > :nth-child(n + 4) {
-  animation-delay: 180ms;
-}
-#action-result .next-actions {
-  margin-top: 2px;
-}
-
 @media (max-width: 760px) {
   .how {
     grid-template-columns: 1fr;
-  }
-  .how li + li {
-    border-top: 1px dashed var(--hair-2);
-    border-left: 0;
-  }
-  .how li::after {
-    display: none;
+    gap: 22px;
   }
   .progress-card > :not(.progress-rows) {
     margin: 0 18px;
   }
+  /* On a phone the bar keeps the brand and the wallet; the first screen names the network. */
   .public .topbar {
-    width: calc(100% - 16px);
     height: 56px;
-    margin-top: 8px;
-    padding: 0 8px 0 12px;
+    padding: 0 12px 0 16px;
     flex-wrap: nowrap;
   }
-  /* On a phone the bar keeps the brand and the wallet; the first screen names the network. */
   .public .header-links {
     display: none;
   }

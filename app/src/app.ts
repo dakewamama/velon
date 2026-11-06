@@ -1,7 +1,17 @@
 import { createSolanaRpc } from "@solana/rpc";
 import { signAndSubmitReviewedTransaction } from "catalyst-sdk/src/submit";
 import { action, result, reviewRevoke, verifiedRevoke, type Control, type ActionState } from "./control.ts";
-import { wallets, signingWallets, testWallet, type SigningWallet } from "./wallet.ts";
+import {
+  forget,
+  PHONE_WALLET,
+  registerPhoneWallets,
+  wallets,
+  signingWallets,
+  testWallet,
+  type SigningWallet,
+} from "./wallet.ts";
+import { connectFailure, deviceOf, INSTALL, openInWallet } from "./reach.ts";
+import velonIcon from "./assets/velon-192.png";
 import { address as toAddress, isAddress } from "@solana/addresses";
 import {
   appendTransactionMessageInstruction,
@@ -1097,8 +1107,13 @@ function disconnected() {
 }
 disconnectButton.onclick = () => {
   if (actionState && ["AWAITING_SIGNATURE", "SUBMITTING", "FINALIZING"].includes(actionState)) return;
+  const wallet = connected?.wallet;
   disconnected();
+  if (wallet) void forget(wallet);
 };
+// A phone's wallet apps arrive under the protocol's name; people know them as their wallet app.
+const walletName = (wallet: SigningWallet) =>
+  wallet.name === PHONE_WALLET ? "A wallet app on this phone" : wallet.name;
 // One button for every Wallet Standard wallet; a chooser appears only when several are installed.
 connectButton.onclick = () => {
   if (actionState && ["AWAITING_SIGNATURE", "SUBMITTING", "FINALIZING"].includes(actionState)) return;
@@ -1112,7 +1127,7 @@ connectButton.onclick = () => {
       const icon = node("img");
       icon.src = wallet.icon;
       icon.alt = "";
-      option.append(icon, node("span", wallet.name));
+      option.append(icon, node("span", walletName(wallet)));
       option.onclick = () => {
         chooser.close();
         void connect(wallet);
@@ -1123,45 +1138,79 @@ connectButton.onclick = () => {
   chooser.showModal();
 };
 
-// Connecting needs a wallet in this browser; without one, say so and how to get one.
-function noWallet() {
+// Connecting needs a wallet that can reach this page. Each device is told its own way there:
+// a phone opens the page inside a wallet app, keeping the wallet being checked; a computer installs one.
+function noWallet(noPhoneApp = false) {
+  const device = deviceOf(navigator.userAgent, navigator.maxTouchPoints);
+  const phone = device !== "desktop";
   const links = node("p", "", "wallet-links");
-  for (const [name, href] of [
-    ["Phantom", "https://phantom.com"],
-    ["Solflare", "https://solflare.com"],
-    ["Backpack", "https://backpack.app"],
-  ] as const) {
-    const anchor = labelled(node("a", name, "link-button"), "external");
+  for (const { name, href } of phone ? openInWallet(location.href) : INSTALL) {
+    const anchor = labelled(node("a", phone ? `Open in ${name}` : name, "link-button"), "external");
     anchor.href = href;
-    anchor.target = "_blank";
+    // A phone hands the link to the wallet app; a computer keeps this page open beside the download.
+    if (!phone) anchor.target = "_blank";
     anchor.rel = "noreferrer";
     links.append(anchor);
   }
   const close = node("button", "Close", "action-button");
   close.type = "button";
   close.onclick = () => chooser.close();
+  const [title, line] = noPhoneApp
+    ? [
+        "No wallet app found on this phone",
+        "Velon looked for a Solana wallet app on this phone and didn't find one. Install one, or open this page inside a wallet app you already use. The wallet you're checking comes with it.",
+      ]
+    : device === "ios"
+      ? [
+          "Connect from your wallet app",
+          "On iPhone and iPad, Solana wallets connect inside their own app. Open this page there. The wallet you're checking comes with it.",
+        ]
+      : device === "android"
+        ? [
+            "This browser can't reach your wallet app",
+            "Open this page inside your wallet app, or in Chrome, to connect. The wallet you're checking comes with it.",
+          ]
+        : [
+            "No Solana wallet in this browser",
+            "To remove an approval, Velon asks your wallet to sign it, so a wallet needs to be installed here.",
+          ];
   chooser.replaceChildren(
-    node("h2", "No Solana wallet in this browser"),
-    node(
-      "p",
-      "To remove an approval, Velon asks your wallet to sign it, so a wallet needs to be installed here. On a phone, open this page in your wallet app's own browser.",
-      "muted",
-    ),
+    node("h2", title),
+    node("p", line, "muted"),
     links,
+    ...(phone
+      ? [node("p", `Another wallet? Open its app's browser and go to ${location.host}.`, "muted")]
+      : []),
     node("p", "You can still check any wallet without one: paste its address.", "muted"),
     close,
   );
-  chooser.showModal();
+  if (!chooser.open) chooser.showModal();
+}
+
+// While a wallet is asked, the button says so; a phone may be switching to its wallet app.
+function connecting(busy: boolean) {
+  connectButton.setAttribute("aria-busy", String(busy));
+  connectButton.lastChild!.textContent = busy ? "Connecting…" : "Connect wallet";
+  if (busy) connectButton.disabled = true;
+  else refreshWallets();
 }
 
 async function connect(wallet: SigningWallet | undefined) {
   try {
     invalidateReview();
     if (!wallet) throw new Error("Install a Wallet Standard wallet with signTransaction support.");
+    connecting(true);
     const { accounts } = await wallet.features["standard:connect"].connect();
+    // A phone wallet reports what it can do once connected, under the protocol's own names. Velon
+    // signs only what it reviewed and sends it itself, so sign-and-send alone isn't enough.
+    const phone = wallet.name === PHONE_WALLET;
+    if (phone && !("solana:signTransaction" in wallet.features))
+      throw new Error(
+        "This wallet app only signs and sends in one step, so Velon couldn't check the exact transaction before it goes out. Try another wallet app.",
+      );
     const account = accounts.find(
       (account) =>
-        account.features.includes("solana:signTransaction") &&
+        (phone || account.features.includes("solana:signTransaction")) &&
         (control?.network === "localnet" || account.chains.includes(network().chain)),
     );
     if (!account) throw new Error("This wallet has no compatible Solana signing account.");
@@ -1172,7 +1221,7 @@ async function connect(wallet: SigningWallet | undefined) {
     logo.src = wallet.icon;
     logo.alt = "";
     walletStatus.replaceChildren(logo, `${account.address.slice(0, 4)}…${account.address.slice(-4)}`);
-    walletStatus.title = `${wallet.name}: ${account.address}`;
+    walletStatus.title = `${walletName(wallet)}: ${account.address}`;
     disconnectButton.hidden = false;
     refreshWallets();
     document.querySelector("#app")!.scrollIntoView();
@@ -1190,7 +1239,10 @@ async function connect(wallet: SigningWallet | undefined) {
       setMode("scan");
     }
   } catch (error) {
-    status(error instanceof Error ? error.message : "Wallet connection failed.", true);
+    const said = connectFailure(error instanceof Error ? error.message : "");
+    if (said) status(said.text, said.error);
+  } finally {
+    connecting(false);
   }
 }
 
@@ -3116,6 +3168,13 @@ try {
       network: config.network,
       testBench: config.testBench === true,
     };
+    // A phone's wallet apps are reached once the network is known; the test chain has none.
+    if (control.network !== "localnet")
+      registerPhoneWallets(
+        network().chain as `solana:${string}`,
+        new URL(velonIcon, location.href).pathname.slice(1),
+        () => noWallet(true),
+      );
   }
   const manifest = array(scenarioData);
   scenarios = manifest.map((value) => {
