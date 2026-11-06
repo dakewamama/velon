@@ -31,6 +31,12 @@ pub struct Features {
     pub active: Vec<(Pubkey, u64)>,
 }
 
+/// loaderv3_programdata_size_floor, active on mainnet from epoch 1079 and unknown to 4.3.2. It only
+/// changes the loader's account data budget, which isn't executed here; removals still match the provider.
+const BEYOND_EXECUTION: [Pubkey; 1] = [solana_pubkey::pubkey!(
+    "8whkDenELnfwYLirBc4Wb4H2Z1z5K7tiykpdxJS7cWg1"
+)];
+
 impl Features {
     pub fn runtime(&self, observed: u64) -> Result<SVMFeatureSet, Error> {
         // Observation records the observed slot itself; anything else was not produced here.
@@ -43,7 +49,7 @@ impl Features {
         for (id, slot) in &self.active {
             if FEATURE_NAMES.contains_key(id) {
                 set.activate(id, *slot);
-            } else if !RETIRED.contains(id) {
+            } else if !RETIRED.contains(id) && !BEYOND_EXECUTION.contains(id) {
                 return Err(Error::InvalidObservation(
                     "feature unknown to the pinned runtime",
                 ));
@@ -101,4 +107,24 @@ pub async fn observe(client: &RpcClient, slot: u64) -> Result<Features, Error> {
     // The set is the observed bank's, whichever later bank answered; recording the observed
     // slot keeps two observations of one bank identical.
     Ok(Features { slot, active })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_reviewed_loader_feature_is_accepted_beyond_the_pinned_set() {
+        let features = |id: Pubkey| Features {
+            slot: 10,
+            active: vec![(id, 5)],
+        };
+        assert!(features(BEYOND_EXECUTION[0]).runtime(10).is_ok());
+        assert!(matches!(
+            features(Pubkey::new_unique()).runtime(10),
+            Err(Error::InvalidObservation(
+                "feature unknown to the pinned runtime"
+            ))
+        ));
+    }
 }

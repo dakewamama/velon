@@ -27,7 +27,7 @@ const bytes = (key: string) => Array.from(getAddressEncoder().encode(key as Addr
 
 // One verified build: its padded payload hash, the source it was built from, and how.
 type Build = { hash: string; source: string; buildToolchain: string };
-type Program = {
+export type Program = {
   id: string;
   name: string;
   builds: Build[];
@@ -144,9 +144,11 @@ export async function tokenCatalogAsync(
   return records;
 }
 
-function accept(program: Program, raw: string | undefined, rpcUrl: string, revision: string): Json[] {
+export function accept(program: Program, raw: string | undefined, rpcUrl: string, revision: string): Json[] {
   const capture = raw === undefined ? undefined : object(readJson(raw));
-  const build = program.builds.find((build) => text(capture?.version) === `sha256:${build.hash}`);
+  // A failed capture has no version; it is reported as failed, never read.
+  const version = capture === undefined ? undefined : text(capture.version);
+  const build = program.builds.find((build) => version === `sha256:${build.hash}`);
   const problem =
     capture === undefined
       ? `Capturing ${program.name} failed.`
