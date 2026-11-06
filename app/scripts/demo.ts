@@ -20,7 +20,7 @@ import {
   writeJson,
   type Json,
 } from "../src/wire.ts";
-import { DEVNET_GENESIS, MAINNET_GENESIS, type Control } from "../src/control.ts";
+import { DEVNET_GENESIS, MAINNET_GENESIS, otherConsoles, type Control } from "../src/control.ts";
 import { SUBSCRIPTIONS_PROGRAM, tokenCatalog, tokenCatalogAsync } from "./catalog.ts";
 import { base58, DELEGATOR_OFFSET, delegation, event, plan, type Delegation } from "./subscriptions.ts";
 import { planName } from "../src/plain.ts";
@@ -173,7 +173,8 @@ if (process.env.RPC_URL) {
     );
   if (!verified)
     throw new Error(`LIVE_CATALOG has no SPL Token deployment with runtime evidence for cluster ${cluster}.`);
-  control = { rpcUrl: rpcUrl.href, network, cluster };
+  const elsewhere = otherConsoles(process.env.PUBLIC_NETWORKS, network);
+  control = { rpcUrl: rpcUrl.href, network, cluster, ...(elsewhere.length ? { elsewhere } : {}) };
   const encoder = getAddressEncoder();
   const bytes = (address: string) => Array.from(encoder.encode(address as Address));
   const ASSOCIATED_TOKEN = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
@@ -446,6 +447,7 @@ if (process.env.RPC_URL) {
       const merchant = value.kind === "subscription" ? plans.get(value.plan) : undefined;
       return {
         address,
+        kind: value.kind,
         name: merchant ? planName(merchant.metadataUri) : undefined,
         delegate: merchant ? merchant.owner : value.delegatee,
         mint: value.kind === "subscription" ? merchant?.mint : value.mint,
@@ -466,7 +468,7 @@ if (process.env.RPC_URL) {
         return [key, decimals ? Number(object(decimals).decimals) : undefined];
       }),
     );
-    return terms.map(({ address, name, delegate, mint, amount }) => {
+    return terms.map(({ address, kind, name, delegate, mint, amount }) => {
       const decimals = mint ? scale.get(mint) : undefined;
       return {
         program: "subscriptions",
@@ -478,6 +480,7 @@ if (process.env.RPC_URL) {
         ui: decimals === undefined ? amount.toString() : decimal(amount, decimals),
         decimals,
         extensions: [] as string[],
+        delegationKind: kind,
         ...(name ? { planName: name } : {}),
       };
     });

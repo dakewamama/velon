@@ -1,6 +1,14 @@
 import { createSolanaRpc } from "@solana/rpc";
 import { signAndSubmitReviewedTransaction } from "catalyst-sdk/src/submit";
-import { action, result, reviewRevoke, verifiedRevoke, type Control, type ActionState } from "./control.ts";
+import {
+  action,
+  otherConsoles,
+  result,
+  reviewRevoke,
+  verifiedRevoke,
+  type Control,
+  type ActionState,
+} from "./control.ts";
 import {
   forget,
   PHONE_WALLET,
@@ -190,12 +198,51 @@ function labelled<T extends HTMLElement>(element: T, name: IconName): T {
   return element;
 }
 
-// The header names the network, with Solana's mark whenever a real cluster is behind it.
+// The header names the network, with Solana's mark whenever a real cluster is behind it. Where
+// another network has its own console, the name is a menu that opens it with the same wallet.
+const NETWORK_NOTE = { mainnet: "Real wallets and funds", devnet: "Test tokens, for builders" } as const;
 function badge(label: string, chain = true) {
   const target = document.querySelector<HTMLElement>(".header-links .badge")!;
-  target.replaceChildren(...(chain && control ? [solana()] : []), label);
-  target.title = chain && control ? `Velon reads Solana ${label.toLowerCase()}` : "";
+  const mark = chain && control ? [solana()] : [];
+  const others = chain ? (control?.elsewhere ?? []) : [];
+  const name = node("span", label, "network-name");
+  target.title = "";
+  if (!others.length || !control || control.network === "localnet") {
+    target.replaceChildren(...mark, name);
+    target.title = mark.length ? `Velon reads Solana ${label.toLowerCase()}` : "";
+    return;
+  }
+  const button = node("button", "", "network");
+  button.type = "button";
+  button.setAttribute("aria-expanded", "false");
+  button.setAttribute("aria-label", `Network: ${label}. Switch network`);
+  button.append(...mark, name, icon("chevron"));
+  const menu = node("div", "", "network-menu");
+  menu.hidden = true;
+  const here = node("div", "", "network-option current");
+  here.append(node("strong", label), node("span", NETWORK_NOTE[control.network]), icon("check"));
+  menu.append(here);
+  for (const other of others) {
+    const option = node("a", "", "network-option");
+    option.href = other.url;
+    // The wallet on screen comes along: an address is the same on every network.
+    option.onclick = () => (option.href = `${other.url}${location.hash}`);
+    option.append(node("strong", NETWORKS[other.network].label), node("span", NETWORK_NOTE[other.network]));
+    menu.append(option);
+  }
+  button.onclick = () => openNetworks(menu.hidden === true);
+  target.replaceChildren(button, menu);
 }
+function openNetworks(open: boolean) {
+  const menu = document.querySelector<HTMLElement>(".network-menu");
+  if (!menu) return;
+  menu.hidden = !open;
+  document.querySelector(".network")?.setAttribute("aria-expanded", String(open));
+}
+addEventListener("click", (event) => {
+  if (!(event.target as Element).closest?.(".header-links .badge")) openNetworks(false);
+});
+addEventListener("keydown", (event) => (event as KeyboardEvent).key === "Escape" && openNetworks(false));
 
 // What was read, in one plain line; the slot, origin and provenance wait under Technical details.
 // A wallet keeps its caveat whatever the view's coverage says: the view covers one account.
@@ -254,10 +301,69 @@ function glossary(): HTMLElement {
 }
 
 // The specialist's view of one permission. Addresses are built with the card so full keys stay
-// searchable; the raw evidence is built when the panel first opens.
-function technical(grant: ObjectValue, availability: string, rating: Status): HTMLElement {
+// searchable; the raw evidence is built when the panel first opens. In a wallet's list the plain
+// facts come first and this record folds beneath them.
+function technical(grant: ObjectValue, availability: string, rating: Status, list = false): HTMLElement {
   const panel = node("section", "", "detail technical");
   panel.hidden = true;
+  if (list) {
+    const record = node("details", "", "record");
+    record.append(node("summary", "Technical record"), technicalFacts(grant, availability, rating));
+    panel.append(plainFacts(grant), record);
+    return panel;
+  }
+  panel.append(technicalFacts(grant, availability, rating));
+  return panel;
+}
+
+// What a person needs about one permission: who, how much is left, when it renews or ends, and
+// where it draws from.
+function plainFacts(grant: ObjectValue): HTMLElement {
+  const source = text(object(grant.resource).id);
+  const mint = assetMint(grant);
+  const usage = object(grant.usage);
+  const lifecycle = object(grant.lifecycle);
+  const principal = object(grant.principal);
+  const facts = node("dl", "", "plain-facts");
+  facts.append(
+    principal.kind === "identity"
+      ? address("Who can take it", text(principal.value), "holder")
+      : field("Who can take it", principalLabel(grant.principal)),
+  );
+  if (usage.remaining !== undefined && usage.remaining !== null)
+    facts.append(
+      field(
+        usage.kind === "recurring" ? "Left this period" : "Left to take",
+        integer(usage.remaining) === UNLIMITED
+          ? "Every token this account will ever hold"
+          : (tokens(integer(usage.remaining), source, mint) ??
+              allowance(source, integer(usage.remaining), mint)),
+      ),
+    );
+  if (usage.kind === "recurring" && usage.observed_period_start != null && usage.period_seconds != null)
+    facts.append(
+      field(
+        "Next period starts",
+        when(integer(usage.observed_period_start) + integer(usage.period_seconds)) ?? "Unknown",
+      ),
+    );
+  if (lifecycle.kind === "active")
+    facts.append(
+      field(
+        "Ends",
+        lifecycle.valid_until == null ? "No end date" : (when(integer(lifecycle.valid_until)) ?? "Unknown"),
+      ),
+    );
+  facts.append(
+    object(grant.resource).namespace === "solana:token-account"
+      ? address("Draws from", source, "token account")
+      : address("Applies to", source, "account"),
+  );
+  if (mint && mint !== source) facts.append(address("Token", mint));
+  return facts;
+}
+
+function technicalFacts(grant: ObjectValue, availability: string, rating: Status): HTMLElement {
   const source = text(object(grant.resource).id);
   const mint = assetMint(grant);
   const usage = object(grant.usage);
@@ -293,8 +399,7 @@ function technical(grant: ObjectValue, availability: string, rating: Status): HT
   );
   if (mint && mint !== source) facts.append(address("Token", mint));
   facts.append(field("Program", system(grant)));
-  panel.append(facts);
-  return panel;
+  return facts;
 }
 
 function evidence(grant: ObjectValue): HTMLElement[] {
@@ -344,7 +449,7 @@ function toggleDetail(button: HTMLButtonElement, panel: HTMLElement, grant?: Obj
   }
   if (open) return;
   if (grant && !panel.dataset.built) {
-    panel.append(...evidence(grant));
+    (panel.querySelector(".record") ?? panel).append(...evidence(grant));
     panel.dataset.built = "true";
   }
   button.setAttribute("aria-expanded", "true");
@@ -403,6 +508,11 @@ const balances = new Map<string, { amount: bigint; decimals: number }>();
 
 // Plan names from the wallet listing, keyed by subscription. The merchant chose them; display only.
 const planNames = new Map<string, string>();
+// Each Subscriptions delegation's kind, from the wallet's listing: a fixed or recurring payment
+// approval can be removed by its owner at any time; a subscription only once it has ended.
+const delegationKinds = new Map<string, string>();
+const paymentApproval = (grant: ObjectValue) =>
+  ["fixed", "recurring"].includes(delegationKinds.get(revokeKey(grant) ?? "") ?? "");
 
 // Numbers each card so its buttons can point at its own sentence and token.
 let cardCount = 0;
@@ -437,6 +547,7 @@ function card(
   const left = object(grant.usage).remaining;
   row.dataset.amount = left == null ? "" : compact(integer(left));
   row.dataset.system = text(object(grant.native_context).protocol);
+  if (paymentApproval(grant)) row.dataset.payment = "";
   const source = text(object(grant.resource).id);
   row.dataset.source = source;
   const rowMint = assetMint(grant);
@@ -484,7 +595,7 @@ function card(
   }
   if (list) row.append(node("span", allowanceCell(grant, known.token), "row-amount"));
   const actions = node("div", "", "permission-actions");
-  const panel = technical(grant, availability, rating);
+  const panel = technical(grant, availability, rating, list);
   panel.id = `${title.id}-details`;
   if (list) panel.prepend(said);
   // A subscription or delegation shows what it has actually charged, read from finalized transactions.
@@ -514,7 +625,7 @@ function card(
     owner !== "" &&
     grant.capability === "spend" &&
     object(grant.lifecycle).kind === "active" &&
-    (protocol !== "subscriptions" || ended(grant, view));
+    (protocol !== "subscriptions" || ended(grant, view) || paymentApproval(grant));
   if (scope && removable) row.dataset.removable = owner;
   if (
     control &&
@@ -526,7 +637,9 @@ function card(
     ((["spl-token", "token-2022"].includes(protocol) &&
       object(grant.authority_kind).kind === "direct" &&
       object(grant.lifecycle).kind === "active") ||
-      (protocol === "subscriptions" && ended(grant, view) && revokeKey(grant) !== undefined)) &&
+      (protocol === "subscriptions" &&
+        (ended(grant, view) || paymentApproval(grant)) &&
+        revokeKey(grant) !== undefined)) &&
     object(grant.subject).kind === "identity" &&
     object(grant.subject).value === connected.account.address
   ) {
@@ -664,7 +777,10 @@ function charges(row: HTMLElement, panel: HTMLElement, delegation: string, token
           "muted",
         ),
       );
-      panel.append(section);
+      // The history reads before the folded technical record, which stays last.
+      const record = panel.querySelector(".record");
+      if (record) record.before(section);
+      else panel.append(section);
     })
     .catch(() => {
       line.textContent = "Velon couldn't read past charges.";
@@ -1363,6 +1479,8 @@ async function holdingsPanel(
             : `up to ${units(delegated, scale)}`;
       const key = text(entry.delegate);
       const said = node("span", `${short(key)} can take ${limit}`, "holding-status risk");
+      said.dataset.delegate = key;
+      said.dataset.limit = limit;
       // A known program, or an account one controls (such as the Subscriptions authority), is named.
       if (control)
         void describeDelegate(control.rpcUrl, key)
@@ -1583,6 +1701,8 @@ async function scanWallet(
     if (typeof entry.decimals === "number") decimals.set(text(entry.source), entry.decimals);
     if (entry.program === "subscriptions" && typeof entry.planName === "string")
       planNames.set(text(entry.source), entry.planName);
+    if (entry.program === "subscriptions" && typeof entry.delegationKind === "string")
+      delegationKinds.set(text(entry.source), entry.delegationKind);
   }
   // Every delegated account, SPL Token or Token-2022, is observed through the runtime.
   const owned = reported;
@@ -1592,6 +1712,8 @@ async function scanWallet(
   const cards: HTMLElement[] = [];
   let last: ObjectValue | undefined;
   let unread = 0;
+  // Keys the verified rows can name, so the wallet panel calls each delegate what its row does.
+  const named = new Map<string, string>();
   // While the chain is read, every account is listed at once and marked as its batch returns.
   const checking = node("ol", "", "checking");
   const rows = owned.map((entry) => {
@@ -1761,6 +1883,9 @@ async function scanWallet(
           }))
         : [],
     );
+    for (const { grant } of found)
+      if (subscriptionsAuthority(grant))
+        named.set(text(object(grant.principal).value), "Solana Subscriptions");
     const holds = (grant: ObjectValue) =>
       `${text(object(grant.resource).id)}:${text(object(grant.principal).value)}`;
     const covered = new Set(
@@ -1826,8 +1951,12 @@ async function scanWallet(
       ` ${total === 1 ? "permission" : "permissions"} can take tokens from ${whose}`,
     );
     const subscriptions = cards.filter(
-      (row) => row.dataset.system === "subscriptions" && row.classList.contains("derived"),
+      (row) =>
+        row.dataset.system === "subscriptions" &&
+        row.classList.contains("derived") &&
+        row.dataset.payment === undefined,
     ).length;
+    const payments = cards.filter((row) => row.dataset.payment !== undefined).length;
     const stats = node("ul", "", "stats");
     const stat = (count: number, label: string, kind: string) => {
       if (!count) return;
@@ -1849,6 +1978,7 @@ async function scanWallet(
     stat(unlimited, "with no limit", "risk");
     stat(cards.length - charging - open, "with a limit", "limited");
     stat(subscriptions, subscriptions === 1 ? "subscription" : "subscriptions", "sub");
+    stat(payments, payments === 1 ? "payment approval" : "payment approvals", "sub");
     stat(cards.length, "checked by Velon", "ok");
     stat(reportedRows.length, "shown as the network reports", "plain");
     const bar = node("div", "", "composition");
@@ -1923,8 +2053,14 @@ async function scanWallet(
         removable: removableRows.length,
         unlimitedRemovable: removableRows.filter((row) => row.dataset.amount === "∞").length,
         reported: reportedRows.length,
-        running: cards.filter((row) => row.dataset.system === "subscriptions" && !row.dataset.removable)
-          .length,
+        // Only a subscription waits on its paid period; the approval it rests on is not counted.
+        running: cards.filter(
+          (row) =>
+            row.dataset.system === "subscriptions" &&
+            row.classList.contains("derived") &&
+            row.dataset.payment === undefined &&
+            !row.dataset.removable,
+        ).length,
         connected: connected !== undefined,
         owner: connected?.account.address === owner,
         mainnet: control?.network === "mainnet",
@@ -2008,7 +2144,13 @@ async function scanWallet(
       ),
     );
   }
-  if (holdings) content.append(holdings);
+  if (holdings) {
+    for (const pill of holdings.querySelectorAll<HTMLElement>("[data-delegate]")) {
+      const name = named.get(pill.dataset.delegate ?? "");
+      if (name) pill.textContent = `${name} can take ${pill.dataset.limit}`;
+    }
+    content.append(holdings);
+  }
   // The fine print comes last: what was read, what wasn't, and the words used.
   const footer = node("section", "", "wallet-footer");
   if (last) footer.append(metadata(last, { read: owned.length - unread, listed: owned.length }));
@@ -2484,9 +2626,11 @@ async function prepare(scanned: ObjectValue, scope: string) {
       ),
       field(
         "What changes",
-        subscription
-          ? "The ended subscription's record is closed, and its SOL deposit goes back to whoever paid for it. The approval Solana Subscriptions holds on this account stays."
-          : `The approval for ${who(grant, known, true)} is cleared. Nothing else changes.`,
+        subscription && paymentApproval(grant)
+          ? `The payment approval is closed, so ${who(grant, known, true)} can't take any more, and its SOL deposit goes back to whoever paid for it. The approval Solana Subscriptions holds on this account stays.`
+          : subscription
+            ? "The ended subscription's record is closed, and its SOL deposit goes back to whoever paid for it. The approval Solana Subscriptions holds on this account stays."
+            : `The approval for ${who(grant, known, true)} is cleared. Nothing else changes.`,
       ),
       field("Network", network().label),
     );
@@ -3162,11 +3306,20 @@ try {
       throw new Error("Unsupported control network.");
     const rpcUrl = new URL(text(config.rpcUrl));
     if (!["http:", "https:"].includes(rpcUrl.protocol)) throw new Error("Invalid public RPC URL.");
+    // The other consoles are checked again here, so only a known network on a safe link is offered.
+    const elsewhere = otherConsoles(
+      array(config.elsewhere ?? [])
+        .map(object)
+        .map((entry) => `${text(entry.network)}=${text(entry.url)}`)
+        .join(","),
+      config.network,
+    );
     control = {
       cluster: text(config.cluster),
       rpcUrl: rpcUrl.href,
       network: config.network,
       testBench: config.testBench === true,
+      elsewhere,
     };
     // A phone's wallet apps are reached once the network is known; the test chain has none.
     if (control.network !== "localnet")

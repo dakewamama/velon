@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { DEVNET_GENESIS, reviewRevoke, verifiedRevoke } from "../src/control.ts";
+import { DEVNET_GENESIS, otherConsoles, reviewRevoke, verifiedRevoke } from "../src/control.ts";
 import { object, type ObjectValue } from "../src/wire.ts";
 import fixture from "./fixtures/spl-control.json";
 
@@ -112,4 +112,25 @@ test("verified state requires the exact receipt and a current projection without
     expect(() =>
       verifiedRevoke(verification, current, view.state_version, String(grant.id), "signed-exactly"),
     ).toThrow();
+});
+
+test("other consoles are read from PUBLIC_NETWORKS and never include this one or a bad link", () => {
+  expect(
+    otherConsoles(
+      "mainnet=https://console.velonsecure.xyz, devnet=https://devnet.velonsecure.xyz/",
+      "mainnet",
+    ),
+  ).toEqual([{ network: "devnet", url: "https://devnet.velonsecure.xyz/" }]);
+  expect(otherConsoles("devnet=http://localhost:3490/app", "mainnet")).toEqual([
+    { network: "devnet", url: "http://localhost:3490/app" },
+  ]);
+  expect(otherConsoles(undefined, "mainnet")).toEqual([]);
+  for (const bad of [
+    "devnet=http://evil.example",
+    "devnet=javascript:alert(1)",
+    "testnet=https://x.example",
+    "devnet=https://x.example/#a",
+    "devnet=",
+  ])
+    expect(otherConsoles(bad, "mainnet")).toEqual([]);
 });

@@ -20,7 +20,29 @@ export type Control = {
   network: "mainnet" | "devnet" | "localnet";
   /// The server can mint fresh test permissions on its disposable ledger.
   testBench?: boolean;
+  /// The consoles for the other public networks, each a separate deployment.
+  elsewhere?: Elsewhere[];
 };
+export type Elsewhere = { network: "mainnet" | "devnet"; url: string };
+
+/// Reads `mainnet=https://…,devnet=https://…` into the consoles other than this one. Anything that
+/// isn't a known network on https (or a local http address) is dropped, never linked.
+export function otherConsoles(spec: string | undefined, current: string): Elsewhere[] {
+  const found = new Map<Elsewhere["network"], string>();
+  for (const entry of (spec ?? "").split(",")) {
+    const [name, value] = entry.split("=").map((part) => part.trim());
+    if ((name !== "mainnet" && name !== "devnet") || name === current || !value || found.has(name)) continue;
+    try {
+      const url = new URL(value);
+      const local = url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname);
+      if ((url.protocol === "https:" || local) && !url.hash && !url.search && !url.username)
+        found.set(name, url.href);
+    } catch {
+      /* Not a URL; left out. */
+    }
+  }
+  return [...found].map(([network, url]) => ({ network, url }));
+}
 export type ActionState =
   "PREPARING" | "SIMULATED" | "AWAITING_SIGNATURE" | "SUBMITTING" | "FINALIZING" | "VERIFIED" | "FAILED";
 export const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";

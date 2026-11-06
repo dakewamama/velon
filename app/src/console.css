@@ -253,14 +253,90 @@ pre {
   width: 12px;
   height: 12px;
 }
+/* The network: the Solana mark and its name, on one line with the wallet button. */
 .header-links .badge {
+  position: relative;
   display: inline-flex;
+  align-items: center;
   gap: 8px;
+  height: 38px;
   padding: 0;
   border: 0;
   background: none;
-  color: var(--t3);
+  color: var(--t2);
+  font-size: 14px;
+  font-weight: 500;
   cursor: default;
+}
+.header-links .solana-mark {
+  width: 15px;
+  height: 12px;
+}
+.network {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 10px 0 14px;
+  border: 1px solid var(--hair-2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--t1);
+  font-weight: 500;
+  transition:
+    border-color 160ms,
+    background 160ms;
+}
+.network:hover,
+.network[aria-expanded="true"] {
+  border-color: var(--t3);
+  background: var(--s1);
+}
+.network .icon {
+  width: 15px;
+  height: 15px;
+  color: var(--t3);
+}
+.network-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: 2px;
+  width: 248px;
+  padding: 6px;
+  border: 1px solid var(--hair-2);
+  border-radius: 14px;
+  background: var(--s2);
+}
+.network-option {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: 10px 36px 10px 12px;
+  border-radius: 10px;
+  color: var(--t1);
+  text-decoration: none;
+}
+a.network-option:hover {
+  background: var(--s3);
+}
+.network-option strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.network-option span {
+  color: var(--t3);
+  font-size: 12.5px;
+}
+.network-option .icon {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 15px;
+  height: 15px;
+  color: var(--mint);
 }
 .brand .tag {
   padding: 0;
@@ -1020,6 +1096,15 @@ pre {
   margin: 12px 0 0;
   font-size: 13px;
 }
+/* In a wallet's list, the record behind the plain facts stays folded until asked for. */
+.technical .record {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hair);
+}
+.technical .record > dl {
+  margin-top: 12px;
+}
 
 /* Charges: a short timeline, newest first. */
 .charges {
@@ -1599,8 +1684,7 @@ dialog .link-button {
 .address,
 pre,
 dd {
-  font-family: var(--mono);
-  font-size: 13px;
+  font-size: 13.5px;
   overflow-wrap: anywhere;
 }
 
@@ -2561,14 +2645,35 @@ input:focus {
   .progress-card > :not(.progress-rows) {
     margin: 0 18px;
   }
-  /* On a phone the bar keeps the brand and the wallet; the first screen names the network. */
+  /* On a phone the bar keeps the brand, the network's mark and the wallet on one line. */
   .public .topbar {
+    gap: 10px;
     height: 56px;
     padding: 0 12px 0 16px;
     flex-wrap: nowrap;
   }
   .public .header-links {
+    order: 0;
+    flex: 1;
+    flex-basis: auto;
+    justify-content: flex-end;
+  }
+  .public .brand .tag,
+  .public .network-name {
     display: none;
+  }
+  .network {
+    padding: 0 8px 0 11px;
+  }
+  /* The menu spans the bar instead of hanging off the button. */
+  .public .header-links .badge {
+    position: static;
+  }
+  .public .network-menu {
+    top: calc(100% + 6px);
+    right: 12px;
+    left: 12px;
+    width: auto;
   }
 }
 

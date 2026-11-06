@@ -502,7 +502,7 @@ export function nextSteps(state: WalletState): string[] {
     );
   if (state.running)
     steps.push(
-      "Velon can't remove a subscription or payment approval that is still running. A subscription can be removed here once it is cancelled and its paid period has ended.",
+      "Velon can't remove a subscription that is still running. It can be removed here once it is cancelled and its paid period has ended.",
     );
   if (state.reported)
     steps.push(
