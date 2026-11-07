@@ -1139,7 +1139,9 @@ pre {
   font-size: 14px;
 }
 .holdings-summary .link-button {
+  flex: none;
   margin-left: auto;
+  white-space: nowrap;
 }
 .holdings-list {
   display: grid;
@@ -2244,6 +2246,7 @@ input:focus {
   .holding-status {
     grid-column: 2 / -1;
     justify-self: start;
+    text-align: left;
     white-space: normal;
   }
   .checking li {
