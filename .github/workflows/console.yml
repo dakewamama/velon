@@ -1,0 +1,145 @@
+# Ships the console to Vercel once Railway runs the same commit,
+# so the page never gets ahead of the backend it calls.
+name: console
+
+on:
+  push:
+    branches: [wip]
+
+# A newer push stops an older run; the newer run ships its own console.
+concurrency:
+  group: console-production
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  deployments: read
+
+env:
+  BACKEND: velon / production
+  CONSOLE: https://console.velonsecure.xyz
+
+jobs:
+  ship:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Bun 1.3.14, checked like the backend image
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/bun.zip" https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64.zip
+          unzip -q "$RUNNER_TEMP/bun.zip" -d "$RUNNER_TEMP"
+          echo "9fd36f87e4b90b07632b987a2e4ec81ca15a62c81bf983190cea6d715be2ad74  $RUNNER_TEMP/bun-linux-x64/bun" | sha256sum -c -
+          echo "$RUNNER_TEMP/bun-linux-x64" >> "$GITHUB_PATH"
+
+      # The lockfile names a GitHub dependency over SSH; fetch it over HTTPS with the npm that wrote it.
+      - name: Install
+        working-directory: app
+        run: |
+          git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+          npx --yes npm@10.9.9 ci --ignore-scripts
+
+      - name: Check
+        working-directory: app
+        run: bun run typecheck && bun run format:check && bun run test
+
+      - name: Rust, as pinned in rust-toolchain.toml
+        run: rustup toolchain install --profile minimal
+
+      - id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            runtime/target
+          key: runtime-${{ hashFiles('rust-toolchain.toml', 'runtime/Cargo.lock') }}
+          restore-keys: runtime-
+
+      # Built here because the export gives the demo only a few minutes to start.
+      - name: Build the runtime
+        working-directory: runtime
+        run: cargo build --release --locked -p catalyst-indexer --bin authorization-api
+
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            runtime/target
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      - name: Export the console
+        working-directory: app
+        env:
+          HOSTED_RUNTIME: "1"
+          CONSOLE_ROOT: "1"
+        run: bun run export
+
+      - name: Wait for Railway to run this commit
+        id: backend
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          deadline=$((SECONDS + 2400))
+          while :; do
+            id=$(gh api -X GET "repos/$GITHUB_REPOSITORY/deployments" -f sha="$GITHUB_SHA" -f environment="$BACKEND" --jq '.[0].id // empty' || true)
+            state=
+            if [ -n "$id" ]; then
+              state=$(gh api "repos/$GITHUB_REPOSITORY/deployments/$id/statuses" --jq '.[0].state // empty' || true)
+            fi
+            case "$state" in
+              success)
+                echo "live=true" >> "$GITHUB_OUTPUT"
+                echo "Railway runs $GITHUB_SHA."
+                exit 0 ;;
+              failure | error)
+                echo "::error::Railway could not deploy this commit, so the console stays as it is."
+                exit 1 ;;
+              inactive)
+                echo "::notice::A newer commit replaced this one on Railway; its own run ships the console."
+                exit 0 ;;
+            esac
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Railway has not run this commit after 40 minutes."
+              exit 1
+            fi
+            sleep 15
+          done
+
+      - name: Ship to Vercel
+        if: steps.backend.outputs.live == 'true'
+        working-directory: app/site
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_6Gq5Y7YtX0T8decOAZ53RO9Y
+          VERCEL_PROJECT_ID: prj_vtkcVuomaPOoJSm6U6fYqeoHUiLC
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::error::Add a VERCEL_TOKEN repository secret, then re-run this job."
+            exit 1
+          fi
+          npx --yes vercel@58.11.0 deploy --prod --yes --token "$VERCEL_TOKEN"
+
+      - name: Confirm the live console
+        if: steps.backend.outputs.live == 'true'
+        run: |
+          bundle=$(grep -o 'console-[a-z0-9]*\.js' app/site/index.html | head -1)
+          live=
+          for _ in $(seq 1 24); do
+            live=$(curl -fsS -m 20 "$CONSOLE/" | grep -o 'console-[a-z0-9]*\.js' | head -1 || true)
+            if [ "$live" = "$bundle" ]; then break; fi
+            sleep 5
+          done
+          if [ "$live" != "$bundle" ]; then
+            echo "::error::$CONSOLE serves ${live:-nothing}, not $bundle."
+            exit 1
+          fi
+          curl -fsS -m 60 -o /dev/null "$CONSOLE/api/control"
+          echo "$CONSOLE serves $bundle and reaches its backend."
