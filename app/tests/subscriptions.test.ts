@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { getAddressDecoder, getAddressEncoder, type Address } from "@solana/addresses";
-import { base58, delegation, event, EVENT_TAG, plan } from "../scripts/subscriptions.ts";
+import { base58, delegation, event, EVENT_TAG, historyCoverage, plan } from "../scripts/subscriptions.ts";
 
 // Accounts written field by field in the program's own order, so offsets are checked, not assumed.
 const keyOf = (byte: number) => getAddressDecoder().decode(new Uint8Array(32).fill(byte));
