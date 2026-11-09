@@ -146,6 +146,22 @@ mod tests {
     }
 
     #[test]
+    fn resolves_program_id_in_lookup_table_addresses() {
+        let mut bytes = vec![0u8; 9];
+        bytes[..8].copy_from_slice(&EVENT_IX_TAG);
+        let encoded = bs58::encode(&bytes).into_string();
+        let mut payload = make_payload("static-key", &encoded);
+
+        payload[0].meta.loaded_addresses.readonly =
+            vec![SUBSCRIPTIONS_PROGRAM_ID.to_string()];
+        payload[0].meta.inner_instructions[0].instructions[0].program_id_index = 1;
+
+        let events = extract_events(&payload);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].signature, "sig");
+    }
+
+    #[test]
     fn drops_events_from_failed_transactions() {
         let mut bytes = vec![0u8; 9];
         bytes[..8].copy_from_slice(&EVENT_IX_TAG);
