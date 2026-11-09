@@ -77,7 +77,8 @@ pub fn extract_events(payload: &WebhookPayload) -> Vec<ExtractedEvent> {
 mod tests {
     use super::*;
     use crate::types::{
-        InnerInstruction, Instruction, Message, Meta, RawTransaction, TransactionInner,
+        InnerInstruction, Instruction, LoadedAddresses, Message, Meta, RawTransaction,
+        TransactionInner,
     };
 
     fn make_payload(program_id: &str, data: &str) -> WebhookPayload {
