@@ -28,7 +28,13 @@ export type Delegation =
 
 /// A delegation account's header and terms. A subscription's delegatee is its plan.
 export function delegation(data: Uint8Array): Delegation | undefined {
-  if (data[1] !== 1) return undefined;
+  // Check the complete layout before decoding its header. Untrusted or truncated
+  // program-account data must not abort discovery for an entire wallet.
+  const supported =
+    (data[0] === 2 && data.length === 187) ||
+    (data[0] === 3 && data.length === 211) ||
+    (data[0] === 4 && data.length === 155);
+  if (data[1] !== 1 || !supported) return undefined;
   const header = { delegator: key(data, 3), delegatee: key(data, 35), payer: key(data, 67) };
   if (data[0] === 2 && data.length === 187)
     return { ...header, kind: "fixed", mint: key(data, 139), amount: u64(data, 171), expiry: i64(data, 179) };
