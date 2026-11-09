@@ -180,6 +180,18 @@ test("lifecycle events and unknown lengths", () => {
   expect(event(Uint8Array.from([0, ...created]))).toBeUndefined();
 });
 
+test("RPC signature windows cannot certify archival completeness", () => {
+  for (const count of [0, 1, 24, 25]) {
+    expect(historyCoverage(count, 25)).toEqual({
+      checkedSignatures: count,
+      windowLimit: 25,
+      complete: false,
+    });
+  }
+  expect(() => historyCoverage(26, 25)).toThrow("Invalid history window");
+  expect(() => historyCoverage(-1, 25)).toThrow("Invalid history window");
+});
+
 test("base58 reads what the address encoder writes, leading zeros included", () => {
   for (const byte of [0, 1, 5, 255])
     expect(base58(keyOf(byte))).toEqual(Uint8Array.from(getAddressEncoder().encode(keyOf(byte) as Address)));
