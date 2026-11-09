@@ -68,8 +68,8 @@ mod tests {
             }
         }))
         .unwrap();
-        assert_eq!(meta.loaded_addresses.writable, ["lookup-writable"]);
-        assert_eq!(meta.loaded_addresses.readonly, ["lookup-readonly"]);
+        assert_eq!(meta.loaded_addresses.writable, vec!["lookup-writable".to_string()]);
+        assert_eq!(meta.loaded_addresses.readonly, vec!["lookup-readonly".to_string()]);
     }
 
     #[test]
