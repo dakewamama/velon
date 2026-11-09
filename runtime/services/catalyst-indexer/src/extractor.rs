@@ -24,7 +24,16 @@ pub fn extract_events(payload: &WebhookPayload) -> Vec<ExtractedEvent> {
             .cloned()
             .unwrap_or_default();
 
-        let account_keys = &tx.transaction.message.account_keys;
+        // In versioned transactions, programIdIndex indexes static keys followed by
+        // loaded writable and then loaded readonly lookup-table addresses.
+        let account_keys = tx
+            .transaction
+            .message
+            .account_keys
+            .iter()
+            .chain(&tx.meta.loaded_addresses.writable)
+            .chain(&tx.meta.loaded_addresses.readonly)
+            .collect::<Vec<_>>();
 
         for inner in &tx.meta.inner_instructions {
             for (position, instruction) in inner.instructions.iter().enumerate() {
