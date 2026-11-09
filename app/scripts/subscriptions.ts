@@ -18,9 +18,13 @@ export const NONE = "11111111111111111111111111111111";
 // mean that an upstream RPC no longer retains older transactions. Never certify a complete
 // payment history from the size of a single RPC response.
 export function historyCoverage(checkedSignatures: number, windowLimit: number) {
-  if (!Number.isSafeInteger(checkedSignatures) || checkedSignatures < 0 ||
-      !Number.isSafeInteger(windowLimit) || windowLimit < 1 ||
-      checkedSignatures > windowLimit) {
+  if (
+    !Number.isSafeInteger(checkedSignatures) ||
+    checkedSignatures < 0 ||
+    !Number.isSafeInteger(windowLimit) ||
+    windowLimit < 1 ||
+    checkedSignatures > windowLimit
+  ) {
     throw new Error("Invalid history window");
   }
   return { checkedSignatures, windowLimit, complete: false as const };
