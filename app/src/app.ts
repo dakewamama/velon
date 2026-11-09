@@ -779,7 +779,9 @@ function charges(row: HTMLElement, panel: HTMLElement, delegation: string, token
       const last = pulls[0];
       line.textContent = last
         ? `Last charged ${quantity(amountOf(last.amount), token)} on ${day(last.time)}`
-        : "No charges yet";
+        : body.complete === true
+          ? "No charges in available history"
+          : "No charges in the last 25 checked transactions";
       const section = node("section", "", "charges");
       section.append(node("h4", "Charges and changes"));
       const list = node("ol");
