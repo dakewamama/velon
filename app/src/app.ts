@@ -806,9 +806,7 @@ function charges(row: HTMLElement, panel: HTMLElement, delegation: string, token
         events.length ? list : node("p", "No charges or changes yet.", "muted"),
         node(
           "p",
-          body.complete === true
-            ? "Read from every finalized transaction for this permission."
-            : "Read from its 25 most recent finalized transactions; older ones aren't shown.",
+          "Shows charges found in up to 25 recent finalized transactions. Older activity may be missing.",
           "muted",
         ),
       );
