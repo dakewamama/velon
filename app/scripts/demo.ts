@@ -22,7 +22,7 @@ import {
 } from "../src/wire.ts";
 import { DEVNET_GENESIS, MAINNET_GENESIS, otherConsoles, type Control } from "../src/control.ts";
 import { SUBSCRIPTIONS_PROGRAM, tokenCatalog, tokenCatalogAsync } from "./catalog.ts";
-import { base58, DELEGATOR_OFFSET, delegation, event, plan, type Delegation } from "./subscriptions.ts";
+import { base58, DELEGATOR_OFFSET, delegation, event, historyCoverage, plan, type Delegation } from "./subscriptions.ts";
 import { planName } from "../src/plain.ts";
 import type { Live } from "../src/server.ts";
 
