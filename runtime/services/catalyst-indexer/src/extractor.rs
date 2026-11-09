@@ -86,6 +86,7 @@ mod tests {
             slot: 1,
             meta: Meta {
                 err: None,
+                loaded_addresses: LoadedAddresses::default(),
                 inner_instructions: vec![InnerInstruction {
                     index: 2,
                     instructions: vec![Instruction {
