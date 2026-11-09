@@ -27,6 +27,16 @@ pub struct Meta {
     pub err: Option<serde_json::Value>,
     #[serde(rename = "innerInstructions", default)]
     pub inner_instructions: Vec<InnerInstruction>,
+    #[serde(rename = "loadedAddresses", default)]
+    pub loaded_addresses: LoadedAddresses,
+}
+
+#[derive(Default, Deserialize)]
+pub struct LoadedAddresses {
+    #[serde(default)]
+    pub writable: Vec<String>,
+    #[serde(default)]
+    pub readonly: Vec<String>,
 }
 
 #[derive(Deserialize)]
