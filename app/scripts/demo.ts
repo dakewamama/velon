@@ -548,8 +548,9 @@ if (process.env.RPC_URL) {
         }),
       );
     events.sort((a, b) => b.slot - a.slot || b.outer - a.outer || b.inner - a.inner);
-    // Fewer signatures than asked for means the account's whole history was read.
-    return { delegation: address, kind: found.kind, complete: signatures.length < HISTORY, events };
+    // An RPC result shorter than the requested page does not prove the provider
+    // retained every historical signature for this address.
+    return { delegation: address, kind: found.kind, ...historyCoverage(signatures.length, HISTORY), events };
   };
   const history: Live["history"] = async (address) => {
     const now = Date.now();
