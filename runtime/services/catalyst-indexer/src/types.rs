@@ -58,6 +58,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn deserializes_versioned_loaded_addresses() {
+        let meta: Meta = serde_json::from_value(serde_json::json!({
+            "err": null,
+            "innerInstructions": [],
+            "loadedAddresses": {
+                "writable": ["lookup-writable"],
+                "readonly": ["lookup-readonly"]
+            }
+        }))
+        .unwrap();
+        assert_eq!(meta.loaded_addresses.writable, ["lookup-writable"]);
+        assert_eq!(meta.loaded_addresses.readonly, ["lookup-readonly"]);
+    }
+
+    #[test]
     fn deserializes_real_helius_raw_payload_shape() {
         let json = r#"[{
             "slot": 123456,
