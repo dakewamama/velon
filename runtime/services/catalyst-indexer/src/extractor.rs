@@ -153,9 +153,9 @@ mod tests {
         let encoded = bs58::encode(&bytes).into_string();
         let mut payload = make_payload("static-key", &encoded);
 
-        payload[0].meta.loaded_addresses.readonly =
-            vec![SUBSCRIPTIONS_PROGRAM_ID.to_string()];
-        payload[0].meta.inner_instructions[0].instructions[0].program_id_index = 1;
+        payload[0].meta.loaded_addresses.writable = vec!["lookup-writable".to_string()];
+        payload[0].meta.loaded_addresses.readonly = vec![SUBSCRIPTIONS_PROGRAM_ID.to_string()];
+        payload[0].meta.inner_instructions[0].instructions[0].program_id_index = 2;
 
         let events = extract_events(&payload);
         assert_eq!(events.len(), 1);
