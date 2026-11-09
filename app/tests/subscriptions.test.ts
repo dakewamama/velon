@@ -70,6 +70,8 @@ test("a subscription's delegatee is its plan, with the terms it locked in", () =
 test("any other kind, version or length is not read", () => {
   const fixed = header(2).key(4).key(5).u64(1n).i64(1n).done();
   expect(delegation(fixed.slice(0, 186))).toBeUndefined();
+  expect(delegation(Uint8Array.of(4, 1))).toBeUndefined();
+  expect(delegation(Uint8Array.of(2, 1, 0))).toBeUndefined();
   expect(delegation(Uint8Array.from([...fixed, 0]))).toBeUndefined();
   expect(delegation(Uint8Array.from(fixed, (byte, index) => (index === 1 ? 2 : byte)))).toBeUndefined();
   expect(delegation(Uint8Array.from(fixed, (byte, index) => (index === 0 ? 5 : byte)))).toBeUndefined();
