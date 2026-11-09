@@ -33,6 +33,7 @@ pub fn extract_events(payload: &WebhookPayload) -> Vec<ExtractedEvent> {
             .iter()
             .chain(&tx.meta.loaded_addresses.writable)
             .chain(&tx.meta.loaded_addresses.readonly)
+            .map(String::as_str)
             .collect::<Vec<_>>();
 
         for inner in &tx.meta.inner_instructions {
@@ -42,7 +43,7 @@ pub fn extract_events(payload: &WebhookPayload) -> Vec<ExtractedEvent> {
                     None => continue,
                 };
 
-                if program_id != SUBSCRIPTIONS_PROGRAM_ID {
+                if *program_id != SUBSCRIPTIONS_PROGRAM_ID {
                     continue;
                 }
 
