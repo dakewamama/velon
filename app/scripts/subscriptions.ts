@@ -14,6 +14,18 @@ const i64 = (data: Uint8Array, offset: number) =>
 export const DELEGATOR_OFFSET = 3;
 export const NONE = "11111111111111111111111111111111";
 
+// RPC signature pagination is not an archival-completeness proof. Even a short page can
+// mean that an upstream RPC no longer retains older transactions. Never certify a complete
+// payment history from the size of a single RPC response.
+export function historyCoverage(checkedSignatures: number, windowLimit: number) {
+  if (!Number.isSafeInteger(checkedSignatures) || checkedSignatures < 0 ||
+      !Number.isSafeInteger(windowLimit) || windowLimit < 1 ||
+      checkedSignatures > windowLimit) {
+    throw new Error("Invalid history window");
+  }
+  return { checkedSignatures, windowLimit, complete: false as const };
+}
+
 type Header = { delegator: Address; delegatee: Address; payer: Address };
 export type Delegation =
   | (Header & { kind: "fixed"; mint: Address; amount: bigint; expiry: bigint })
