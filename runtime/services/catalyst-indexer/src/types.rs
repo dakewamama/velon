@@ -83,6 +83,8 @@ mod tests {
         assert_eq!(payload.len(), 1);
         assert_eq!(payload[0].slot, 123456);
         assert_eq!(payload[0].transaction.signatures[0], "sig123");
+        assert!(payload[0].meta.loaded_addresses.writable.is_empty());
+        assert!(payload[0].meta.loaded_addresses.readonly.is_empty());
         assert_eq!(
             payload[0].meta.inner_instructions[0].instructions[0].program_id_index,
             12
