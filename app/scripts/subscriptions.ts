@@ -14,6 +14,22 @@ const i64 = (data: Uint8Array, offset: number) =>
 export const DELEGATOR_OFFSET = 3;
 export const NONE = "11111111111111111111111111111111";
 
+// RPC signature pagination is not an archival-completeness proof. Even a short page can
+// mean that an upstream RPC no longer retains older transactions. Never certify a complete
+// payment history from the size of a single RPC response.
+export function historyCoverage(checkedSignatures: number, windowLimit: number) {
+  if (
+    !Number.isSafeInteger(checkedSignatures) ||
+    checkedSignatures < 0 ||
+    !Number.isSafeInteger(windowLimit) ||
+    windowLimit < 1 ||
+    checkedSignatures > windowLimit
+  ) {
+    throw new Error("Invalid history window");
+  }
+  return { checkedSignatures, windowLimit, complete: false as const };
+}
+
 type Header = { delegator: Address; delegatee: Address; payer: Address };
 export type Delegation =
   | (Header & { kind: "fixed"; mint: Address; amount: bigint; expiry: bigint })
@@ -28,7 +44,13 @@ export type Delegation =
 
 /// A delegation account's header and terms. A subscription's delegatee is its plan.
 export function delegation(data: Uint8Array): Delegation | undefined {
-  if (data[1] !== 1) return undefined;
+  // Check the complete layout before decoding its header. Untrusted or truncated
+  // program-account data must not abort discovery for an entire wallet.
+  const supported =
+    (data[0] === 2 && data.length === 187) ||
+    (data[0] === 3 && data.length === 211) ||
+    (data[0] === 4 && data.length === 155);
+  if (data[1] !== 1 || !supported) return undefined;
   const header = { delegator: key(data, 3), delegatee: key(data, 35), payer: key(data, 67) };
   if (data[0] === 2 && data.length === 187)
     return { ...header, kind: "fixed", mint: key(data, 139), amount: u64(data, 171), expiry: i64(data, 179) };

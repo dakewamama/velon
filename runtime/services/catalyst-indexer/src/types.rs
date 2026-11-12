@@ -27,6 +27,16 @@ pub struct Meta {
     pub err: Option<serde_json::Value>,
     #[serde(rename = "innerInstructions", default)]
     pub inner_instructions: Vec<InnerInstruction>,
+    #[serde(rename = "loadedAddresses", default)]
+    pub loaded_addresses: LoadedAddresses,
+}
+
+#[derive(Default, Deserialize)]
+pub struct LoadedAddresses {
+    #[serde(default)]
+    pub writable: Vec<String>,
+    #[serde(default)]
+    pub readonly: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -46,6 +56,21 @@ pub struct Instruction {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deserializes_versioned_loaded_addresses() {
+        let meta: Meta = serde_json::from_value(serde_json::json!({
+            "err": null,
+            "innerInstructions": [],
+            "loadedAddresses": {
+                "writable": ["lookup-writable"],
+                "readonly": ["lookup-readonly"]
+            }
+        }))
+        .unwrap();
+        assert_eq!(meta.loaded_addresses.writable, vec!["lookup-writable".to_string()]);
+        assert_eq!(meta.loaded_addresses.readonly, vec!["lookup-readonly".to_string()]);
+    }
 
     #[test]
     fn deserializes_real_helius_raw_payload_shape() {
@@ -73,6 +98,8 @@ mod tests {
         assert_eq!(payload.len(), 1);
         assert_eq!(payload[0].slot, 123456);
         assert_eq!(payload[0].transaction.signatures[0], "sig123");
+        assert!(payload[0].meta.loaded_addresses.writable.is_empty());
+        assert!(payload[0].meta.loaded_addresses.readonly.is_empty());
         assert_eq!(
             payload[0].meta.inner_instructions[0].instructions[0].program_id_index,
             12

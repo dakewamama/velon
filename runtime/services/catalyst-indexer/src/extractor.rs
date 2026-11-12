@@ -24,7 +24,17 @@ pub fn extract_events(payload: &WebhookPayload) -> Vec<ExtractedEvent> {
             .cloned()
             .unwrap_or_default();
 
-        let account_keys = &tx.transaction.message.account_keys;
+        // In versioned transactions, programIdIndex indexes static keys followed by
+        // loaded writable and then loaded readonly lookup-table addresses.
+        let account_keys = tx
+            .transaction
+            .message
+            .account_keys
+            .iter()
+            .chain(&tx.meta.loaded_addresses.writable)
+            .chain(&tx.meta.loaded_addresses.readonly)
+            .map(String::as_str)
+            .collect::<Vec<_>>();
 
         for inner in &tx.meta.inner_instructions {
             for (position, instruction) in inner.instructions.iter().enumerate() {
@@ -33,7 +43,7 @@ pub fn extract_events(payload: &WebhookPayload) -> Vec<ExtractedEvent> {
                     None => continue,
                 };
 
-                if program_id != SUBSCRIPTIONS_PROGRAM_ID {
+                if *program_id != SUBSCRIPTIONS_PROGRAM_ID {
                     continue;
                 }
 
@@ -68,7 +78,8 @@ pub fn extract_events(payload: &WebhookPayload) -> Vec<ExtractedEvent> {
 mod tests {
     use super::*;
     use crate::types::{
-        InnerInstruction, Instruction, Message, Meta, RawTransaction, TransactionInner,
+        InnerInstruction, Instruction, LoadedAddresses, Message, Meta, RawTransaction,
+        TransactionInner,
     };
 
     fn make_payload(program_id: &str, data: &str) -> WebhookPayload {
@@ -76,6 +87,7 @@ mod tests {
             slot: 1,
             meta: Meta {
                 err: None,
+                loaded_addresses: LoadedAddresses::default(),
                 inner_instructions: vec![InnerInstruction {
                     index: 2,
                     instructions: vec![Instruction {
@@ -132,6 +144,22 @@ mod tests {
         assert_eq!(events[0].signature, "sig");
         assert_eq!(events[0].slot, 1);
         assert_eq!((events[0].outer_index, events[0].inner_index), (2, 0));
+    }
+
+    #[test]
+    fn resolves_program_id_in_lookup_table_addresses() {
+        let mut bytes = vec![0u8; 9];
+        bytes[..8].copy_from_slice(&EVENT_IX_TAG);
+        let encoded = bs58::encode(&bytes).into_string();
+        let mut payload = make_payload("static-key", &encoded);
+
+        payload[0].meta.loaded_addresses.writable = vec!["lookup-writable".to_string()];
+        payload[0].meta.loaded_addresses.readonly = vec![SUBSCRIPTIONS_PROGRAM_ID.to_string()];
+        payload[0].meta.inner_instructions[0].instructions[0].program_id_index = 2;
+
+        let events = extract_events(&payload);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].signature, "sig");
     }
 
     #[test]

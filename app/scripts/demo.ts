@@ -22,7 +22,15 @@ import {
 } from "../src/wire.ts";
 import { DEVNET_GENESIS, MAINNET_GENESIS, otherConsoles, type Control } from "../src/control.ts";
 import { SUBSCRIPTIONS_PROGRAM, tokenCatalog, tokenCatalogAsync } from "./catalog.ts";
-import { base58, DELEGATOR_OFFSET, delegation, event, plan, type Delegation } from "./subscriptions.ts";
+import {
+  base58,
+  DELEGATOR_OFFSET,
+  delegation,
+  event,
+  historyCoverage,
+  plan,
+  type Delegation,
+} from "./subscriptions.ts";
 import { planName } from "../src/plain.ts";
 import type { Live } from "../src/server.ts";
 
@@ -548,8 +556,14 @@ if (process.env.RPC_URL) {
         }),
       );
     events.sort((a, b) => b.slot - a.slot || b.outer - a.outer || b.inner - a.inner);
-    // Fewer signatures than asked for means the account's whole history was read.
-    return { delegation: address, kind: found.kind, complete: signatures.length < HISTORY, events };
+    // An RPC result shorter than the requested page does not prove the provider
+    // retained every historical signature for this address.
+    return {
+      delegation: address,
+      kind: found.kind,
+      ...historyCoverage(signatures.length, HISTORY),
+      events,
+    };
   };
   const history: Live["history"] = async (address) => {
     const now = Date.now();

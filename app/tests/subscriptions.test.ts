@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { getAddressDecoder, getAddressEncoder, type Address } from "@solana/addresses";
-import { base58, delegation, event, EVENT_TAG, plan } from "../scripts/subscriptions.ts";
+import { base58, delegation, event, EVENT_TAG, historyCoverage, plan } from "../scripts/subscriptions.ts";
 
 // Accounts written field by field in the program's own order, so offsets are checked, not assumed.
 const keyOf = (byte: number) => getAddressDecoder().decode(new Uint8Array(32).fill(byte));
@@ -70,6 +70,8 @@ test("a subscription's delegatee is its plan, with the terms it locked in", () =
 test("any other kind, version or length is not read", () => {
   const fixed = header(2).key(4).key(5).u64(1n).i64(1n).done();
   expect(delegation(fixed.slice(0, 186))).toBeUndefined();
+  expect(delegation(Uint8Array.of(4, 1))).toBeUndefined();
+  expect(delegation(Uint8Array.of(2, 1, 0))).toBeUndefined();
   expect(delegation(Uint8Array.from([...fixed, 0]))).toBeUndefined();
   expect(delegation(Uint8Array.from(fixed, (byte, index) => (index === 1 ? 2 : byte)))).toBeUndefined();
   expect(delegation(Uint8Array.from(fixed, (byte, index) => (index === 0 ? 5 : byte)))).toBeUndefined();
@@ -176,6 +178,18 @@ test("lifecycle events and unknown lengths", () => {
   expect(event(tagged(2, new Uint8Array(255)))).toBeUndefined();
   expect(event(tagged(6, new Uint8Array(201)))).toBeUndefined();
   expect(event(Uint8Array.from([0, ...created]))).toBeUndefined();
+});
+
+test("RPC signature windows cannot certify archival completeness", () => {
+  for (const count of [0, 1, 24, 25]) {
+    expect(historyCoverage(count, 25)).toEqual({
+      checkedSignatures: count,
+      windowLimit: 25,
+      complete: false,
+    });
+  }
+  expect(() => historyCoverage(26, 25)).toThrow("Invalid history window");
+  expect(() => historyCoverage(-1, 25)).toThrow("Invalid history window");
 });
 
 test("base58 reads what the address encoder writes, leading zeros included", () => {
