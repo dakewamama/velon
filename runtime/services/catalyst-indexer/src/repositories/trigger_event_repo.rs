@@ -15,6 +15,17 @@ impl TriggerEventRepo {
         &self,
         event: &NewTriggerEvent,
     ) -> Result<Option<TriggerEvent>, sqlx::Error> {
+        // A NULL position bypasses SQLite's unique index. Do not acknowledge
+        // newly ingested evidence that cannot be replayed idempotently.
+        if event.signature.is_empty()
+            || event.slot.is_none_or(|value| value < 0)
+            || event
+                .outer_index
+                .is_none_or(|value| !(0..=255).contains(&value))
+            || event.inner_index.is_none_or(|value| value < 0)
+        {
+            return Err(sqlx::Error::Protocol("missing event position".into()));
+        }
         let row = sqlx::query_as::<_, TriggerEvent>(
             r#"
             INSERT INTO trigger_events (
@@ -54,6 +65,27 @@ impl TriggerEventRepo {
         .fetch_optional(&self.db)
         .await?;
 
+        if row.is_none() {
+            let existing: (String, i64, Vec<u8>, Option<i64>) = sqlx::query_as(
+                "SELECT program_id, discriminator, raw_data, slot FROM trigger_events \
+                 WHERE signature = ? AND outer_index = ? AND inner_index = ?",
+            )
+            .bind(&event.signature)
+            .bind(event.outer_index)
+            .bind(event.inner_index)
+            .fetch_one(&self.db)
+            .await?;
+            if existing
+                != (
+                    event.program_id.clone(),
+                    i64::from(event.discriminator),
+                    event.raw_data.clone(),
+                    event.slot,
+                )
+            {
+                return Err(sqlx::Error::Protocol("conflicting event evidence".into()));
+            }
+        }
         Ok(row)
     }
 
@@ -146,5 +178,56 @@ mod tests {
         assert!(repo.insert(&second).await.unwrap().is_some());
         assert!(repo.insert(&second).await.unwrap().is_none());
         assert_eq!(repo.list().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn conflicting_replay_fails_without_replacing_retained_bytes() {
+        let repo = setup().await;
+        repo.insert(&make_event()).await.unwrap();
+        for changed in [
+            NewTriggerEvent {
+                raw_data: vec![1; 9],
+                ..make_event()
+            },
+            NewTriggerEvent {
+                slot: Some(8),
+                ..make_event()
+            },
+            NewTriggerEvent {
+                program_id: "another-program".into(),
+                ..make_event()
+            },
+        ] {
+            assert!(repo.insert(&changed).await.is_err());
+        }
+        let rows = repo.list().await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].raw_data, make_event().raw_data);
+    }
+
+    #[tokio::test]
+    async fn missing_positions_cannot_bypass_replay_deduplication() {
+        let repo = setup().await;
+        for invalid in [
+            NewTriggerEvent {
+                signature: String::new(),
+                ..make_event()
+            },
+            NewTriggerEvent {
+                slot: None,
+                ..make_event()
+            },
+            NewTriggerEvent {
+                outer_index: None,
+                ..make_event()
+            },
+            NewTriggerEvent {
+                inner_index: None,
+                ..make_event()
+            },
+        ] {
+            assert!(repo.insert(&invalid).await.is_err());
+        }
+        assert!(repo.list().await.unwrap().is_empty());
     }
 }
