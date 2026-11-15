@@ -2,12 +2,26 @@ import { expect, test } from "bun:test";
 import {
   DEVNET_GENESIS,
   otherConsoles,
+  requireRelease,
   reviewAction,
   reviewRevoke,
   verifiedAction,
   verifiedRevoke,
 } from "../src/control.ts";
-import { array, object, type ObjectValue } from "../src/wire.ts";
+import { array, object, type Json, type ObjectValue } from "../src/wire.ts";
+
+test("a hosted console rejects missing, incompatible or different backend release metadata", () => {
+  const revision = "a".repeat(40);
+  expect(() => requireRelease({ apiVersion: "1", revision }, revision)).not.toThrow();
+  for (const config of [
+    null,
+    {},
+    { apiVersion: "2", revision },
+    { apiVersion: "1", revision: "b".repeat(40) },
+  ] as Json[])
+    expect(() => requireRelease(config, revision)).toThrow("different releases");
+  expect(() => requireRelease(null)).not.toThrow();
+});
 import fixture from "./fixtures/spl-control.json";
 
 const devnet = { cluster: DEVNET_GENESIS, rpcUrl: "http://127.0.0.1:1", network: "devnet" } as const;

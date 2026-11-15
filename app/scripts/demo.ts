@@ -20,7 +20,13 @@ import {
   writeJson,
   type Json,
 } from "../src/wire.ts";
-import { DEVNET_GENESIS, MAINNET_GENESIS, otherConsoles, type Control } from "../src/control.ts";
+import {
+  CONTROL_API_VERSION,
+  DEVNET_GENESIS,
+  MAINNET_GENESIS,
+  otherConsoles,
+  type Control,
+} from "../src/control.ts";
 import { SUBSCRIPTIONS_PROGRAM, tokenCatalog, tokenCatalogAsync } from "./catalog.ts";
 import { DELEGATOR_OFFSET, delegation, discoverDelegations, plan, type Delegation } from "./subscriptions.ts";
 import { planName } from "../src/plain.ts";
@@ -179,7 +185,14 @@ if (process.env.RPC_URL) {
   if (!verified)
     throw new Error(`LIVE_CATALOG has no SPL Token deployment with runtime evidence for cluster ${cluster}.`);
   const elsewhere = otherConsoles(process.env.PUBLIC_NETWORKS, network);
-  control = { rpcUrl: rpcUrl.href, network, cluster, ...(elsewhere.length ? { elsewhere } : {}) };
+  control = {
+    rpcUrl: rpcUrl.href,
+    network,
+    cluster,
+    apiVersion: CONTROL_API_VERSION,
+    revision: CATALOGER_REVISION,
+    ...(elsewhere.length ? { elsewhere } : {}),
+  };
   const encoder = getAddressEncoder();
   const bytes = (address: string) => Array.from(encoder.encode(address as Address));
   const ASSOCIATED_TOKEN = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";

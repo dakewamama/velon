@@ -15,6 +15,8 @@ import {
 } from "./wire.ts";
 
 export type Control = {
+  apiVersion?: string;
+  revision?: string;
   cluster: string;
   rpcUrl: string;
   network: "mainnet" | "devnet" | "localnet";
@@ -23,6 +25,21 @@ export type Control = {
   /// The consoles for the other public networks, each a separate deployment.
   elsewhere?: Elsewhere[];
 };
+
+export const CONTROL_API_VERSION = "1";
+
+// Hosted exports carry their expected backend commit. A cached/new console must
+// fail before enabling controls against a different release or an older API.
+export function requireRelease(value: Json, expected?: string): void {
+  if (!expected) return;
+  const config = value === null ? undefined : object(value);
+  if (
+    !/^[a-f0-9]{40}$/.test(expected) ||
+    config?.apiVersion !== CONTROL_API_VERSION ||
+    config.revision !== expected
+  )
+    throw new Error("The console and backend are running different releases. Refresh after the update.");
+}
 export type Elsewhere = { network: "mainnet" | "devnet"; url: string };
 
 /// Reads `mainnet=https://…,devnet=https://…` into the consoles other than this one. Anything that

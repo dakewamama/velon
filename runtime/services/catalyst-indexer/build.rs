@@ -15,6 +15,14 @@ fn main() {
         if let Some(head) = git(&["rev-parse", "--git-path", "HEAD"]) {
             println!("cargo:rerun-if-changed={head}");
         }
+        if let Some(reference) = git(&["symbolic-ref", "-q", "HEAD"])
+            && let Some(path) = git(&["rev-parse", "--git-path", &reference])
+        {
+            println!("cargo:rerun-if-changed={path}");
+        }
+        if let Some(path) = git(&["rev-parse", "--git-path", "packed-refs"]) {
+            println!("cargo:rerun-if-changed={path}");
+        }
         if let Some(index) = git(&["rev-parse", "--git-path", "index"]) {
             println!("cargo:rerun-if-changed={index}");
         }

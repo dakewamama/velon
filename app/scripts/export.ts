@@ -62,7 +62,22 @@ try {
           ["/app", "app.html"],
         ] as const);
   for (const [path, file] of pages) {
-    const html = await (await get(path)).text();
+    let html = await (await get(path)).text();
+    if (path === "/app" && process.env.HOSTED_RUNTIME === "1") {
+      const revision =
+        process.env.VELON_REVISION ??
+        Bun.spawnSync(["git", "rev-parse", "HEAD"], {
+          cwd: root,
+          stdout: "pipe",
+          stderr: "inherit",
+        })
+          .stdout.toString()
+          .trim();
+      if (!/^[a-f0-9]{40}$/.test(revision)) throw new Error("Hosted export requires a commit revision.");
+      html = html.replace("<head>", `<head><meta name="velon-backend-revision" content="${revision}">`);
+      if (!html.includes(`name="velon-backend-revision"`))
+        throw new Error("Hosted release pin was not embedded.");
+    }
     await Bun.write(`${out}/${file}`, html);
     for (const [, asset] of html.matchAll(/(?:src|href)="\.\/([^"]+\.(?:js|css))"/g)) {
       const body = await (await get(`/${asset}`)).arrayBuffer();

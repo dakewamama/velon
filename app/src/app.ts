@@ -3,6 +3,7 @@ import { signAndSubmitReviewedTransaction } from "catalyst-sdk/src/submit";
 import {
   action,
   otherConsoles,
+  requireRelease,
   result,
   reviewAction,
   verifiedAction,
@@ -142,6 +143,13 @@ async function get(path: string, signal?: AbortSignal): Promise<Json> {
     throw new Error("The observation provider is unavailable. Try scanning again.");
   }
   return readJson(await response.text());
+}
+
+const expectedRelease = () =>
+  document.querySelector<HTMLMetaElement>('meta[name="velon-backend-revision"]')?.content;
+async function matchBackendRelease(signal?: AbortSignal) {
+  const expected = expectedRelease();
+  if (expected) requireRelease(await get("control", signal), expected);
 }
 
 function status(message: string, error = false) {
@@ -2630,6 +2638,7 @@ async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "
   draw();
   sendRequested = false;
   try {
+    await matchBackendRelease(signal);
     setAction("PREPARING", "Reading the account's latest final state…");
     if (!key) throw new Error("This permission has no account Velon can revoke it by.");
     if (batchScopes.has(scope)) {
@@ -2762,6 +2771,7 @@ async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "
             signal.throwIfAborted();
             if (connected !== session || signed.length !== 1)
               throw new Error("Wallet signing response changed.");
+            await matchBackendRelease(signal);
             const current = object(await get(`scopes/${scope}`, signal));
             if (current.id !== stateVersion)
               throw new Error("Permission evidence changed while signing. Review again.");
@@ -3354,6 +3364,7 @@ document.querySelector<HTMLButtonElement>("#scan-tab")!.onclick = () => setMode(
 document.querySelector<HTMLButtonElement>("#diff-tab")!.onclick = () => setMode("diff");
 try {
   const [scenarioData, controlData] = await Promise.all([get("scenarios"), get("control")]);
+  requireRelease(controlData, expectedRelease());
   if (controlData !== null) {
     const config = object(controlData);
     if (config.network !== "mainnet" && config.network !== "devnet" && config.network !== "localnet")

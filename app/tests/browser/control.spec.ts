@@ -433,6 +433,54 @@ test("wallet signs exact revoke and success waits for finalized verification and
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test("a hosted console refuses a backend from another release before enabling wallet controls", async ({
+  page,
+}) => {
+  const provider = await browserProvider(page);
+  await page.route("**/app", async (route) => {
+    const response = await route.fetch();
+    const html = await response.text();
+    expect(html).toContain("<head>");
+    await route.fulfill({
+      response,
+      body: html.replace("<head>", `<head><meta name="velon-backend-revision" content="${"a".repeat(40)}">`),
+    });
+  });
+  await page.goto("/app");
+  await expect(page.locator("#notice")).toContainText("different releases");
+  expect(provider.counts()).toEqual({ sends: 0, polls: 0, observes: 0 });
+  await expect(page.getByRole("button", { name: "Remove access", exact: true })).toHaveCount(0);
+});
+
+test("a hosted console with the matching release can review the verified action", async ({ page }) => {
+  await browserProvider(page);
+  const revision = "a".repeat(40);
+  await page.route("**/api/control", (route) =>
+    route.fulfill({
+      json: {
+        apiVersion: "1",
+        revision,
+        cluster: DEVNET_GENESIS,
+        rpcUrl: "http://127.0.0.1:3390/wallet-test-rpc",
+        network: "devnet",
+      },
+    }),
+  );
+  await page.route("**/app", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body: (await response.text()).replace(
+        "<head>",
+        `<head><meta name="velon-backend-revision" content="${revision}">`,
+      ),
+    });
+  });
+  await connectAndReview(page);
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.locator("#notice")).not.toContainText("different releases");
+});
+
 for (const mode of [
   "rejected",
   "tampered",

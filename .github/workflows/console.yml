@@ -145,5 +145,11 @@ jobs:
             echo "::error::$CONSOLE serves ${live:-nothing}, not $bundle."
             exit 1
           fi
-          curl -fsS -m 60 -o /dev/null "$CONSOLE/api/control"
+          curl -fsS -m 60 -o "$RUNNER_TEMP/velon-control.json" "$CONSOLE/api/control"
+          python3 - <<'PY'
+          import json, os, pathlib
+          control = json.loads((pathlib.Path(os.environ['RUNNER_TEMP']) / 'velon-control.json').read_text())
+          if not control or control.get('apiVersion') != '1' or control.get('revision') != os.environ['GITHUB_SHA']:
+              raise SystemExit('Console/backend release identity mismatch')
+          PY
           echo "$CONSOLE serves $bundle and reaches its backend."
