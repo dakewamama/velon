@@ -70,7 +70,6 @@ import {
   planChanges,
   planName,
   planSentence,
-  amount as quantity,
   when,
   subscriptionsAuthority,
   UNVERIFIED,
@@ -607,7 +606,7 @@ function card(
     object(grant.authority_kind).kind === "derived" &&
     delegation
   )
-    charges(row, panel, delegation, known.token);
+    charges(row, panel, delegation);
   const button = node("button", list ? "Details" : "Technical details", "link-button");
   button.type = "button";
   button.setAttribute("aria-expanded", "false");
@@ -756,10 +755,13 @@ const amountOf = (value: Json | undefined) => {
 const day = (seconds: Json | undefined) =>
   seconds == null
     ? "an unknown date"
-    : (when(integer(seconds))?.split(",").slice(0, 2).join(",") ?? "an unknown date");
+    : (when(typeof seconds === "string" ? BigInt(seconds) : integer(seconds))
+        ?.split(",")
+        .slice(0, 2)
+        .join(",") ?? "an unknown date");
 
 // The last charge goes on the row; every charge and change, with its transaction, goes under Details.
-function charges(row: HTMLElement, panel: HTMLElement, delegation: string, token: Facts["token"]) {
+function charges(row: HTMLElement, panel: HTMLElement, delegation: string) {
   const line = node("span", "Reading past charges…", "last-charge");
   (row.querySelector(".row-amount") ?? row.querySelector(".delegate") ?? row).append(line);
   void oneOf(async () => {
@@ -778,18 +780,16 @@ function charges(row: HTMLElement, panel: HTMLElement, delegation: string, token
       const pulls = events.filter((entry) => entry.kind === "pull");
       const last = pulls[0];
       line.textContent = last
-        ? `Last charged ${quantity(amountOf(last.amount), token)} on ${day(last.time)}`
-        : body.complete === true
-          ? "No charges in available history"
-          : "No charges in the last 25 checked transactions";
+        ? `Address activity on ${day(last.time)}`
+        : "No charges found in available history";
       const section = node("section", "", "charges");
-      section.append(node("h4", "Charges and changes"));
+      section.append(node("h4", "Address activity"));
       const list = node("ol");
       for (const entry of events) {
         const item = node("li");
         const said =
           entry.kind === "pull"
-            ? `Charged ${quantity(amountOf(entry.amount), token)}, paid to ${short(text(entry.receiver))}${entry.puller ? `, by ${short(text(entry.puller))}` : ""}`
+            ? `Transferred ${text(entry.amount)} base units of ${short(text(entry.mint))}, paid to ${short(text(entry.receiver))}${entry.puller ? `, by ${short(text(entry.puller))}` : "; initiator unknown"}`
             : entry.kind === "created"
               ? "Subscribed"
               : entry.kind === "cancelled"
@@ -803,13 +803,16 @@ function charges(row: HTMLElement, panel: HTMLElement, delegation: string, token
         list.append(item);
       }
       section.append(
-        events.length ? list : node("p", "No charges or changes yet.", "muted"),
+        events.length ? list : node("p", "No activity found in the available transactions.", "muted"),
         node(
           "p",
-          "Shows charges found in up to 25 recent finalized transactions. Older activity may be missing.",
+          "Up to 25 recent finalized transactions. Older or unavailable activity may be missing. This address may have been reused; these events have not been linked to the current permission.",
           "muted",
         ),
       );
+      const evidence = node("details");
+      evidence.append(node("summary", "Historical transaction evidence"), node("pre", writeJson(body, 2)));
+      section.append(evidence);
       // The history reads before the folded technical record, which stays last.
       const record = panel.querySelector(".record");
       if (record) record.before(section);

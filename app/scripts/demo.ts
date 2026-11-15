@@ -22,16 +22,9 @@ import {
 } from "../src/wire.ts";
 import { DEVNET_GENESIS, MAINNET_GENESIS, otherConsoles, type Control } from "../src/control.ts";
 import { SUBSCRIPTIONS_PROGRAM, tokenCatalog, tokenCatalogAsync } from "./catalog.ts";
-import {
-  base58,
-  DELEGATOR_OFFSET,
-  delegation,
-  event,
-  historyCoverage,
-  plan,
-  type Delegation,
-} from "./subscriptions.ts";
+import { DELEGATOR_OFFSET, delegation, historyCoverage, plan, type Delegation } from "./subscriptions.ts";
 import { planName } from "../src/plain.ts";
+import { transactionEvents } from "./history.ts";
 import type { Live } from "../src/server.ts";
 
 const root = resolve(import.meta.dir, "..");
@@ -493,76 +486,51 @@ if (process.env.RPC_URL) {
       };
     });
   };
-  // A delegation's past charges and lifecycle, from the cluster's finalized transactions. Only events
-  // the Subscriptions program emitted, in transactions that succeeded, for this delegation are kept.
+  // Address activity from finalized RPC transactions. Historical incarnation and
+  // deployment attribution remain unresolved; current state never supplies historical terms.
   const HISTORY = 25;
   const histories = new Map<string, { at: number; read: Promise<Json> }>();
   const readHistory = async (address: string): Promise<Json> => {
-    const info = array(
-      object(await rpc("getMultipleAccounts", [[address], { encoding: "base64", commitment: "finalized" }]))
-        .value,
-    )[0];
-    const found = info ? delegation(subscriptionData(info) ?? new Uint8Array()) : undefined;
-    if (!found) return { error: "Not a Subscriptions delegation." };
     const signatures = array(
       await rpc("getSignaturesForAddress", [address, { limit: HISTORY, commitment: "finalized" }]),
     ).map(object);
-    const events: (Record<string, Json> & { slot: number; outer: number; inner: number })[] = [];
-    const settled = signatures.filter((entry) => entry.err === null).map((entry) => text(entry.signature));
+    const events = new Map<string, Record<string, Json>>();
+    const gaps: Json[] = [];
+    const settled = signatures.filter((entry) => entry.err === null);
     for (let start = 0; start < settled.length; start += 4)
       await Promise.all(
-        settled.slice(start, start + 4).map(async (signature) => {
-          const tx = object(
-            await rpc("getTransaction", [
+        settled.slice(start, start + 4).map(async (entry) => {
+          const signature = text(entry.signature);
+          try {
+            const tx = await rpc("getTransaction", [
               signature,
               { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "finalized" },
-            ]),
-          );
-          const meta = object(tx.meta);
-          if (meta.err !== null) return;
-          const loaded = object(meta.loadedAddresses ?? {});
-          const keys = [
-            ...array(object(object(tx.transaction).message).accountKeys),
-            ...array(loaded.writable ?? []),
-            ...array(loaded.readonly ?? []),
-          ].map(text);
-          for (const group of array(meta.innerInstructions ?? []).map(object))
-            array(group.instructions).forEach((item, inner) => {
-              const instruction = object(item);
-              if (keys[Number(instruction.programIdIndex)] !== SUBSCRIPTIONS_PROGRAM) return;
-              const value = event(base58(text(instruction.data)) ?? new Uint8Array());
-              const ours =
-                value?.kind === "pull"
-                  ? value.delegation === address
-                  : value !== undefined &&
-                    found.kind === "subscription" &&
-                    value.plan === found.plan &&
-                    value.subscriber === found.delegator;
-              if (!value || !ours) return;
-              events.push({
-                ...Object.fromEntries(
-                  Object.entries(value).map(([field, data]) => [
-                    field,
-                    typeof data === "bigint" ? String(data) : data,
-                  ]),
-                ),
-                signature,
-                slot: Number(tx.slot),
-                time: tx.blockTime == null ? null : Number(tx.blockTime),
-                outer: Number(group.index),
-                inner,
-              });
-            });
+            ]);
+            for (const value of await transactionEvents(cluster, address, signature, entry.slot!, tx)) {
+              events.set(text(value.id), value);
+            }
+          } catch {
+            gaps.push({ signature, reason: "Transaction evidence unavailable or inconsistent." });
+          }
         }),
       );
-    events.sort((a, b) => b.slot - a.slot || b.outer - a.outer || b.inner - a.inner);
+    const ordered = [...events.values()].sort((a, b) => {
+      const left = BigInt(text(a.slot));
+      const right = BigInt(text(b.slot));
+      return left === right
+        ? Number(b.outer) - Number(a.outer) || Number(b.inner) - Number(a.inner)
+        : left > right
+          ? -1
+          : 1;
+    });
     // An RPC result shorter than the requested page does not prove the provider
     // retained every historical signature for this address.
     return {
       delegation: address,
-      kind: found.kind,
+      attribution: "unresolved",
       ...historyCoverage(signatures.length, HISTORY),
-      events,
+      events: ordered,
+      gaps,
     };
   };
   const history: Live["history"] = async (address) => {

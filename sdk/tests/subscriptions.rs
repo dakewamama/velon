@@ -644,6 +644,28 @@ fn native_token_revoke_suspends_grant_without_deleting_it() {
 }
 
 #[test]
+fn closing_and_recreating_child_reuses_parent_generation_and_projection_id() {
+    // The same nonce derives the same PDA. Header.init_id belongs to the parent,
+    // not to this child creation. History must never use the ARM ID as proof that
+    // an older transfer exercised the currently observed incarnation.
+    let mut accounts = accounts(1);
+    let vm = vm(&mut accounts);
+    let before = state(&accounts);
+    let grants = sdk::compile_state(&DelegationAdapter, &before, &context()).unwrap();
+    let closed = vm.process_instruction(&instruction(4), &accounts);
+    assert_eq!(closed.raw_result, Ok(()));
+    assert_eq!(state(&closed.resulting_accounts).delegation.1.lamports, 0);
+    let recreated = vm.process_instruction(&instruction(1), &closed.resulting_accounts);
+    assert_eq!(recreated.raw_result, Ok(()));
+    let after = state(&recreated.resulting_accounts);
+    assert_eq!(before.authority, after.authority);
+    assert_eq!(before.delegation.0, after.delegation.0);
+    assert_eq!(before.delegation.1.data, after.delegation.1.data);
+    let after_grants = sdk::compile_state(&DelegationAdapter, &after, &context()).unwrap();
+    assert_eq!(grants[1].id, after_grants[1].id);
+}
+
+#[test]
 fn native_authority_incarnation_controls_existing_grant() {
     for slot in [100, 101] {
         let mut accounts = accounts(2);
