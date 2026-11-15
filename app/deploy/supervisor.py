@@ -1,4 +1,5 @@
 import hashlib,json,os,pathlib,signal,subprocess,time,urllib.request
+from evidence_storage import require_persistent_database
 os.sched_setaffinity(0, sorted(os.sched_getaffinity(0))[:2])
 root=pathlib.Path(os.environ.get('VELON_ROOT','/opt/velon'))
 # A second instance (another network) runs from its own root on its own three ports.
@@ -24,6 +25,10 @@ else:
  if not upstream.startswith('https://'):raise SystemExit('Mainnet mode needs UPSTREAM_RPC_URL over HTTPS')
  # The gateway port is public on such hosts; without a token anyone could call it directly.
  if not os.environ.get('GATEWAY_TOKEN'):raise SystemExit('Mainnet mode needs GATEWAY_TOKEN')
+ # A release must never silently open a new revision-scoped database on ephemeral storage.
+ # The operator must migrate and verify the existing journal on a mounted volume first.
+ try: require_persistent_database(os.environ)
+ except RuntimeError as error: raise SystemExit(str(error)) from error
  env.update(RPC_URL=upstream,MAINNET_RPC_URL=upstream)
 children=[]
 def launch(args,name):
