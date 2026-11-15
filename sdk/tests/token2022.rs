@@ -656,3 +656,39 @@ fn only_verified_token_2022_deployments_are_supported() {
     assert!(!Token2022Adapter.supports(&native(UPGRADED_DEPLOYMENT, LIVE_PROGRAM_VERSION)));
     assert!(!Token2022Adapter.supports(&native(LIVE_DEPLOYMENT, UPGRADED_PROGRAM_VERSION)));
 }
+
+#[test]
+fn owner_revoke_clears_a_replacement_delegate_but_not_the_mint_wide_delegate() {
+    let before = fixture();
+    let grants = sdk::compile_state(&Token2022Adapter, &before, &context()).unwrap();
+    let action = sdk::actions(&Token2022Adapter, &grants[0], &before, &context())
+        .unwrap()
+        .remove(0);
+    let mut replaced = fixture();
+    let mut native = TokenAccount::unpack(&replaced.source.account.data).unwrap();
+    native.delegate = COption::Some(key(9));
+    native.delegated_amount = 77;
+    TokenAccount::pack(native, &mut replaced.source.account.data).unwrap();
+    assert_eq!(
+        action.instructions[0],
+        instruction::revoke(&token2022::ID, &replaced.source.address, &native.owner, &[]).unwrap()
+    );
+    let mut accounts = vec![(replaced.source.address, replaced.source.account.clone())];
+    accounts.extend(replaced.source.authorities.clone());
+    let result = svm().process_instruction(&action.instructions[0], &accounts);
+    assert_eq!(result.raw_result, Ok(()));
+    replaced.source.account = result
+        .resulting_accounts
+        .iter()
+        .find(|(key, _)| *key == replaced.source.address)
+        .unwrap()
+        .1
+        .clone();
+    let after = TokenAccount::unpack(&replaced.source.account.data).unwrap();
+    assert_eq!(after.delegate, COption::None);
+    assert_eq!(after.delegated_amount, 0);
+    assert_eq!(after.amount, native.amount);
+    let remaining = sdk::compile_state(&Token2022Adapter, &replaced, &context()).unwrap();
+    assert_eq!(remaining, vec![grants[1].clone()]);
+    assert_eq!(transfer(&replaced, key(7), 26).raw_result, Ok(()));
+}

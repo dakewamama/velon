@@ -57,9 +57,10 @@ export function createServer(
       // Simulation follows the scope: a retained snapshot leaves its finalized bank within a slot.
       // A revoke or, for a running subscription, a cancel: the same simulate-then-verify path.
       const simulate = /^\/api\/scopes\/[a-f0-9]{64}\/actions\/(revoke|cancel)\/([^/]+)$/.exec(url.pathname);
-      const verify = /^\/api\/snapshots\/[a-f0-9]{64}\/actions\/(revoke|cancel)\/([^/]+)\/verify$/.exec(
-        url.pathname,
-      );
+      const verify =
+        /^\/api\/snapshots\/[a-f0-9]{64}\/actions\/(revoke|cancel)\/([^/]+)\/(verify|revalidate)$/.exec(
+          url.pathname,
+        );
       const action = simulate ?? verify;
       const receipt = /^\/api\/verifications\/revoke\/[a-f0-9]{64}$/.test(url.pathname);
       const transactionEvidence =

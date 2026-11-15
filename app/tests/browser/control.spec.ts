@@ -339,6 +339,24 @@ async function browserProvider(
     else throw new Error(`Unexpected RPC ${request.method}`);
     await route.fulfill({ json: { jsonrpc: "2.0", id: request.id, result } });
   });
+  await page.route("**/api/snapshots/*/actions/*/*/revalidate", (route) => {
+    expect(route.request().headers()["content-type"]).toBe("application/json");
+    expect(new URL(route.request().url()).pathname).toBe(
+      `/api/snapshots/${beforeId}/actions/${mode === "cancel" ? "cancel" : "revoke"}/${key}/revalidate`,
+    );
+    const body = route.request().postDataJSON();
+    expect(Object.keys(body)).toEqual(["reviewed_transaction"]);
+    expect(body.reviewed_transaction).toBe(reviewedBytes);
+    const reviewed = decoder.decode(new Uint8Array(Buffer.from(body.reviewed_transaction, "base64")));
+    expect(
+      Object.values(reviewed.signatures).every(
+        (signature) => signature === null || signature.every((byte) => byte === 0),
+      ),
+    ).toBe(true);
+    return mode === "native-stale"
+      ? route.fulfill({ status: 422, json: { error: "authority evidence changed while signing" } })
+      : route.fulfill({ json: { state_version: beforeId, observation_id: "e".repeat(64), slot: 11 } });
+  });
   await page.route("**/api/snapshots/*/actions/revoke/*/verify", (route) => {
     polls++;
     expect(new URL(route.request().url()).pathname).toBe(
@@ -418,18 +436,51 @@ test("wallet signs exact revoke and success waits for finalized verification and
   const provider = await browserProvider(page);
   await connectAndReview(page);
   await expect(page.getByRole("dialog")).toContainText("25 base units");
+  await expect(page.getByRole("dialog")).toContainText(
+    "Clears the token account's current delegate approval.",
+  );
+  await expect(page.getByRole("dialog")).toContainText(
+    "If that approval changes before execution, the changed approval may be cleared instead.",
+  );
+  await expect(page.getByRole("dialog")).toContainText("Approved when checked");
+  await expect(page.getByRole("dialog")).not.toContainText("Nothing else changes");
   await expect(page.getByRole("heading", { name: "You are removing" })).toBeInViewport();
   await page.screenshot({ path: `test-results/${info.project.name}-review.png`, fullPage: true });
   await page.getByRole("button", { name: "Confirm in wallet" }).click();
   await expect(page.getByRole("heading", { name: "Finalizing", exact: true })).toBeVisible();
-  // Access is reported removed as soon as the revoke lands, before finality proves it.
-  await expect(page.locator("#action-result")).toContainText("Access removed");
+  // Confirmation identifies the transaction; only the finalized reread establishes state.
+  await expect(page.locator("#action-result")).toContainText("The token account revoke is confirmed");
+  await expect(page.locator("#action-result")).not.toContainText("Access removed");
   await expect(page.getByRole("heading", { name: "Removed and verified", exact: true })).toBeVisible();
   await expect(page.locator("#results article")).toHaveCount(0);
-  await expect(page.locator("#action-result")).toContainText("the access is gone on devnet.");
+  await expect(page.locator("#action-result")).toContainText(
+    "At the finalized read, this token account had no delegate approval.",
+  );
+  await expect(page.locator("#action-result")).toContainText(
+    "This does not identify any approvals that changed before execution.",
+  );
   await expect(page.locator("#action-result")).toContainText("c".repeat(64));
   expect(provider.counts()).toEqual({ sends: 1, polls: 2, observes: 1 });
   await page.screenshot({ path: `test-results/${info.project.name}-verified.png`, fullPage: true });
+  await page.getByRole("button", { name: "See receipts" }).click();
+  await expect(page.getByRole("heading", { name: "Token account approval cleared on devnet" })).toBeVisible();
+  await expect(page.locator("#receipts")).toContainText(
+    "At the finalized read, this token account had no delegate approval.",
+  );
+  await expect(page.locator("#receipts")).toContainText(
+    "This does not identify any approvals that changed before execution.",
+  );
+  await page.route("**/api/verifications/revoke/*", (route) =>
+    route.fulfill({ json: { verification_id: "c".repeat(64) } }),
+  );
+  await page.getByRole("button", { name: "Replay proof" }).click();
+  await expect(page.locator("#receipts")).toContainText("Replayed from retained evidence.");
+  await page.route("**/api/verifications/revoke/*", (route) =>
+    route.fulfill({ json: { verification_id: "d".repeat(64) } }),
+  );
+  await page.getByRole("button", { name: "Replay proof" }).click();
+  await expect(page.locator("#receipts")).toContainText("Velon couldn't replay this receipt right now.");
+  await expect(page.locator("#receipts")).not.toContainText("Replayed from retained evidence.");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
@@ -486,6 +537,7 @@ for (const mode of [
   "tampered",
   "changed-account",
   "stale",
+  "native-stale",
   "expired",
   "verification-failed",
   "reapproved",
@@ -509,7 +561,11 @@ test("a revoke the network reports failed is shown at once, never as removed", a
   const provider = await browserProvider(page, "failed-on-chain");
   await connectAndReview(page);
   await page.getByRole("button", { name: "Confirm in wallet" }).click();
-  await expect(page.locator("#action-result")).toContainText("the permission is still active");
+  await expect(page.locator("#action-result")).toContainText(
+    "Velon has not verified a change to the token account's delegate approval.",
+  );
+  await expect(page.locator("#action-result")).not.toContainText("the permission is still active");
+  await expect(page.getByRole("heading", { name: "Unconfirmed", exact: true })).toBeVisible();
   await expect(page.locator("#action-result")).not.toContainText("Access removed");
   await expect(page.getByRole("heading", { name: "Removed and verified", exact: true })).toHaveCount(0);
   expect(provider.counts().sends).toBe(1);
@@ -645,6 +701,7 @@ test("a running subscription is cancelled, proved, and keeps its grant only unti
   await expect(page.getByRole("button", { name: /remove access/i })).toHaveCount(0);
   await card(page, derived.id).getByRole("button", { name: "Cancel subscription", exact: true }).click();
   await expect(page.getByRole("heading", { name: "You are cancelling" })).toBeInViewport();
+  await expect(page.getByRole("dialog")).not.toContainText("changed approval may be cleared");
   await expect(page.getByRole("dialog")).toContainText("It can still charge until");
   await expect(page.getByRole("dialog")).toContainText("After that it can't charge again");
   await page.getByRole("button", { name: "Confirm in wallet" }).click();

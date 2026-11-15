@@ -239,10 +239,15 @@ fn current_client(observations: Vec<Value>, simulations: Vec<Value>) -> RpcClien
     use solana_rpc_client::mock_sender::MocksMap;
     let genesis = vec![metadata()["cluster"].clone(); observations.len() + simulations.len()];
     let features = vec![support::feature_response(support::MAINNET_FEATURES); observations.len()];
+    let slots: Vec<_> = observations
+        .iter()
+        .map(|response| response["context"]["slot"].clone())
+        .collect();
     let mocks = MocksMap(
         [
             (RpcRequest::GetGenesisHash, genesis.into()),
             (RpcRequest::GetMultipleAccounts, observations.into()),
+            (RpcRequest::GetSlot, slots.into()),
             (RpcRequest::SimulateTransaction, simulations.into()),
             (RpcRequest::GetProgramAccounts, features.into()),
         ]
@@ -1876,4 +1881,365 @@ async fn unknown_missing_or_later_feature_evidence_blocks_review() {
             "{case}"
         );
     }
+}
+
+fn unsigned_review(transaction: &Transaction) -> String {
+    use solana_compute_budget_interface::ComputeBudgetInstruction as Budget;
+    use solana_transaction::{AccountMeta, Instruction};
+    let instruction = &transaction.message.instructions[0];
+    let native = Instruction {
+        program_id: transaction.message.account_keys[usize::from(instruction.program_id_index)],
+        accounts: instruction
+            .accounts
+            .iter()
+            .map(|index| {
+                let index = usize::from(*index);
+                AccountMeta {
+                    pubkey: transaction.message.account_keys[index],
+                    is_signer: transaction.message.is_signer(index),
+                    is_writable: transaction
+                        .message
+                        .is_maybe_writable_with_reserved_addresses(
+                            index,
+                            None::<&std::collections::BTreeSet<Pubkey>>,
+                        ),
+                }
+            })
+            .collect(),
+        data: instruction.data.clone(),
+    };
+    let mut reviewed = Transaction::new_with_payer(
+        &[
+            Budget::set_compute_unit_limit(10_000),
+            Budget::set_compute_unit_price(1_000_000),
+            native,
+        ],
+        Some(&transaction.message.account_keys[0]),
+    );
+    reviewed.message.recent_blockhash = transaction.message.recent_blockhash;
+    STANDARD.encode(bincode::serialize(&reviewed).unwrap())
+}
+
+#[tokio::test]
+async fn signing_revalidation_retains_a_fresh_native_read_without_replacing_the_review() {
+    let (before, _, transaction) = verification_fixture();
+    let journal = Journal::open("sqlite::memory:").await.unwrap();
+    let record = journal.ingest(before.clone(), &catalog()).await.unwrap();
+    let next = next_bank(&before);
+    let signed = unsigned_review(&transaction);
+    let result = rpc::revalidate_action(
+        &current_client(vec![observed(&next)], vec![]),
+        &journal,
+        &record.id,
+        source(),
+        &signed,
+        rpc::Kind::Revoke,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.state_version, record.id);
+    assert_eq!(result.slot, next.observation.slot);
+    assert_ne!(result.observation_id, record.id);
+    assert_eq!(
+        journal.replay(&record.id).await.unwrap().snapshot,
+        record.snapshot
+    );
+    assert_eq!(
+        journal
+            .latest(&before.scope_id().unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .id,
+        result.observation_id
+    );
+    // Once the journal advances, an old reviewed message must not revalidate again.
+    assert!(matches!(
+        rpc::revalidate_action(
+            &RpcClient::new_mock("fails".into()),
+            &journal,
+            &record.id,
+            source(),
+            &signed,
+            rpc::Kind::Revoke
+        )
+        .await,
+        Err(Error::Conflict)
+    ));
+}
+
+#[tokio::test]
+async fn signing_revalidation_rejects_and_retains_changed_native_authority_and_program() {
+    for changed_key in [
+        source(),
+        spl::DelegateAdapter.protocol().program_id,
+        get_program_data_address(&spl::DelegateAdapter.protocol().program_id),
+    ] {
+        let (before, _, transaction) = verification_fixture();
+        let journal = Journal::open("sqlite::memory:").await.unwrap();
+        let record = journal.ingest(before.clone(), &catalog()).await.unwrap();
+        let mut next = next_bank(&before);
+        let changed = account(&mut next, changed_key);
+        if changed_key == source() {
+            // Replace the delegate without updating the retained review checkpoint.
+            changed.data[76] ^= 1;
+        } else if changed_key
+            == get_program_data_address(&spl::DelegateAdapter.protocol().program_id)
+        {
+            *changed.data.last_mut().unwrap() ^= 1;
+        } else {
+            changed.executable = false;
+        }
+        let result = rpc::revalidate_action(
+            &current_client(vec![observed(&next)], vec![]),
+            &journal,
+            &record.id,
+            source(),
+            &unsigned_review(&transaction),
+            rpc::Kind::Revoke,
+        )
+        .await;
+        assert!(
+            matches!(
+                result,
+                Err(Error::InvalidObservation(
+                    "authority evidence changed while signing"
+                ))
+            ),
+            "{changed_key}"
+        );
+        let latest = journal
+            .latest(&before.scope_id().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(latest.id, record.id);
+        assert_eq!(
+            latest
+                .snapshot
+                .accounts
+                .into_iter()
+                .collect::<std::collections::BTreeMap<_, _>>(),
+            next.accounts
+                .into_iter()
+                .collect::<std::collections::BTreeMap<_, _>>()
+        );
+    }
+}
+
+#[tokio::test]
+async fn signing_revalidation_api_accepts_only_the_reviewed_unsigned_message() {
+    let (before, _, transaction) = verification_fixture();
+    let journal = Journal::open("sqlite::memory:").await.unwrap();
+    let record = journal.ingest(before.clone(), &catalog()).await.unwrap();
+    let scope = before.scope_id().unwrap();
+    let encoded = unsigned_review(&transaction);
+    let signed = STANDARD.encode(bincode::serialize(&transaction).unwrap());
+    let mut partial = transaction.clone();
+    partial.message.header.num_required_signatures = 2;
+    partial.signatures.push(Default::default());
+    for wire in [
+        &signed,
+        &STANDARD.encode(bincode::serialize(&partial).unwrap()),
+    ] {
+        assert!(matches!(
+            rpc::revalidate_action(
+                &RpcClient::new_mock("fails".into()),
+                &journal,
+                &record.id,
+                source(),
+                wire,
+                rpc::Kind::Revoke
+            )
+            .await,
+            Err(Error::InvalidObservation(
+                "reviewed transaction must contain only empty signature slots"
+            ))
+        ));
+    }
+    let mut alternate = transaction.clone();
+    alternate.message.instructions[0].data[0] ^= 1;
+    let mut old_format = transaction.clone();
+    old_format.signatures.fill(Default::default());
+    for body in [
+        json!({"reviewed_transaction": signed}),
+        json!({"reviewed_transaction": STANDARD.encode(bincode::serialize(&partial).unwrap())}),
+        json!({"reviewed_transaction": format!("{encoded}AAAA")}),
+        json!({"reviewed_transaction": "invalid"}),
+        json!({"reviewed_transaction": unsigned_review(&alternate)}),
+        json!({"reviewed_transaction": STANDARD.encode(bincode::serialize(&old_format).unwrap())}),
+        json!({"signed_transaction": signed}),
+        json!({"reviewed_transaction":encoded,"signed_transaction":signed}),
+    ] {
+        let app = rpc::action_router(journal.clone(), RpcClient::new_mock("fails".into()));
+        let response = app
+            .oneshot(
+                Request::post(format!(
+                    "/snapshots/{}/actions/revoke/{}/revalidate",
+                    record.id,
+                    source()
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(journal.latest(&scope).await.unwrap().unwrap().id, record.id);
+    }
+    let next = next_bank(&before);
+    let app = rpc::action_router(
+        journal.clone(),
+        current_client(vec![observed(&next)], vec![]),
+    );
+    let response = app
+        .oneshot(
+            Request::post(format!(
+                "/snapshots/{}/actions/revoke/{}/revalidate",
+                record.id,
+                source()
+            ))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"reviewed_transaction":encoded}).to_string(),
+            ))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let proof: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(proof["state_version"], record.id);
+    assert_eq!(proof["slot"], next.observation.slot);
+    assert!(
+        proof.get("transaction").is_none(),
+        "Revalidation must not claim chain execution."
+    );
+    let weak = RpcClient::new_sender(
+        MockSender::new("fails"),
+        RpcClientConfig::with_commitment(CommitmentConfig::confirmed()),
+    );
+    let latest = journal.latest(&scope).await.unwrap().unwrap();
+    assert!(matches!(
+        rpc::revalidate_action(
+            &weak,
+            &journal,
+            &latest.id,
+            source(),
+            &encoded,
+            rpc::Kind::Revoke
+        )
+        .await,
+        Err(Error::InvalidObservation("finalized evidence required"))
+    ));
+}
+
+#[tokio::test]
+async fn signing_revalidation_refuses_a_cached_bank_older_than_the_provider_tip() {
+    let (before, _, transaction) = verification_fixture();
+    let journal = Journal::open("sqlite::memory:").await.unwrap();
+    let record = journal.ingest(before.clone(), &catalog()).await.unwrap();
+    let signed = unsigned_review(&transaction);
+    for tip in [before.observation.slot - 1, before.observation.slot + 1] {
+        let mock = RpcClient::new_mock_with_mocks(
+            "succeeds".into(),
+            [
+                (RpcRequest::GetGenesisHash, metadata()["cluster"].clone()),
+                (RpcRequest::GetSlot, json!(tip)),
+                (RpcRequest::GetMultipleAccounts, observed(&before)),
+            ]
+            .into(),
+        );
+        assert!(
+            rpc::revalidate_action(
+                &mock,
+                &journal,
+                &record.id,
+                source(),
+                &signed,
+                rpc::Kind::Revoke
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            journal
+                .latest(&before.scope_id().unwrap())
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            record.id
+        );
+    }
+}
+
+#[tokio::test]
+async fn signing_revalidation_fetches_only_read_only_rpc_evidence() {
+    let (before, _, transaction) = verification_fixture();
+    let journal = Journal::open("sqlite::memory:").await.unwrap();
+    let record = journal.ingest(before.clone(), &catalog()).await.unwrap();
+    let next = next_bank(&before);
+    let tip = next.observation.slot;
+    let observation = observed(&next);
+    let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let retained = requests.clone();
+    let app = Router::new().route(
+        "/",
+        post(move |Json(request): Json<Value>| {
+            let requests = retained.clone();
+            let observation = observation.clone();
+            async move {
+                requests.lock().unwrap().push(request.clone());
+                let result = match request["method"].as_str().unwrap() {
+                    "getSlot" => json!(tip),
+                    "getGenesisHash" => metadata()["cluster"].clone(),
+                    "getMultipleAccounts" => {
+                        assert_eq!(request["params"][1]["commitment"], "finalized");
+                        assert_eq!(request["params"][1]["minContextSlot"], tip);
+                        observation
+                    }
+                    "getProgramAccounts" => support::feature_response(support::MAINNET_FEATURES),
+                    method => panic!("Revalidation requested forbidden RPC method: {method}"),
+                };
+                Json(json!({"jsonrpc":"2.0","id":request["id"],"result":result}))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let client = RpcClient::new_with_timeout_and_commitment(
+        format!("http://{address}"),
+        Duration::from_secs(5),
+        CommitmentConfig::finalized(),
+    );
+    rpc::revalidate_action(
+        &client,
+        &journal,
+        &record.id,
+        source(),
+        &unsigned_review(&transaction),
+        rpc::Kind::Revoke,
+    )
+    .await
+    .unwrap();
+    task.abort();
+    let methods: Vec<_> = requests
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|request| request["method"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        methods,
+        [
+            "getSlot",
+            "getGenesisHash",
+            "getMultipleAccounts",
+            "getProgramAccounts"
+        ]
+    );
 }

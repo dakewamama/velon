@@ -108,6 +108,37 @@ test("verification forwards signed bytes unchanged and retains pending, conflict
   }
 });
 
+test("unsigned revalidation preserves request bytes, statuses and action validation", async () => {
+  const path = verifyPath.replace("/verify", "/revalidate");
+  const signed = '{ "reviewed_transaction" : "AQAB+/==" }';
+  let calls = 0;
+  const upstream = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(request) {
+      calls++;
+      expect(new URL(request.url).pathname).toBe(path.slice(4));
+      expect(await request.text()).toBe(signed);
+      expect(request.headers.get("Content-Type")).toBe("application/json");
+      return Response.json({ error: "authority evidence changed while signing" }, { status: 422 });
+    },
+  });
+  const server = createServer(String(upstream.url), [], 0);
+  servers.push(upstream, server);
+  expect((await fetch(new URL(path, server.url))).status).toBe(405);
+  expect(
+    (await fetch(new URL(path, server.url), { method: "POST", headers: actionHeaders, body: signed })).status,
+  ).toBe(415);
+  const response = await fetch(new URL(path, server.url), {
+    method: "POST",
+    headers: { ...actionHeaders, "Content-Type": "application/json" },
+    body: signed,
+  });
+  expect(response.status).toBe(422);
+  expect((await response.json()).error).toBe("authority evidence changed while signing");
+  expect(calls).toBe(1);
+});
+
 test("action allowlist rejects invalid requests before contacting the runtime", async () => {
   let calls = 0;
   const upstream = Bun.serve({
