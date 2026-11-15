@@ -65,11 +65,7 @@ export type ActionState =
 export const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 export const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 
-export async function action(
-  path: string,
-  signal: AbortSignal,
-  signedTransaction?: string,
-): Promise<Response> {
+export async function action(path: string, signal: AbortSignal, transaction?: string): Promise<Response> {
   return call(
     `/api/${path}`,
     {
@@ -77,9 +73,15 @@ export async function action(
       headers: {
         // The header names the action the path takes, so a page can't send one for the other.
         "X-Velon-Action": /\/actions\/cancel\//.test(path) ? "cancel" : "revoke",
-        ...(signedTransaction ? { "Content-Type": "application/json" } : {}),
+        ...(transaction ? { "Content-Type": "application/json" } : {}),
       },
-      body: signedTransaction ? JSON.stringify({ signed_transaction: signedTransaction }) : undefined,
+      body: transaction
+        ? JSON.stringify(
+            path.endsWith("/revalidate")
+              ? { reviewed_transaction: transaction }
+              : { signed_transaction: transaction },
+          )
+        : undefined,
       signal,
     },
     60000,

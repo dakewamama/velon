@@ -1192,25 +1192,38 @@ fn checked_action(
     signed: &Transaction,
     kind: Kind,
 ) -> Result<sdk::Action, Error> {
+    signed
+        .verify()
+        .map_err(|_| Error::InvalidObservation("invalid transaction signature"))?;
+    checked_message(record, source, signed, kind, true)
+}
+
+fn checked_message(
+    record: &Record,
+    source: Pubkey,
+    transaction: &Transaction,
+    kind: Kind,
+    allow_historical_legacy_revoke: bool,
+) -> Result<sdk::Action, Error> {
     let snapshot = &record.snapshot;
     if snapshot.observation.origin != Origin::Finalized {
         return Err(Error::InvalidObservation("finalized evidence required"));
     }
     let token = Token::of(&snapshot.targets, source)?;
-    signed
-        .verify()
-        .map_err(|_| Error::InvalidObservation("invalid transaction signature"))?;
     let (context, token_version) = token.context(snapshot, &record.versions, &record.id)?;
     let action = token.action(snapshot, (&context, &token_version), source, kind)?;
     let payer = token.payer(snapshot, source, &action)?;
     // Earlier revoke receipts contain only Revoke; both historical formats remain exact.
-    let mut expected = if kind == Kind::Revoke && signed.message.instructions.len() == 1 {
+    let mut expected = if allow_historical_legacy_revoke
+        && kind == Kind::Revoke
+        && transaction.message.instructions.len() == 1
+    {
         Transaction::new_with_payer(&action.instructions, Some(&payer))
     } else {
         action_transaction(kind, &action, payer)
     };
-    expected.message.recent_blockhash = signed.message.recent_blockhash;
-    if signed.message != expected.message {
+    expected.message.recent_blockhash = transaction.message.recent_blockhash;
+    if transaction.message != expected.message {
         return Err(AdapterError::DiffMismatch.into());
     }
     Ok(action)
@@ -1366,7 +1379,7 @@ pub async fn revalidate_action(
     journal: &Journal,
     id: &str,
     source: Pubkey,
-    signed_transaction: &str,
+    reviewed_transaction: &str,
     kind: Kind,
 ) -> Result<RevalidatedAction, Error> {
     let record = journal.replay(id).await?;
@@ -1381,8 +1394,18 @@ pub async fn revalidate_action(
     {
         return Err(Error::Conflict);
     }
-    let signed = decode_signed(signed_transaction)?;
-    checked_action(&record, source, &signed, kind)?;
+    let reviewed = decode_transaction(reviewed_transaction)?;
+    if reviewed.signatures.len() != usize::from(reviewed.message.header.num_required_signatures)
+        || reviewed
+            .signatures
+            .iter()
+            .any(|signature| *signature != Default::default())
+    {
+        return Err(Error::InvalidObservation(
+            "reviewed transaction must contain only empty signature slots",
+        ));
+    }
+    checked_message(&record, source, &reviewed, kind, false)?;
     let catalog = Catalog::new(record.versions.clone()).map_err(|_| Error::ReplayMismatch)?;
     // Bind the read to this provider's independently requested finalized tip,
     // rather than allowing a cached response from the old review slot.
@@ -1426,7 +1449,7 @@ pub async fn revalidate_action(
     }
     // Recompile with the fresh clock: expiry or native action availability may
     // have changed without any token/delegation account bytes changing.
-    checked_action(&observation, source, &signed, kind)?;
+    checked_message(&observation, source, &reviewed, kind, false)?;
     if journal
         .latest(&snapshot.scope_id()?)
         .await?
@@ -1441,7 +1464,7 @@ pub async fn revalidate_action(
     })
 }
 
-fn decode_signed(signed_transaction: &str) -> Result<Transaction, Error> {
+fn decode_transaction(signed_transaction: &str) -> Result<Transaction, Error> {
     let signed =
         EncodedTransaction::Binary(signed_transaction.into(), TransactionBinaryEncoding::Base64)
             .decode()
@@ -1475,7 +1498,7 @@ pub async fn verify_action(
         return Err(Error::InvalidObservation("finalized evidence required"));
     }
     Token::of(&snapshot.targets, source)?;
-    let signed = decode_signed(signed_transaction)?;
+    let signed = decode_transaction(signed_transaction)?;
     let action = checked_action(&record, source, &signed, kind)?;
     let catalog = Catalog::new(record.versions.clone()).map_err(|_| Error::ReplayMismatch)?;
     if client.get_genesis_hash().await?.to_string() != snapshot.observation.cluster {
@@ -1655,17 +1678,23 @@ struct SignedRevoke {
     signed_transaction: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReviewedRevoke {
+    reviewed_transaction: String,
+}
+
 async fn revalidate_revoke(
     State((journal, client)): State<(Journal, Arc<RpcClient>)>,
     Path((id, source)): Path<(String, String)>,
-    Json(request): Json<SignedRevoke>,
+    Json(request): Json<ReviewedRevoke>,
 ) -> Handled<RevalidatedAction> {
     revalidate_action(
         &client,
         &journal,
         &id,
         address(&source)?,
-        &request.signed_transaction,
+        &request.reviewed_transaction,
         Kind::Revoke,
     )
     .await
@@ -1676,14 +1705,14 @@ async fn revalidate_revoke(
 async fn revalidate_cancel(
     State((journal, client)): State<(Journal, Arc<RpcClient>)>,
     Path((id, source)): Path<(String, String)>,
-    Json(request): Json<SignedRevoke>,
+    Json(request): Json<ReviewedRevoke>,
 ) -> Handled<RevalidatedAction> {
     revalidate_action(
         &client,
         &journal,
         &id,
         address(&source)?,
-        &request.signed_transaction,
+        &request.reviewed_transaction,
         Kind::Cancel,
     )
     .await

@@ -2788,9 +2788,7 @@ async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "
                 await action(
                   `snapshots/${stateVersion}/actions/${kind}/${key}/revalidate`,
                   signal,
-                  getBase64EncodedWireTransaction(
-                    getTransactionDecoder().decode(signed[0]!.signedTransaction),
-                  ),
+                  getBase64EncodedWireTransaction(getTransactionDecoder().decode(prepared.bytes)),
                 ),
               ),
             );

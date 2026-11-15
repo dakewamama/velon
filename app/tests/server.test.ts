@@ -108,9 +108,9 @@ test("verification forwards signed bytes unchanged and retains pending, conflict
   }
 });
 
-test("signed revalidation preserves request bytes, statuses and action validation", async () => {
+test("unsigned revalidation preserves request bytes, statuses and action validation", async () => {
   const path = verifyPath.replace("/verify", "/revalidate");
-  const signed = '{ "signed_transaction" : "AQAB+/==" }';
+  const signed = '{ "reviewed_transaction" : "AQAB+/==" }';
   let calls = 0;
   const upstream = Bun.serve({
     port: 0,

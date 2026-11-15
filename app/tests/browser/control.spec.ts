@@ -344,7 +344,15 @@ async function browserProvider(
     expect(new URL(route.request().url()).pathname).toBe(
       `/api/snapshots/${beforeId}/actions/${mode === "cancel" ? "cancel" : "revoke"}/${key}/revalidate`,
     );
-    expect(typeof route.request().postDataJSON().signed_transaction).toBe("string");
+    const body = route.request().postDataJSON();
+    expect(Object.keys(body)).toEqual(["reviewed_transaction"]);
+    expect(body.reviewed_transaction).toBe(reviewedBytes);
+    const reviewed = decoder.decode(new Uint8Array(Buffer.from(body.reviewed_transaction, "base64")));
+    expect(
+      Object.values(reviewed.signatures).every(
+        (signature) => signature === null || signature.every((byte) => byte === 0),
+      ),
+    ).toBe(true);
     return mode === "native-stale"
       ? route.fulfill({ status: 422, json: { error: "authority evidence changed while signing" } })
       : route.fulfill({ json: { state_version: beforeId, observation_id: "e".repeat(64), slot: 11 } });
