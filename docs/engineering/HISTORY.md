@@ -74,6 +74,12 @@ are labelled unverified against the historical deployment; unknown layouts retai
 raw bytes rather than inventing transfers. Missing ALT keys or inner-instruction
 metadata produces an incomplete interpretation with the full transaction retained.
 
+Instruction evidence is checked with Solana's existing RPC message types before
+event decoding. Orphan/duplicate CPI groups, invalid instruction account indices,
+inconsistent lookup counts, unsupported transaction versions and malformed event
+bytes cannot masquerade as a successful decode. Unknown layouts retain their raw
+events and mark the transaction interpretation incomplete.
+
 RPC commitment and cluster checks are provider assertions, not cryptographic state
 proofs. Inconsistent cluster replies fail collection. Historical executable
 resolution, creation/closure reconstruction, complete transaction ordering and

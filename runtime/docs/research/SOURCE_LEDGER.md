@@ -130,6 +130,15 @@
 - Finality and account authenticity are RPC trust assumptions. A response supplies
   neither a bank hash nor a cryptographic state proof. No source copied.
 
+## Historical RPC evidence
+
+Historical instruction validation reuses `UiRawMessage`, `UiCompiledInstruction`
+and `UiInnerInstructions` from the existing pinned
+`solana-transaction-status-client-types` 4.3.2 dependency (Agave, Apache-2.0).
+Inspection: native RPC JSON representations and upstream `getBlock`/`getTransaction`
+contracts. Reuse: DEPEND / PUBLIC API; no decoder implementation copied. Event
+positions additionally require unique CPI groups referencing real outer instructions.
+
 ## SQLite checkpoint index
 
 - Existing dependency: SQLx 0.7.4 and its locked SQLite library. Inspection:

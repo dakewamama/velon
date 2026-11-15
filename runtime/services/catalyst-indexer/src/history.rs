@@ -13,6 +13,9 @@ use sha2::{Digest, Sha256};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::request::RpcRequest;
+use solana_transaction_status_client_types::{
+    UiCompiledInstruction, UiInnerInstructions, UiInstruction, UiRawMessage,
+};
 use sqlx::Row;
 use std::{collections::BTreeSet, time::Duration};
 
@@ -213,7 +216,14 @@ impl Journal {
             let source: String = row.try_get("source_id")?;
             let decoded = normalize(cluster, &address.to_string(), &raw, &digest);
             let (entries, mut status) = match decoded {
-                Ok(entries) => (entries, "decoded_unverified_deployment"),
+                Ok(entries) => {
+                    let status = if entries.iter().any(|entry| entry["kind"] == "unknown") {
+                        "incomplete"
+                    } else {
+                        "decoded_unverified_deployment"
+                    };
+                    (entries, status)
+                }
                 Err(_) => (vec![], "incomplete"),
             };
             if !raw["meta"]["err"].is_null() {
@@ -286,6 +296,94 @@ fn status(error: Error) -> StatusCode {
     }
 }
 
+// Use the native RPC representations for message/header and instruction formats.
+// Account lookup resolution still comes from the retained RPC metadata, not today's tables.
+fn validate_instructions(raw: &Value, tx: &types::RawTransaction) -> Result<(), Error> {
+    let message: UiRawMessage =
+        serde_json::from_value(raw.pointer("/transaction/message").ok_or(INVALID)?.clone())?;
+    if raw
+        .get("version")
+        .is_some_and(|version| version != 0 && version != "legacy")
+    {
+        return Err(INVALID);
+    }
+    let static_count = message.account_keys.len();
+    let required = usize::from(message.header.num_required_signatures);
+    if required == 0
+        || required > static_count
+        || required != tx.transaction.signatures.len()
+        || usize::from(message.header.num_readonly_signed_accounts) >= required
+        || usize::from(message.header.num_readonly_unsigned_accounts) > static_count - required
+    {
+        return Err(INVALID);
+    }
+    let mut writable = 0;
+    let mut readonly = 0;
+    if message
+        .address_table_lookups
+        .as_ref()
+        .is_some_and(|lookups| !lookups.is_empty())
+        && raw.get("version") != Some(&json!(0))
+    {
+        return Err(INVALID);
+    }
+    for lookup in message.address_table_lookups.as_deref().unwrap_or_default() {
+        lookup.account_key.parse::<Pubkey>().map_err(|_| INVALID)?;
+        writable += lookup.writable_indexes.len();
+        readonly += lookup.readonly_indexes.len();
+    }
+    if writable != tx.meta.loaded_addresses.writable.len()
+        || readonly != tx.meta.loaded_addresses.readonly.len()
+        || static_count + writable + readonly > 256
+    {
+        return Err(INVALID);
+    }
+    let keys = message
+        .account_keys
+        .iter()
+        .chain(&tx.meta.loaded_addresses.writable)
+        .chain(&tx.meta.loaded_addresses.readonly)
+        .collect::<Vec<_>>();
+    let check = |instruction: &UiCompiledInstruction| -> Result<(), Error> {
+        if usize::from(instruction.program_id_index) >= keys.len()
+            || instruction
+                .accounts
+                .iter()
+                .any(|index| usize::from(*index) >= keys.len())
+        {
+            return Err(INVALID);
+        }
+        let bytes = bs58::decode(&instruction.data)
+            .into_vec()
+            .map_err(|_| INVALID)?;
+        if keys[usize::from(instruction.program_id_index)].as_str() == SUBSCRIPTIONS_PROGRAM_ID
+            && bytes.as_slice() == crate::constants::EVENT_IX_TAG
+        {
+            return Err(INVALID);
+        }
+        Ok(())
+    };
+    for instruction in &message.instructions {
+        check(instruction)?;
+    }
+    let groups: Vec<UiInnerInstructions> =
+        serde_json::from_value(raw["meta"]["innerInstructions"].clone())?;
+    let mut positions = BTreeSet::new();
+    for group in groups {
+        if usize::from(group.index) >= message.instructions.len() || !positions.insert(group.index)
+        {
+            return Err(INVALID);
+        }
+        for instruction in group.instructions {
+            let UiInstruction::Compiled(instruction) = instruction else {
+                return Err(INVALID);
+            };
+            check(&instruction)?;
+        }
+    }
+    Ok(())
+}
+
 fn normalize(cluster: &str, address: &str, raw: &Value, digest: &str) -> Result<Vec<Value>, Error> {
     let meta = raw.get("meta").ok_or(INVALID)?;
     if !meta["err"].is_null() {
@@ -295,17 +393,7 @@ fn normalize(cluster: &str, address: &str, raw: &Value, digest: &str) -> Result<
         return Err(INVALID);
     }
     let tx: types::RawTransaction = serde_json::from_value(raw.clone())?;
-    let count = tx.transaction.message.account_keys.len()
-        + tx.meta.loaded_addresses.writable.len()
-        + tx.meta.loaded_addresses.readonly.len();
-    if tx.meta.inner_instructions.iter().any(|group| {
-        group
-            .instructions
-            .iter()
-            .any(|instruction| instruction.program_id_index as usize >= count)
-    }) {
-        return Err(INVALID);
-    }
+    validate_instructions(raw, &tx)?;
     let mut result = Vec::new();
     let mut positions = BTreeSet::new();
     for event in extractor::extract_events(&vec![tx]) {
@@ -622,11 +710,108 @@ mod tests {
         event.extend_from_slice(&[5; 32]);
         event.extend_from_slice(&[6; 32]);
         let data = bs58::encode(event).into_string();
-        json!({"slot":slot,"blockTime":1800000000,
-            "transaction":{"signatures":[signature],"message":{"accountKeys":[address(1)]}},
+        json!({"slot":slot,"blockTime":1800000000,"version":0,
+            "transaction":{"signatures":[signature],"message":{"accountKeys":[address(1)],
+                "header":{"numRequiredSignatures":1,"numReadonlySignedAccounts":0,"numReadonlyUnsignedAccounts":0},
+                "recentBlockhash":address(8),
+                "addressTableLookups":[{"accountKey":address(7),"writableIndexes":[0],"readonlyIndexes":[1]}],
+                "instructions":[{"programIdIndex":2,"accounts":[0,1],"data":"1"}]}},
             "meta":{"err":null,"loadedAddresses":{"writable":[address(9)],"readonly":[SUBSCRIPTIONS_PROGRAM_ID]},
-                "innerInstructions":[{"index":0,"instructions":[{"programIdIndex":2,"data":data},
-                    {"programIdIndex":2,"data":data}]}]}})
+                "innerInstructions":[{"index":0,"instructions":[{"programIdIndex":2,"accounts":[],"data":data},
+                    {"programIdIndex":2,"accounts":[],"data":data}]}]}})
+    }
+
+    #[tokio::test]
+    async fn malformed_instruction_evidence_is_retained_without_inventing_valid_positions() {
+        for case in [
+            "orphan",
+            "duplicate_group",
+            "invalid_base58",
+            "missing_discriminator",
+            "account_index",
+            "lookup_count",
+            "unsupported_version",
+            "legacy_lookup",
+            "missing_version",
+            "readonly_payer",
+            "outer_program_index",
+        ] {
+            let mut evidence = raw(case, 10);
+            match case {
+                "orphan" => evidence["meta"]["innerInstructions"][0]["index"] = json!(1),
+                "duplicate_group" => evidence["meta"]["innerInstructions"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!({"index":0,"instructions":[]})),
+                "invalid_base58" => {
+                    evidence["meta"]["innerInstructions"][0]["instructions"][0]["data"] =
+                        json!("0OIl")
+                }
+                "missing_discriminator" => {
+                    evidence["meta"]["innerInstructions"][0]["instructions"][0]["data"] =
+                        json!(bs58::encode(crate::constants::EVENT_IX_TAG).into_string())
+                }
+                "account_index" => {
+                    evidence["meta"]["innerInstructions"][0]["instructions"][0]["accounts"] =
+                        json!([200])
+                }
+                "lookup_count" => evidence["meta"]["loadedAddresses"]["readonly"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!(address(8))),
+                "unsupported_version" => evidence["version"] = json!(1),
+                "legacy_lookup" => evidence["version"] = json!("legacy"),
+                "missing_version" => {
+                    evidence.as_object_mut().unwrap().remove("version");
+                }
+                "readonly_payer" => {
+                    evidence["transaction"]["message"]["header"]["numReadonlySignedAccounts"] =
+                        json!(1)
+                }
+                "outer_program_index" => {
+                    evidence["transaction"]["message"]["instructions"][0]["programIdIndex"] =
+                        json!(200)
+                }
+                _ => unreachable!(),
+            }
+            let journal = Journal::open("sqlite::memory:").await.unwrap();
+            journal
+                .retain_activity("cluster", case, 10, "fixture", evidence.clone())
+                .await
+                .unwrap();
+            let page = journal
+                .activity("cluster", address(1).parse().unwrap(), Page::default())
+                .await
+                .unwrap();
+            assert_eq!(page["transactions"][0]["status"], "incomplete", "{case}");
+            assert_eq!(page["events"], json!([]), "{case}");
+            assert_eq!(
+                journal.activity_transaction("cluster", case).await.unwrap(),
+                evidence
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_event_layout_retains_bytes_and_marks_interpretation_incomplete() {
+        let mut evidence = raw("unknown", 10);
+        let mut bytes = crate::constants::EVENT_IX_TAG.to_vec();
+        bytes.push(255);
+        evidence["meta"]["innerInstructions"][0]["instructions"][0]["data"] =
+            json!(bs58::encode(&bytes).into_string());
+        let journal = Journal::open("sqlite::memory:").await.unwrap();
+        journal
+            .retain_activity("cluster", "unknown", 10, "fixture", evidence)
+            .await
+            .unwrap();
+        let page = journal
+            .activity("cluster", address(1).parse().unwrap(), Page::default())
+            .await
+            .unwrap();
+        assert_eq!(page["transactions"][0]["status"], "incomplete");
+        assert_eq!(page["events"][0]["kind"], "unknown");
+        assert_eq!(page["events"][0]["rawEvent"], STANDARD.encode(bytes));
+        assert_eq!(page["events"].as_array().unwrap().len(), 2);
     }
 
     #[tokio::test]
