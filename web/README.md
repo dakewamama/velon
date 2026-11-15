@@ -35,3 +35,6 @@ point there; change them together if the domain changes. Only the static files a
 `.vercelignore` keeps the sources and tooling out, and `vercel.json` sets the security
 headers and sends `www` to the bare domain. Run `bun run build` first, then
 `vercel deploy --prod` from this folder.
+
+The landing design restores `ee39947` with its dark palette on every device.
+The console, hosting security headers and domain configuration are unchanged.
