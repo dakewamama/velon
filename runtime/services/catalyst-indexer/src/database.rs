@@ -5,7 +5,7 @@ pub async fn connect(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
     let options = SqliteConnectOptions::from_str(database_url)?
         .busy_timeout(std::time::Duration::from_secs(5))
         .pragma("journal_mode", "WAL")
-        .pragma("synchronous", "NORMAL");
+        .pragma("synchronous", "FULL");
 
     let pool = SqlitePoolOptions::new()
         .max_connections(5)

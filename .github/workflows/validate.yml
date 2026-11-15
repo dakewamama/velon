@@ -92,4 +92,4 @@ jobs:
         env:
           AUTHZ_BIN: ${{ github.workspace }}/runtime/target/debug/authorization-api
           CATALOGER_DIR: ${{ github.workspace }}/runtime
-        run: bun run test:e2e
+        run: bun run test:e2e --workers=2

@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
 import { getAddressDecoder, getAddressEncoder, type Address } from "@solana/addresses";
-import { base58, delegation, event, EVENT_TAG, historyCoverage, plan } from "../scripts/subscriptions.ts";
+import {
+  base58,
+  delegation,
+  discoverDelegations,
+  event,
+  EVENT_TAG,
+  historyCoverage,
+  plan,
+} from "../scripts/subscriptions.ts";
 
 // Accounts written field by field in the program's own order, so offsets are checked, not assumed.
 const keyOf = (byte: number) => getAddressDecoder().decode(new Uint8Array(32).fill(byte));
@@ -75,6 +83,23 @@ test("any other kind, version or length is not read", () => {
   expect(delegation(Uint8Array.from([...fixed, 0]))).toBeUndefined();
   expect(delegation(Uint8Array.from(fixed, (byte, index) => (index === 1 ? 2 : byte)))).toBeUndefined();
   expect(delegation(Uint8Array.from(fixed, (byte, index) => (index === 0 ? 5 : byte)))).toBeUndefined();
+});
+
+test("unread discovery accounts preserve valid entries and prevent a false clear wallet", () => {
+  const valid = header(2).key(4).key(5).u64(1n).i64(1n).done();
+  const result = discoverDelegations(
+    [
+      { address: keyOf(6), data: valid },
+      { address: keyOf(7), data: Uint8Array.of(4, 1) },
+      { address: keyOf(8) },
+    ],
+    keyOf(1),
+  );
+  expect(result.entries.map((entry) => entry.address)).toEqual([keyOf(6)]);
+  expect(result.unread).toBe(2);
+  const unknown = discoverDelegations([{ address: keyOf(7), data: Uint8Array.of(4, 1) }], keyOf(1));
+  expect(unknown.entries).toEqual([]);
+  expect(unknown.unread).toBe(1);
 });
 
 test("a plan lists its owner, status, terms, destinations, pullers and the merchant's link", () => {

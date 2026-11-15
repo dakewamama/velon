@@ -7,9 +7,7 @@ use axum::{
 };
 use tokio::net::TcpListener;
 
-mod constants;
-mod extractor;
-mod types;
+use catalyst_indexer::{constants, decoder, events, extractor, types};
 
 use extractor::extract_events;
 use types::WebhookPayload;
@@ -22,9 +20,6 @@ mod state;
 use constants::SUBSCRIPTIONS_PROGRAM_ID;
 use models::NewTriggerEvent;
 use state::AppState;
-
-mod decoder;
-mod events;
 
 mod middleware;
 
@@ -133,7 +128,27 @@ fn record(
     row
 }
 
-async fn webhook(State(state): State<AppState>, Json(payload): Json<WebhookPayload>) -> StatusCode {
+async fn webhook(State(state): State<AppState>, Json(raw): Json<serde_json::Value>) -> StatusCode {
+    if !raw.is_array() {
+        return StatusCode::UNPROCESSABLE_ENTITY;
+    }
+    if let Err(error) = catalyst_indexer::history::receive(&state.database, &raw).await {
+        tracing::error!(error=%error,"failed to retain webhook delivery");
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    let payload: WebhookPayload = match serde_json::from_value(raw) {
+        Ok(payload) => payload,
+        // Raw evidence and reconciliation work survive an unsupported payload layout.
+        Err(_) => return StatusCode::UNPROCESSABLE_ENTITY,
+    };
+    if payload.iter().any(|tx| {
+        tx.transaction
+            .signatures
+            .first()
+            .is_none_or(String::is_empty)
+    }) {
+        return StatusCode::UNPROCESSABLE_ENTITY;
+    }
     let raw_events = extract_events(&payload);
 
     for event in &raw_events {

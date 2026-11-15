@@ -5,7 +5,7 @@ import {
   getProgramDerivedAddress,
   type Address,
 } from "@solana/addresses";
-import { transactionEvents } from "../scripts/history.ts";
+import { transactionEvents } from "./history-reference.ts";
 import { SUBSCRIPTIONS_PROGRAM } from "../scripts/catalog.ts";
 import { EVENT_TAG } from "../scripts/subscriptions.ts";
 import type { Json, ObjectValue } from "../src/wire.ts";

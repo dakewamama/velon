@@ -24,8 +24,14 @@ use std::{
     time::Duration,
 };
 
+pub mod constants;
+pub mod decoder;
+pub mod events;
+pub mod extractor;
 pub mod features;
+pub mod history;
 pub mod rpc;
+pub mod types;
 
 /// The SDK is built from this repository, so its revision is the commit the runtime was built
 /// from, marked dirty when the SDK or the permission model had uncommitted changes.
@@ -912,6 +918,11 @@ async fn current_graph(
 
 pub fn router(journal: Journal) -> Router {
     Router::new()
+        .route(
+            "/activity/transactions/:cluster/:signature",
+            get(history::transaction),
+        )
+        .route("/activity/:cluster/:address", get(history::page))
         .route("/verifications/revoke/:id", get(rpc::retained_revoke))
         .route("/snapshots/:id", get(snapshot))
         .route(

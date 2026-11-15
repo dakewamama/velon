@@ -22,9 +22,8 @@ import {
 } from "../src/wire.ts";
 import { DEVNET_GENESIS, MAINNET_GENESIS, otherConsoles, type Control } from "../src/control.ts";
 import { SUBSCRIPTIONS_PROGRAM, tokenCatalog, tokenCatalogAsync } from "./catalog.ts";
-import { DELEGATOR_OFFSET, delegation, historyCoverage, plan, type Delegation } from "./subscriptions.ts";
+import { DELEGATOR_OFFSET, delegation, discoverDelegations, plan, type Delegation } from "./subscriptions.ts";
 import { planName } from "../src/plain.ts";
-import { transactionEvents } from "./history.ts";
 import type { Live } from "../src/server.ts";
 
 const root = resolve(import.meta.dir, "..");
@@ -114,11 +113,16 @@ async function rpc(method: string, params: Json[] = []): Promise<Json> {
   return reply.result;
 }
 
-async function run(args: string[]): Promise<string> {
+async function run(args: string[], timeoutMs?: number): Promise<string> {
   const child = Bun.spawn(args, { cwd: cataloger, env, stdout: "pipe", stderr: "inherit" });
-  const output = await new Response(child.stdout).text();
-  if ((await child.exited) !== 0) throw new Error(`Command failed: ${args[1]}`);
-  return output;
+  const timer = timeoutMs ? setTimeout(() => child.kill("SIGTERM"), timeoutMs) : undefined;
+  try {
+    const output = await new Response(child.stdout).text();
+    if ((await child.exited) !== 0) throw new Error(`Command failed: ${args[1]}`);
+    return output;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 let control: Control | null = null;
@@ -427,10 +431,16 @@ if (process.env.RPC_URL) {
         },
       ]),
     ).map(object);
-    const found = accounts.flatMap((entry) => {
-      const value = delegation(base64(object(entry.account)));
-      return value?.delegator === owner ? [{ address: text(entry.pubkey), value }] : [];
-    });
+    const { entries: found, unread } = discoverDelegations(
+      accounts.map((entry) => {
+        try {
+          return { address: text(entry.pubkey), data: subscriptionData(entry.account) };
+        } catch {
+          return { address: "" };
+        }
+      }),
+      owner,
+    );
     const planKeys = [
       ...new Set(found.flatMap(({ value }) => (value.kind === "subscription" ? [value.plan] : []))),
     ];
@@ -469,7 +479,7 @@ if (process.env.RPC_URL) {
         return [key, decimals ? Number(object(decimals).decimals) : undefined];
       }),
     );
-    return terms.map(({ address, kind, name, delegate, mint, amount }) => {
+    const entries = terms.map(({ address, kind, name, delegate, mint, amount }) => {
       const decimals = mint ? scale.get(mint) : undefined;
       return {
         program: "subscriptions",
@@ -485,53 +495,30 @@ if (process.env.RPC_URL) {
         ...(name ? { planName: name } : {}),
       };
     });
+    return { entries, unread };
   };
   // Address activity from finalized RPC transactions. Historical incarnation and
   // deployment attribution remain unresolved; current state never supplies historical terms.
-  const HISTORY = 25;
   const histories = new Map<string, { at: number; read: Promise<Json> }>();
   const readHistory = async (address: string): Promise<Json> => {
-    const signatures = array(
-      await rpc("getSignaturesForAddress", [address, { limit: HISTORY, commitment: "finalized" }]),
-    ).map(object);
-    const events = new Map<string, Record<string, Json>>();
-    const gaps: Json[] = [];
-    const settled = signatures.filter((entry) => entry.err === null);
-    for (let start = 0; start < settled.length; start += 4)
-      await Promise.all(
-        settled.slice(start, start + 4).map(async (entry) => {
-          const signature = text(entry.signature);
-          try {
-            const tx = await rpc("getTransaction", [
-              signature,
-              { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "finalized" },
-            ]);
-            for (const value of await transactionEvents(cluster, address, signature, entry.slot!, tx)) {
-              events.set(text(value.id), value);
-            }
-          } catch {
-            gaps.push({ signature, reason: "Transaction evidence unavailable or inconsistent." });
-          }
-        }),
+    let collectionError = false;
+    try {
+      const collection = object(
+        readJson(
+          await run(
+            [binary, "history-recent", address, "1", process.env.HISTORY_SOURCE_ID ?? "configured-rpc"],
+            30000,
+          ),
+        ),
       );
-    const ordered = [...events.values()].sort((a, b) => {
-      const left = BigInt(text(a.slot));
-      const right = BigInt(text(b.slot));
-      return left === right
-        ? Number(b.outer) - Number(a.outer) || Number(b.inner) - Number(a.inner)
-        : left > right
-          ? -1
-          : 1;
-    });
-    // An RPC result shorter than the requested page does not prove the provider
-    // retained every historical signature for this address.
-    return {
-      delegation: address,
-      attribution: "unresolved",
-      ...historyCoverage(signatures.length, HISTORY),
-      events: ordered,
-      gaps,
-    };
+      if (text(collection.cluster) !== cluster) throw new Error("History provider changed cluster.");
+    } catch {
+      collectionError = true;
+    }
+    const retained = object(readJson(await run([binary, "history", cluster, address], 10000)));
+    if (collectionError && array(retained.transactions).length === 0)
+      throw new Error("History evidence unavailable.");
+    return { ...retained, collectionError };
   };
   const history: Live["history"] = async (address) => {
     const now = Date.now();
@@ -574,7 +561,12 @@ if (process.env.RPC_URL) {
       // Accounts the RPC could not describe are counted, and a Subscriptions listing that failed is
       // said, so the console never calls the wallet clear.
       return Response.json(
-        { accounts: [...accounts, ...(subscriptions ?? [])], skipped, subscriptionsUnread: !subscriptions },
+        {
+          accounts: [...accounts, ...(subscriptions?.entries ?? [])],
+          skipped,
+          subscriptionsUnread: !subscriptions || subscriptions.unread > 0,
+          subscriptionsSkipped: subscriptions?.unread ?? null,
+        },
         { headers: { "Cache-Control": "no-store" } },
       );
     } catch {

@@ -536,6 +536,58 @@ test("an active subscription and its technical approval offer no revoke", async 
   await expect(page.getByRole("button", { name: /remove access/i })).toHaveCount(0);
 });
 
+test("incomplete address history never claims the current subscription has no past charges", async ({
+  page,
+}) => {
+  await browserProvider(page, "success", "active");
+  await page.route("**/api/live/history", (route) =>
+    route.fulfill({ json: { complete: false, events: [], gaps: [], attribution: "unresolved" } }),
+  );
+  await page.goto("/app");
+  await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+  const permission = card(page, derived.id);
+  await expect(permission.locator(".last-charge")).toHaveText("No charges found in available history");
+  await permission.getByRole("button", { name: /^(Technical details|Details)$/ }).click();
+  await expect(permission).toContainText("This address may have been reused");
+  await expect(permission).not.toContainText("No charges yet");
+  await expect(permission).not.toContainText("No charges or changes yet");
+});
+
+test("historical transfers retain their own mint and unresolved attribution under evidence", async ({
+  page,
+}) => {
+  await browserProvider(page, "success", "active");
+  await page.route("**/api/live/history", (route) =>
+    route.fulfill({
+      json: {
+        complete: false,
+        events: [
+          {
+            kind: "pull",
+            amount: "18446744073709551615",
+            mint: PLAN,
+            receiver: EVENT_AUTHORITY,
+            signature: "history-signature",
+            time: "1800000000",
+            attribution: { status: "unresolved", incarnation: null },
+          },
+        ],
+        gaps: [],
+      },
+    }),
+  );
+  await page.goto("/app");
+  await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+  const permission = card(page, derived.id);
+  await expect(permission.locator(".last-charge")).toContainText("Address activity on");
+  await permission.getByRole("button", { name: /^(Technical details|Details)$/ }).click();
+  await expect(permission).toContainText("18446744073709551615 base units");
+  await expect(permission).toContainText("initiator unknown");
+  await permission.getByText("Historical transaction evidence", { exact: true }).click();
+  await expect(permission.locator(".charges pre")).toContainText('"incarnation": null');
+  await expect(permission.locator(".charges pre")).toContainText(PLAN);
+});
+
 test("a running subscription is cancelled, proved, and keeps its grant only until the paid period ends", async ({
   page,
 }) => {

@@ -58,6 +58,66 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let database_url = std::env::var("DATABASE_URL")?;
     let journal = Journal::open(&database_url).await?;
     match args.as_slice() {
+        [command, limit, source] if command == "history-worker" => {
+            let limit = limit.parse()?;
+            if !(1..=100).contains(&limit) {
+                return Err("history worker limit must be 1..100".into());
+            }
+            let client = RpcClient::new_with_timeout_and_commitment(
+                std::env::var("RPC_URL")?,
+                Duration::from_secs(15),
+                CommitmentConfig::finalized(),
+            );
+            loop {
+                match catalyst_indexer::history::reconcile(&journal, &client, limit, source).await {
+                    Ok(result) => println!("{}", serde_json::to_string(&result)?),
+                    Err(error) => eprintln!(
+                        "history reconciliation failed: {}",
+                        redact(&error.to_string())
+                    ),
+                }
+                tokio::select! {
+                    _=tokio::signal::ctrl_c()=>break,
+                    _=tokio::time::sleep(Duration::from_secs(5))=>{},
+                }
+            }
+        }
+        [command, limit, source] if command == "history-reconcile" => {
+            let client = RpcClient::new_with_timeout_and_commitment(
+                std::env::var("RPC_URL")?,
+                Duration::from_secs(15),
+                CommitmentConfig::finalized(),
+            );
+            let result =
+                catalyst_indexer::history::reconcile(&journal, &client, limit.parse()?, source)
+                    .await?;
+            println!("{}", serde_json::to_string(&result)?);
+        }
+        [command, address, pages, source]
+            if command == "history-backfill" || command == "history-recent" =>
+        {
+            let client = RpcClient::new_with_timeout_and_commitment(
+                std::env::var("RPC_URL")?,
+                Duration::from_secs(15),
+                CommitmentConfig::finalized(),
+            );
+            let result = catalyst_indexer::history::collect(
+                &journal,
+                &client,
+                address.parse()?,
+                pages.parse()?,
+                source,
+                command == "history-recent",
+            )
+            .await?;
+            println!("{}", serde_json::to_string(&result)?);
+        }
+        [command, cluster, address] if command == "history" => {
+            let result = journal
+                .activity(cluster, address.parse()?, Default::default())
+                .await?;
+            println!("{}", serde_json::to_string(&result)?);
+        }
         [command, catalog_path, scope_path] if command == "observe" => {
             let versions: Vec<ProgramVersion> =
                 serde_json::from_slice(&std::fs::read(catalog_path)?)?;
@@ -134,7 +194,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         _ => {
             return Err(
-                "usage: authorization-api capture PROGRAM | observe CATALOG SCOPE | import CATALOG SNAPSHOT | replay ID | simulate-revoke ID SOURCE | latest ID | serve ADDRESS"
+                "usage: authorization-api capture PROGRAM | observe CATALOG SCOPE | import CATALOG SNAPSHOT | replay ID | simulate-revoke ID SOURCE | latest ID | serve ADDRESS | history-backfill ADDRESS PAGES SOURCE | history-recent ADDRESS PAGES SOURCE | history-reconcile LIMIT SOURCE | history-worker LIMIT SOURCE | history CLUSTER ADDRESS"
                     .into(),
             );
         }

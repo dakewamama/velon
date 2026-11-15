@@ -1,4 +1,5 @@
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CatalystEvent {
     SubscriptionCreated(SubscriptionCreated),
     SubscriptionCancelled(SubscriptionCancelled),
@@ -9,7 +10,7 @@ pub enum CatalystEvent {
     PlanUpdated(PlanUpdated),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SubscriptionCreated {
     pub plan: String,
     pub subscriber: String,
@@ -19,14 +20,14 @@ pub struct SubscriptionCreated {
     pub payer: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SubscriptionCancelled {
     pub plan: String,
     pub subscriber: String,
     pub expires_at_ts: i64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SubscriptionTransfer {
     pub subscription: String,
     pub plan: String,
@@ -43,7 +44,7 @@ pub struct SubscriptionTransfer {
     pub puller: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct FixedTransfer {
     pub delegation: String,
     pub delegator: String,
@@ -55,7 +56,7 @@ pub struct FixedTransfer {
     pub receiver_token_account: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct RecurringTransfer {
     pub delegation: String,
     pub delegator: String,
@@ -69,14 +70,14 @@ pub struct RecurringTransfer {
     pub receiver_token_account: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SubscriptionResumed {
     pub plan: String,
     pub subscriber: String,
     pub resumed_ts: i64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct PlanUpdated {
     pub plan: String,
     pub owner: String,

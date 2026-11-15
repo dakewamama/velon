@@ -62,6 +62,8 @@ export function createServer(
       );
       const action = simulate ?? verify;
       const receipt = /^\/api\/verifications\/revoke\/[a-f0-9]{64}$/.test(url.pathname);
+      const transactionEvidence =
+        /^\/api\/activity\/transactions\/([^/]+)\/([1-9A-HJ-NP-Za-km-z]{64,88})$/.exec(url.pathname);
       const scenariosPath = url.pathname === "/api/scenarios";
       const controlPath = url.pathname === "/api/control";
       const observe = live?.observe;
@@ -85,6 +87,7 @@ export function createServer(
         (!match &&
           !action &&
           !receipt &&
+          !transactionEvidence &&
           !scenariosPath &&
           !controlPath &&
           !observePath &&
@@ -99,6 +102,7 @@ export function createServer(
           !relay &&
           !mainnet) ||
         (match?.[4] && !isAddress(match[4])) ||
+        (transactionEvidence && !isAddress(transactionEvidence[1]!)) ||
         (action && !isAddress(action[2]!))
       )
         return new Response("Not found", { status: 404 });

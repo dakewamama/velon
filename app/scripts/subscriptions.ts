@@ -1,4 +1,4 @@
-import { getAddressDecoder, type Address } from "@solana/addresses";
+import { getAddressDecoder, isAddress, type Address } from "@solana/addresses";
 
 // Solana Subscriptions account layouts, as program-v0.5.0 (mainnet) and the devnet build store them.
 // Only the exact version-1 lengths are read; anything else is left for the runtime to refuse.
@@ -73,6 +73,24 @@ export function delegation(data: Uint8Array): Delegation | undefined {
       expiresAt: i64(data, 147),
     };
   return undefined;
+}
+
+// Discovery is partial when even one matching program account cannot be read.
+// Keep supported entries; never turn an unread account into "no permission".
+export function discoverDelegations(
+  accounts: readonly { address: string; data?: Uint8Array }[],
+  owner: string,
+) {
+  let unread = 0;
+  const entries = accounts.flatMap(({ address, data }) => {
+    const value = data && delegation(data);
+    if (!isAddress(address) || !value || value.delegator !== owner) {
+      unread++;
+      return [];
+    }
+    return [{ address, value }];
+  });
+  return { entries, unread };
 }
 
 export type Plan = {

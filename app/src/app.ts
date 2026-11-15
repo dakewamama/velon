@@ -598,7 +598,7 @@ function card(
   const panel = technical(grant, availability, rating, list);
   panel.id = `${title.id}-details`;
   if (list) panel.prepend(said);
-  // A subscription or delegation shows what it has actually charged, read from finalized transactions.
+  // Address history is separate from the current permission's incarnation.
   const delegation = revokeKey(grant);
   if (
     control &&
@@ -789,12 +789,14 @@ function charges(row: HTMLElement, panel: HTMLElement, delegation: string) {
         const item = node("li");
         const said =
           entry.kind === "pull"
-            ? `Transferred ${text(entry.amount)} base units of ${short(text(entry.mint))}, paid to ${short(text(entry.receiver))}${entry.puller ? `, by ${short(text(entry.puller))}` : "; initiator unknown"}`
+            ? `Reported transfer of ${text(entry.amount)} base units of ${short(text(entry.mint))}, paid to ${short(text(entry.receiver))}${entry.puller ? `, by ${short(text(entry.puller))}` : "; initiator unknown"}`
             : entry.kind === "created"
               ? "Subscribed"
               : entry.kind === "cancelled"
                 ? `Cancelled; it ends on ${day(entry.expiresAt)}`
-                : "Resumed";
+                : entry.kind === "resumed"
+                  ? "Resumed"
+                  : "Uninterpreted activity";
         const open = node("a", "Transaction", "link-button");
         open.href = explorer("tx", text(entry.signature));
         open.target = "_blank";
@@ -806,12 +808,28 @@ function charges(row: HTMLElement, panel: HTMLElement, delegation: string) {
         events.length ? list : node("p", "No activity found in the available transactions.", "muted"),
         node(
           "p",
-          "Up to 25 recent finalized transactions. Older or unavailable activity may be missing. This address may have been reused; these events have not been linked to the current permission.",
+          "Up to 25 retained finalized transactions. Older or unavailable activity may be missing. This address may have been reused; these events have not been linked to the current permission. Historical program versions are unverified.",
           "muted",
         ),
       );
+      if (body.collectionError)
+        section.append(
+          node("p", "Recent activity could not be refreshed. Showing retained evidence.", "muted"),
+        );
       const evidence = node("details");
       evidence.append(node("summary", "Historical transaction evidence"), node("pre", writeJson(body, 2)));
+      for (const entry of array(body.transactions ?? []).map(object)) {
+        const path = text(entry.evidence);
+        if (
+          !/^\/activity\/transactions\/[1-9A-HJ-NP-Za-km-z]{32,44}\/[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(path)
+        )
+          continue;
+        const link = node("a", "Retained transaction evidence", "link-button");
+        link.href = `/api${path}`;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        evidence.append(link);
+      }
       section.append(evidence);
       // The history reads before the folded technical record, which stays last.
       const record = panel.querySelector(".record");
@@ -2109,7 +2127,7 @@ async function scanWallet(
     content.append(
       node(
         "p",
-        "Velon couldn't list this wallet's Solana Subscriptions right now. Check the wallet again to retry.",
+        "Velon couldn't read all of this wallet's Solana Subscriptions. Check the wallet again to retry.",
         "notice",
       ),
     );

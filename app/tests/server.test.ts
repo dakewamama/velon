@@ -33,6 +33,24 @@ test("provider failure is explicit and existing conflict status survives", async
   expect((await fetch(path)).status).toBe(502);
 });
 
+test("retained transaction evidence is a bounded read path and preserves lossless RPC JSON", async () => {
+  const body = '{"slot":18446744073709551615,"meta":{"err":null}}';
+  const upstream = Bun.serve({
+    port: 0,
+    fetch: (request) => {
+      expect(request.headers.get("Authorization")).toBeNull();
+      return new Response(body);
+    },
+  });
+  const server = createServer(String(upstream.url), [], 0);
+  servers.push(upstream, server);
+  const path = `${server.url}api/activity/transactions/${"1".repeat(32)}/${"1".repeat(64)}`;
+  expect(await (await fetch(path)).text()).toBe(body);
+  expect((await fetch(path, { method: "POST" })).status).toBe(405);
+  expect((await fetch(`${path}?upstream=https://example.com`)).status).toBe(404);
+  expect((await fetch(path.replace("1".repeat(32), "invalid"))).status).toBe(404);
+});
+
 const revokePath = `/api/scopes/${"a".repeat(64)}/actions/revoke/11111111111111111111111111111111`;
 const verifyPath = `/api/snapshots/${"b".repeat(64)}/actions/revoke/11111111111111111111111111111111/verify`;
 const actionHeaders = { "X-Velon-Action": "revoke" };

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { getAddressEncoder, getProgramDerivedAddress, type Address } from "@solana/addresses";
 import { array, integer, object, text, writeJson, type Json, type ObjectValue } from "../src/wire.ts";
-import { SUBSCRIPTIONS_PROGRAM } from "./catalog.ts";
-import { base58, event, EVENT_TAG, type Event } from "./subscriptions.ts";
+import { SUBSCRIPTIONS_PROGRAM } from "../scripts/catalog.ts";
+import { base58, event, EVENT_TAG, type Event } from "../scripts/subscriptions.ts";
 
 // This reader establishes transaction facts under RPC trust. It does not resolve a
 // historical executable, account incarnation or the plan's historical constraints.
