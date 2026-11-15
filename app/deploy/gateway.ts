@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { infrastructureHealth } from "./health.ts";
 // Public edge of the hosted console. Only the Vercel proxy holds the token that reaches this
 // port (a Daytona preview token, or GATEWAY_TOKEN on a host that serves the port publicly), so
 // X-Velon-Client is the visitor address that proxy observed.
@@ -58,6 +59,7 @@ setInterval(() => {
 
 function kind(method: string, path: string, rpc: boolean): Kind | undefined {
   if (rpc) return "rpc";
+  if (method === "GET" || method === "HEAD") return "read";
   if (method !== "POST") return undefined;
   if (path === "/api/test/account" || path === "/api/live/spl/approve") return "grant";
   if (/\/actions\/(revoke|cancel)\/[^/]+\/verify$/.test(path)) return "verify";
@@ -98,23 +100,13 @@ function log(method: string, path: string, status: number, started: number, clie
   console.log(`${new Date().toISOString()} ${method} ${path} ${status} ${Date.now() - started}ms ${id}`);
 }
 
-// Healthy when the app answers and the cluster RPC returns its genesis hash.
+// Infrastructure probe only. RPC HTTP 200 may contain an error or another cluster.
 async function health(headers: Headers): Promise<Response> {
-  try {
-    const [app, chain] = await Promise.all([
-      fetch(new URL("/api/control", appUrl), { signal: AbortSignal.timeout(5000) }),
-      fetch(rpcUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getGenesisHash" }),
-        signal: AbortSignal.timeout(5000),
-      }),
-    ]);
-    if (app.ok && chain.ok) return new Response("ok", { headers });
-  } catch {
-    /* Reported as unhealthy below. */
-  }
-  return new Response("unhealthy", { status: 503, headers });
+  const ready = await infrastructureHealth(appUrl, rpcUrl);
+  return Response.json(
+    { infrastructure: ready ? "ready" : "unavailable", evidence: "not_assessed" },
+    { status: ready ? 200 : 503, headers },
+  );
 }
 
 let active = 0;
@@ -131,7 +123,16 @@ Bun.serve({
     const headers = new Headers({ "Cache-Control": "no-store" });
     if (active >= 8) return new Response("Demo busy; retry shortly", { status: 429, headers });
     const client = visitor(request.headers.get("X-Velon-Client") || "unknown");
-    if (url.pathname === "/healthz") return health(headers);
+    if (url.pathname === "/healthz") {
+      if (request.method !== "GET") return new Response("GET required", { status: 405, headers });
+      if (!allow("read", "health")) return new Response("Too many probes", { status: 429, headers });
+      active++;
+      try {
+        return await health(headers);
+      } finally {
+        active--;
+      }
+    }
     if (!authorized(request)) return new Response("Unauthorized", { status: 401, headers });
     const limited = kind(request.method, url.pathname, rpc);
     if (limited && !allow(limited, client))

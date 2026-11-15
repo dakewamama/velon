@@ -2,3 +2,5 @@
 node_modules/
 target/
 .data/
+__pycache__/
+*.pyc
