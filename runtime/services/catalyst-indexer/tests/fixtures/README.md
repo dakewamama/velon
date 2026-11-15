@@ -159,3 +159,24 @@ still returns `spl-delegate.bin`. The journal checkpoint stays unchanged.
 Warping past the imported deployment skipped its local ancestry and produced a
 program-cache insertion failure before execution. Starting at the deployment slot
 resolved it without editing the imported program bytes or changing validation.
+
+## Finalized mainnet Subscriptions payload
+
+`mainnet-subscriptions-response.json` retains the unmodified public RPC response
+from finalized slot `469813331` on 2026-11-15. Its capture manifest names the
+request, address order, genesis and response SHA256. Program and canonical
+ProgramData ownership/linkage, deployment slot `438440823`, payload bytes and
+same-response Clock are checked with the existing native loader/Clock types.
+
+The padded payload is `sdk/tests/fixtures/subscriptions-mainnet-program.so`,
+SHA256 `af3cefa5947173e03298361b3f461e2a314382a7206c084f77ad9a40c8b18d3a`.
+The retained OtterSec verification status maps its trailing-zero-normalized hash
+`056ca97cf3ee6586650275ce819d026f7369de0172dc54010fa6dc58180e0318`
+to source `364a41976c33347d092902443bbec2def9227e75`. This is a third-party build
+attestation, not an independent source rebuild or security review performed here.
+
+The SDK executes this payload against all 59 native fixture transitions and the
+native control/recompilation corpus. These tests use the existing Mollusk fixture
+runtime; they do not establish current mainnet runtime feature coverage, account
+incarnation attribution, historical completeness or mainnet action execution.
+The read-only capture contains no user grant. No funds were used.

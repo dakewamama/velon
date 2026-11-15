@@ -111,6 +111,83 @@ fn versions() -> Vec<ProgramVersion> {
     .collect()
 }
 
+#[test]
+fn observed_mainnet_capture_binds_the_native_test_payload_to_loader_state_and_clock() {
+    let raw = include_bytes!("fixtures/mainnet-subscriptions-response.json");
+    let metadata: Value =
+        serde_json::from_str(include_str!("fixtures/mainnet-subscriptions-capture.json")).unwrap();
+    assert_eq!(
+        metadata["response_sha256"],
+        format!("{:x}", Sha256::digest(raw))
+    );
+    assert_eq!(
+        metadata["cluster"],
+        "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d"
+    );
+    assert_eq!(metadata["params"][1]["commitment"], "finalized");
+    let response: Value = serde_json::from_slice(raw).unwrap();
+    let slot = response["result"]["context"]["slot"].as_u64().unwrap();
+    assert_eq!(metadata["observed_slot"], slot);
+    let account = |index: usize| {
+        serde_json::from_value::<UiAccount>(response["result"]["value"][index].clone())
+            .unwrap()
+            .to_account()
+            .unwrap()
+    };
+    let program = subscriptions::DelegationAdapter.protocol().program_id;
+    let data_address = get_program_data_address(&program);
+    assert_eq!(metadata["keys"][0], program.to_string());
+    assert_eq!(metadata["keys"][1], data_address.to_string());
+    assert_eq!(metadata["keys"][2], sysvar::clock::id().to_string());
+    let program_account = account(0);
+    let data_account = account(1);
+    assert_eq!(
+        program_account.owner,
+        solana_sdk_ids::bpf_loader_upgradeable::id()
+    );
+    assert_eq!(data_account.owner, program_account.owner);
+    assert!(program_account.executable && !data_account.executable);
+    assert_eq!(
+        bincode::deserialize::<UpgradeableLoaderState>(&program_account.data).unwrap(),
+        UpgradeableLoaderState::Program {
+            programdata_address: data_address
+        }
+    );
+    let offset = UpgradeableLoaderState::size_of_programdata_metadata();
+    let UpgradeableLoaderState::ProgramData { slot: deployed, .. } =
+        bincode::deserialize(&data_account.data[..offset]).unwrap()
+    else {
+        panic!("not ProgramData")
+    };
+    assert_eq!(deployed, metadata["deployment_slot"].as_u64().unwrap());
+    assert!(deployed < slot);
+    assert!(subscriptions::MAINNET_DEPLOYMENT.ends_with(&format!(":{deployed}")));
+    let elf = &data_account.data[offset..];
+    assert_eq!(
+        elf,
+        include_bytes!("../../../../sdk/tests/fixtures/subscriptions-mainnet-program.so")
+    );
+    assert_eq!(
+        subscriptions::MAINNET_PROGRAM_VERSION,
+        format!("sha256:{:x}", Sha256::digest(elf))
+    );
+    let verification_raw = include_bytes!("fixtures/mainnet-subscriptions-verification.json");
+    assert_eq!(
+        metadata["verification_status_sha256"],
+        format!("{:x}", Sha256::digest(verification_raw))
+    );
+    let verification: Value = serde_json::from_slice(verification_raw).unwrap();
+    assert_eq!(verification["is_verified"], true);
+    assert_eq!(verification["commit"], metadata["source_revision"]);
+    let end = elf.iter().rposition(|byte| *byte != 0).unwrap() + 1;
+    let normalized = format!("{:x}", Sha256::digest(&elf[..end]));
+    assert_eq!(verification["executable_hash"], normalized);
+    assert_eq!(verification["on_chain_hash"], normalized);
+    let clock: solana_clock::Clock = bincode::deserialize(&account(2).data).unwrap();
+    assert_eq!(clock.slot, slot);
+    // This capture contains no user state, historical account incarnation or chain action.
+}
+
 #[tokio::test]
 async fn verified_deployments_do_not_turn_unobserved_grants_into_complete_authority() {
     assert_eq!(format!("{:x}", Sha256::digest(RAW)), RESPONSE_HASH);

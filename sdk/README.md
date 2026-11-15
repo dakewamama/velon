@@ -198,13 +198,16 @@ Diff at the observed bank clock, including empty changes when the plan already i
 the cancellation cutoff. Execution at another clock requires fresh simulation/state;
 a declared Diff does not promise that a delayed transaction has the same result.
 
-Support includes the exact local fixture and verified devnet Subscriptions deployment,
+Support includes the exact local fixture, devnet and mainnet Subscriptions deployments,
 paired with their respective full payload hashes. DEVNET_DEPLOYMENT and
 DEVNET_PROGRAM_VERSION identify deployment slot 506642674; the fixture pair remains
 unchanged. The October 9 finalized capture binds program, ProgramData, SPL and Clock
 to one bank. The official deployment's verified hash matches the rebuilt source;
-the captured executable reproduces all 59 native fixture transitions and the native
-Cancel/CancelNow/Resume/Revoke semantic round trips. See [SOURCE_LEDGER.md](docs/research/SOURCE_LEDGER.md).
+both captured deployment executables reproduce all 59 native fixture transitions and the
+Cancel/CancelNow/Resume/Revoke semantic round trips. Mainnet's payload was read at
+finalized slot 469813331 and matches MAINNET_PROGRAM_VERSION. These are local native
+executions under the fixture environment, not mainnet actions or a live billing journey.
+See [SOURCE_LEDGER.md](docs/research/SOURCE_LEDGER.md).
 The runtime must validate the complete payload and selector for each observation;
 these constants establish neither an open-ended support interval nor address coverage.
 Unknown account versions and malformed bindings fail closed. Token-2022 and program

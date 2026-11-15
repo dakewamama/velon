@@ -1,0 +1,31 @@
+{
+  "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+  "endpoint": "https://api.mainnet-beta.solana.com",
+  "method": "getMultipleAccounts",
+  "params": [
+    [
+      "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44",
+      "HaYb5J9eXooZuNzN3z6TfuzVDcaTfiDdDPWCFtexFfMg",
+      "SysvarC1ock11111111111111111111111111111111"
+    ],
+    {
+      "encoding": "base64",
+      "commitment": "finalized"
+    }
+  ],
+  "keys": [
+    "De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44",
+    "HaYb5J9eXooZuNzN3z6TfuzVDcaTfiDdDPWCFtexFfMg",
+    "SysvarC1ock11111111111111111111111111111111"
+  ],
+  "response_sha256": "8415fc9127ffd0a3440967c4f706172862d867dcc3f3f84f093a9491a2af3663",
+  "captured_at": "2026-11-15T17:28:25.055410+00:00",
+  "source_revision": "364a41976c33347d092902443bbec2def9227e75",
+  "program_payload_sha256": "af3cefa5947173e03298361b3f461e2a314382a7206c084f77ad9a40c8b18d3a",
+  "programdata_address": "HaYb5J9eXooZuNzN3z6TfuzVDcaTfiDdDPWCFtexFfMg",
+  "coverage": "Program accounts only; no user grant, transfer or on-chain action execution.",
+  "observed_slot": 469813331,
+  "deployment_slot": 438440823,
+  "verification_status_url": "https://verify.osec.io/status/De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44",
+  "verification_status_sha256": "d362d95714dba4431a9949543c79fa1a1ed09bfb41cb2279568b264089f5cc5b"
+}

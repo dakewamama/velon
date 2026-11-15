@@ -342,3 +342,21 @@
   version pairs. The fixture pair is preserved; cross-paired hashes are rejected.
   These are local conformance proofs and program identity evidence, not live user
   grants, chain execution, complete coverage or blanket audit coverage of this commit.
+
+## Mainnet Subscriptions native compatibility
+
+The [official payments overview](https://solana.com/docs/payments/subscriptions/overview)
+identifies the shared program and its three delegation models. The
+[announcement](https://solana.com/news/subscriptions-and-allowances) is context;
+its broad support/audit language does not replace per-build conformance.
+
+On 2026-11-15 a read-only finalized capture at slot 469813331 retained mainnet's
+full ProgramData payload, SHA256 `af3cefa5947173e03298361b3f461e2a314382a7206c084f77ad9a40c8b18d3a`.
+The existing native clients and Mollusk execution harness were reused to run all
+59 retained state transitions and the control round trips against these bytes.
+The captured verification-service response identifies source revision
+`364a41976c33347d092902443bbec2def9227e75`; it is third-party build evidence.
+Program source: `solana-foundation/subscriptions`, MIT. Reuse: retained executable
+fixture and existing public APIs. No new framework or implementation code copied.
+Mainnet account observation and local native execution remain distinct from
+mainnet actions and externally audited coverage.

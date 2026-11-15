@@ -36,11 +36,23 @@ fn accounts(value: &Value) -> Vec<(Pubkey, Account)> {
 
 #[test]
 fn observed_devnet_program_reproduces_every_native_fixture_transition() {
-    let elf = include_bytes!("fixtures/subscriptions-devnet-program.so");
-    assert_eq!(
-        format!("{:x}", Sha256::digest(elf)),
-        "2675ad1d2b5068d47fc5d169156cf4859a9c21c0406ce63e3828e3b7320fddbf"
+    reproduce(
+        include_bytes!("fixtures/subscriptions-devnet-program.so"),
+        "2675ad1d2b5068d47fc5d169156cf4859a9c21c0406ce63e3828e3b7320fddbf",
     );
+}
+
+#[test]
+fn observed_mainnet_program_reproduces_every_native_fixture_transition() {
+    reproduce(
+        include_bytes!("fixtures/subscriptions-mainnet-program.so"),
+        "af3cefa5947173e03298361b3f461e2a314382a7206c084f77ad9a40c8b18d3a",
+    );
+}
+
+// Native execution under the existing fixture environment, not public-chain actions.
+fn reproduce(elf: &[u8], expected_hash: &str) {
+    assert_eq!(format!("{:x}", Sha256::digest(elf)), expected_hash);
     let mut vm = Mollusk::default();
     vm.add_program_with_loader_and_elf(&SUBSCRIPTIONS_ID, &program::loader_keys::LOADER_V2, elf);
     token::add_program(&mut vm);

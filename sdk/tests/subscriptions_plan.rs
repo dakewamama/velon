@@ -557,6 +557,11 @@ fn native_actions_predict_exact_changes_and_preserve_technical_and_plan_records(
             DEVNET_PROGRAM_VERSION,
             include_bytes!("fixtures/subscriptions-devnet-program.so").as_slice(),
         ),
+        (
+            MAINNET_DEPLOYMENT,
+            MAINNET_PROGRAM_VERSION,
+            include_bytes!("fixtures/subscriptions-mainnet-program.so").as_slice(),
+        ),
     ] {
         native_actions_round_trip(deployment, version, elf);
     }
@@ -576,6 +581,11 @@ fn delayed_native_cancellation_rejects_the_stale_declared_cutoff() {
             DEVNET_DEPLOYMENT,
             DEVNET_PROGRAM_VERSION,
             include_bytes!("fixtures/subscriptions-devnet-program.so").as_slice(),
+        ),
+        (
+            MAINNET_DEPLOYMENT,
+            MAINNET_PROGRAM_VERSION,
+            include_bytes!("fixtures/subscriptions-mainnet-program.so").as_slice(),
         ),
     ] {
         let mut accounts = accounts(step, "before");
