@@ -48,6 +48,35 @@ Hashes detect corruption; they do not authenticate an operator who can replace
 both a backup and its manifest. Store backup manifests under independent access
 controls. The utility does not encrypt files or send them to an offsite service.
 
+## Enforced production startup boundary
+
+The release image installs the recovery utility at
+`/opt/velon/tools/evidence_backup.py`. Use the utility bundled with the matching
+release when possible.
+
+Mainnet startup now requires `DATABASE_URL` and `VELON_EVIDENCE_MOUNT`.
+The mount must already exist as an active filesystem mount, and the database
+must be a readable, initialized SQLite file inside it. The supervisor
+refuses to silently create a new journal at its revision-specific default.
+For example, with a Railway volume mounted at `/data`:
+
+```text
+VELON_EVIDENCE_MOUNT=/data
+DATABASE_URL=sqlite:///data/observations.db
+```
+
+Do **not** set these variables and redeploy until the old journal has been
+inventoried, backed up and independently restored to the mounted volume.
+The startup guard checks mount presence, path confinement, database
+readability and SQLite integrity. It does not prove that a provider's mount
+is persistent, that the backup is offsite, or that every history range exists.
+Those are independent operator release gates.
+
+Railway volumes are mounted with root ownership. The image uses the
+unprivileged `ubuntu` user. Check ownership and access before cutover:
+a writable volume may require an explicit UID/ownership decision.
+Do not solve this by silently changing the service to run as root.
+
 ## Tested and unmeasured
 
 `python3 -m unittest discover -s scripts -p 'test_*.py' -v` imports retained native
