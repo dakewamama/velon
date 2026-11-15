@@ -553,7 +553,11 @@ test("a revoke the network reports failed is shown at once, never as removed", a
   const provider = await browserProvider(page, "failed-on-chain");
   await connectAndReview(page);
   await page.getByRole("button", { name: "Confirm in wallet" }).click();
-  await expect(page.locator("#action-result")).toContainText("the permission is still active");
+  await expect(page.locator("#action-result")).toContainText(
+    "Velon has not verified a change to the token account's delegate approval.",
+  );
+  await expect(page.locator("#action-result")).not.toContainText("the permission is still active");
+  await expect(page.getByRole("heading", { name: "Unconfirmed", exact: true })).toBeVisible();
   await expect(page.locator("#action-result")).not.toContainText("Access removed");
   await expect(page.getByRole("heading", { name: "Removed and verified", exact: true })).toHaveCount(0);
   expect(provider.counts().sends).toBe(1);
