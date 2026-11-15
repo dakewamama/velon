@@ -1384,13 +1384,23 @@ pub async fn revalidate_action(
     let signed = decode_signed(signed_transaction)?;
     checked_action(&record, source, &signed, kind)?;
     let catalog = Catalog::new(record.versions.clone()).map_err(|_| Error::ReplayMismatch)?;
+    // Bind the read to this provider's independently requested finalized tip,
+    // rather than allowing a cached response from the old review slot.
+    let tip = client
+        .get_slot_with_commitment(CommitmentConfig::finalized())
+        .await?;
+    if tip < snapshot.observation.slot {
+        return Err(Error::InvalidObservation(
+            "provider finalized tip predates review",
+        ));
+    }
     let current = observe(
         client,
         Scope {
             cluster: snapshot.observation.cluster.clone(),
             accounts: snapshot.accounts.iter().map(|(key, _)| *key).collect(),
             targets: snapshot.targets.clone(),
-            min_context_slot: Some(snapshot.observation.slot),
+            min_context_slot: Some(tip),
         },
     )
     .await?;

@@ -239,10 +239,15 @@ fn current_client(observations: Vec<Value>, simulations: Vec<Value>) -> RpcClien
     use solana_rpc_client::mock_sender::MocksMap;
     let genesis = vec![metadata()["cluster"].clone(); observations.len() + simulations.len()];
     let features = vec![support::feature_response(support::MAINNET_FEATURES); observations.len()];
+    let slots: Vec<_> = observations
+        .iter()
+        .map(|response| response["context"]["slot"].clone())
+        .collect();
     let mocks = MocksMap(
         [
             (RpcRequest::GetGenesisHash, genesis.into()),
             (RpcRequest::GetMultipleAccounts, observations.into()),
+            (RpcRequest::GetSlot, slots.into()),
             (RpcRequest::SimulateTransaction, simulations.into()),
             (RpcRequest::GetProgramAccounts, features.into()),
         ]
@@ -2062,4 +2067,44 @@ async fn signing_revalidation_api_requires_canonical_signatures_before_rpc() {
         .await,
         Err(Error::InvalidObservation("finalized evidence required"))
     ));
+}
+
+#[tokio::test]
+async fn signing_revalidation_refuses_a_cached_bank_older_than_the_provider_tip() {
+    let (before, _, transaction) = verification_fixture();
+    let journal = Journal::open("sqlite::memory:").await.unwrap();
+    let record = journal.ingest(before.clone(), &catalog()).await.unwrap();
+    let signed = STANDARD.encode(bincode::serialize(&transaction).unwrap());
+    for tip in [before.observation.slot - 1, before.observation.slot + 1] {
+        let mock = RpcClient::new_mock_with_mocks(
+            "succeeds".into(),
+            [
+                (RpcRequest::GetGenesisHash, metadata()["cluster"].clone()),
+                (RpcRequest::GetSlot, json!(tip)),
+                (RpcRequest::GetMultipleAccounts, observed(&before)),
+            ]
+            .into(),
+        );
+        assert!(
+            rpc::revalidate_action(
+                &mock,
+                &journal,
+                &record.id,
+                source(),
+                &signed,
+                rpc::Kind::Revoke
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(
+            journal
+                .latest(&before.scope_id().unwrap())
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            record.id
+        );
+    }
 }
