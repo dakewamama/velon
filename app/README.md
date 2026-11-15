@@ -182,8 +182,10 @@ from Cataloger's retained finalized mainnet capture, creates an owner, mint and 
 account, approves a delegate for 25 base units and writes the catalog with executable
 identity and runtime evidence for that genesis. It prints the launch command above.
 `AGAVE_BIN=... bun run local:reset` approves the same delegate again on the running
-ledger, keeping earlier receipts and the journal. Rerunning `local` starts a new
-ledger and genesis, so the demo must be restarted with the newly printed command.
+ledger, keeping earlier receipts and the journal. Setup refuses to overwrite an
+existing local data directory; use a fresh checkout for a new ledger. Agave 4.3.2
+requires kernel `io_uring` support. A blocked syscall is reported as a startup
+failure, and the failed ledger and logs are preserved for inspection.
 Then, with the demo running:
 
 ```sh

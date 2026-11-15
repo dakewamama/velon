@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { array, integer, object, readJson, text, writeJson, type Json } from "../src/wire.ts";
 import { PROGRAM_HASH, TOKEN_PROGRAM, tokenCatalog } from "./catalog.ts";
+import { createLocalData, requireValidatorRevision, validatorFailure } from "./local-data.ts";
 
 const PROGRAM_DATA = "3gvYRKWyXRR9xKWe1ZjPhLY5ZJRN7KDB4rFZFGoJfFk2";
 const DEPLOYMENT_SLOT = 419472000;
@@ -36,6 +36,7 @@ async function rpc(method: string, params: Json[] = []): Promise<Json> {
 }
 
 const release = run([`${tools}/solana-test-validator`, "--version"]);
+requireValidatorRevision(release);
 
 // The token program is the retained finalized mainnet capture, byte for byte.
 const fixtures = `${runtime}/services/catalyst-indexer/tests/fixtures`;
@@ -43,8 +44,7 @@ const raw = await Bun.file(`${fixtures}/mainnet-spl-response.json`).text();
 if (sha256(raw) !== RESPONSE_HASH) throw new Error("Unexpected mainnet capture.");
 const keys = array(object(readJson(await Bun.file(`${fixtures}/mainnet-spl-capture.json`).text())).keys);
 const values = array(object(object(readJson(raw)).result).value);
-await rm(dir, { recursive: true, force: true });
-await mkdir(dir, { recursive: true });
+await createLocalData(dir);
 for (const pubkey of [TOKEN_PROGRAM, PROGRAM_DATA]) {
   const account = object(values[keys.indexOf(pubkey)]);
   const { space: _, ...native } = account;
@@ -89,8 +89,13 @@ process.once("SIGTERM", stop);
 
 try {
   for (let attempt = 0; ; attempt++) {
-    if (validator.exitCode !== null || attempt === 600)
-      throw new Error("Validator did not start. Check that no other validator holds these ports.");
+    if (validator.exitCode !== null) {
+      const log = await Bun.file(`${dir}/ledger/validator.log`)
+        .text()
+        .catch(() => "");
+      throw new Error(validatorFailure(log));
+    }
+    if (attempt === 600) throw new Error("Validator startup timed out. Its ledger and logs were preserved.");
     try {
       if ((await rpc("getHealth")) === "ok") break;
     } catch {
@@ -172,7 +177,7 @@ LIVE_TEST_BENCH=1 AGAVE_BIN=${tools} \\
 bun run demo
 
 This validator keeps running until interrupted. \`bun run local:reset\` approves the
-delegate again on this ledger; rerunning this script starts a new one.`);
+delegate again on this ledger. Setup refuses to overwrite an existing ledger.`);
   process.exitCode = await validator.exited;
 } catch (error) {
   await stop();
