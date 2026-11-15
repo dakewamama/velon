@@ -30,6 +30,7 @@ solana-commitment-config = "=3.1.1"
 solana-transaction = { version = "=4.3.0", features = ["serde", "wincode", "verify"] }
 solana-transaction-status-client-types = { version = "=4.3.2", features = ["agave-unstable-api"] }
 sha2 = "0.10"
+subtle = "=2.6.1"
 agave-feature-set = { version = "=4.3.2", features = ["agave-unstable-api"] }
 solana-syscalls = { version = "=4.3.2", features = ["agave-unstable-api"] }
 solana-program-runtime = { version = "=4.3.2", features = ["agave-unstable-api"] }

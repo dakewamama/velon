@@ -30,13 +30,19 @@ async fn main() {
 
     let database_url =
         std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://catalyst.db".to_string());
+    let secret: std::sync::Arc<str> = std::env::var("HELIUS_WEBHOOK_SECRET")
+        .ok()
+        .filter(|secret| !secret.is_empty())
+        .expect("HELIUS_WEBHOOK_SECRET must be set and nonempty")
+        .into();
     let state: AppState = AppState::new(&database_url).await.unwrap();
 
     let app = Router::new()
         .route("/health", get(health))
         .route(
             "/webhook/helius",
-            post(webhook).layer(axum_middleware::from_fn(
+            post(webhook).layer(axum_middleware::from_fn_with_state(
+                secret,
                 middleware::verify_helius_signature,
             )),
         )

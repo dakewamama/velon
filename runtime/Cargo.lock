@@ -831,6 +831,7 @@ dependencies = [
  "spl-token-2022-interface",
  "spl-token-interface",
  "sqlx",
+ "subtle",
  "tokio",
  "tower 0.4.13",
  "tracing",
