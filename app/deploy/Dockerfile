@@ -28,7 +28,9 @@ RUN cd runtime && cargo build --release --locked --bin authorization-api \
 # The lockfile names a GitHub dependency over SSH; the image fetches it over HTTPS.
 RUN git config --global url."https://github.com/".insteadOf ssh://git@github.com/ \
   && cd app && npm ci --omit=dev --ignore-scripts && bun run build
-RUN cp -r app /opt/velon/app && cp app/deploy/supervisor.py /opt/velon/ \
+RUN cp -r app /opt/velon/app \
+  && cp app/deploy/supervisor.py app/deploy/evidence_storage.py /opt/velon/ \
+  && install -D -m 0644 scripts/evidence_backup.py /opt/velon/tools/evidence_backup.py \
   && cp -r runtime /opt/velon/cataloger && rm -rf /opt/velon/cataloger/target \
   && python3 - <<'PY'
 import hashlib, json, os, pathlib
