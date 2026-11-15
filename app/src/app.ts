@@ -2775,6 +2775,24 @@ async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "
             const current = object(await get(`scopes/${scope}`, signal));
             if (current.id !== stateVersion)
               throw new Error("Permission evidence changed while signing. Review again.");
+            const revalidated = object(
+              await result(
+                await action(
+                  `snapshots/${stateVersion}/actions/${kind}/${key}/revalidate`,
+                  signal,
+                  getBase64EncodedWireTransaction(
+                    getTransactionDecoder().decode(signed[0]!.signedTransaction),
+                  ),
+                ),
+              ),
+            );
+            if (
+              revalidated.state_version !== stateVersion ||
+              integer(revalidated.slot) < prepared.minContextSlot
+            )
+              throw new Error("Fresh authority evidence did not match the review. Scan and review again.");
+            signal.throwIfAborted();
+            if (connected !== session) throw new Error("Wallet changed. Review again.");
             setAction("SUBMITTING", "Sending exactly the transaction you reviewed…");
             return signed[0]!.signedTransaction;
           },

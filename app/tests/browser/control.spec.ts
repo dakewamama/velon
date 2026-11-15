@@ -339,6 +339,16 @@ async function browserProvider(
     else throw new Error(`Unexpected RPC ${request.method}`);
     await route.fulfill({ json: { jsonrpc: "2.0", id: request.id, result } });
   });
+  await page.route("**/api/snapshots/*/actions/*/*/revalidate", (route) => {
+    expect(route.request().headers()["content-type"]).toBe("application/json");
+    expect(new URL(route.request().url()).pathname).toBe(
+      `/api/snapshots/${beforeId}/actions/${mode === "cancel" ? "cancel" : "revoke"}/${key}/revalidate`,
+    );
+    expect(typeof route.request().postDataJSON().signed_transaction).toBe("string");
+    return mode === "native-stale"
+      ? route.fulfill({ status: 422, json: { error: "authority evidence changed while signing" } })
+      : route.fulfill({ json: { state_version: beforeId, observation_id: "e".repeat(64), slot: 11 } });
+  });
   await page.route("**/api/snapshots/*/actions/revoke/*/verify", (route) => {
     polls++;
     expect(new URL(route.request().url()).pathname).toBe(
@@ -486,6 +496,7 @@ for (const mode of [
   "tampered",
   "changed-account",
   "stale",
+  "native-stale",
   "expired",
   "verification-failed",
   "reapproved",
