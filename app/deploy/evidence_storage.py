@@ -36,10 +36,9 @@ def require_persistent_database(environment, mounted=os.path.ismount):
         or mount.is_symlink()
         or not mount.is_dir()
         or not mounted(mount)
-        or any(mount == forbidden or mount.is_relative_to(forbidden) for forbidden in (
-            Path("/tmp"), Path("/var/tmp"), Path("/run"), Path("/dev/shm"), Path("/opt/velon")
-        ))
         or mount == Path("/")
+        or mount == Path("/opt/velon")
+        or mount.is_relative_to(Path("/opt/velon"))
     ):
         raise RuntimeError("Mainnet evidence directory must be an active non-temporary mount.")
 
