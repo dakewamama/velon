@@ -50,9 +50,9 @@ controls. The utility does not encrypt files or send them to an offsite service.
 
 ## Enforced production startup boundary
 
-The production image includes `/opt/velon/evidence_backup.py` only if installed by
-the release build under `/opt/velon/tools/evidence_backup.py`. Use that
-version of the utility with the matching release when possible.
+The release image installs the recovery utility at
+`/opt/velon/tools/evidence_backup.py`. Use the utility bundled with the matching
+release when possible.
 
 Mainnet startup now requires `DATABASE_URL` and `VELON_EVIDENCE_MOUNT`.
 The mount must already exist as an active filesystem mount, and the database
