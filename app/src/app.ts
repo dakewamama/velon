@@ -2320,6 +2320,9 @@ grantButton.onclick = async () => {
   }
 };
 
+const TOKEN_ACCOUNT_REVOKE_PROOF =
+  "At the finalized read, this token account had no delegate approval. This does not identify any approvals that changed before execution.";
+
 // Receipts of verified revokes, kept in this browser and replayable from the journal.
 type Receipt = {
   id: string;
@@ -2329,6 +2332,7 @@ type Receipt = {
   network: string;
   at: string;
   kind?: ActionKind;
+  tokenAccountRevoke?: boolean;
 };
 const receipts = document.querySelector<HTMLElement>("#receipts")!;
 const kept = (): Receipt[] => {
@@ -2371,6 +2375,7 @@ document.querySelector<HTMLButtonElement>("#receipts-tab")!.onclick = () => {
       field("Transaction", receipt.signature),
       field("Receipt ID", receipt.id),
     );
+    if (receipt.tokenAccountRevoke) facts.append(field("What this proves", TOKEN_ACCOUNT_REVOKE_PROOF));
     const replay = node("button", "Replay proof", "action-button");
     const outcome = node("span", "", "muted");
     replay.onclick = async () => {
@@ -2384,10 +2389,13 @@ document.querySelector<HTMLButtonElement>("#receipts-tab")!.onclick = () => {
         }
         if (!response.ok) throw new Error();
         const body = await response.text();
+        if (object(readJson(body)).verification_id !== receipt.id) throw new Error("Receipt mismatch");
         outcome.textContent =
           receipt.kind === "cancel"
             ? "Replayed without the chain: the cancellation and the subscription's new end still check out."
-            : "Replayed without the chain: the removal and the cleared approval still check out.";
+            : receipt.tokenAccountRevoke
+              ? `Replayed from retained evidence. ${TOKEN_ACCOUNT_REVOKE_PROOF}`
+              : "Replayed without the chain: the retained transaction and permission evidence still check out.";
         const save = node("a", "Download evidence", "link-button");
         save.href = URL.createObjectURL(new Blob([body], { type: "application/json" }));
         save.download = `velon-${receipt.kind ?? "revoke"}-${receipt.id.slice(0, 12)}.json`;
@@ -2403,7 +2411,7 @@ document.querySelector<HTMLButtonElement>("#receipts-tab")!.onclick = () => {
     row.append(
       node(
         "h3",
-        `${receipt.kind === "cancel" ? "Subscription cancelled" : "Access removed"} on ${{ mainnet: "mainnet", devnet: "devnet" }[receipt.network] ?? "the test chain"}`,
+        `${receipt.kind === "cancel" ? "Subscription cancelled" : receipt.tokenAccountRevoke ? "Token account approval cleared" : "Access removed"} on ${{ mainnet: "mainnet", devnet: "devnet" }[receipt.network] ?? "the test chain"}`,
       ),
       node("p", new Date(receipt.at).toLocaleString(), "remaining"),
       facts,
@@ -2696,7 +2704,7 @@ async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "
     const named = label?.symbol ?? label?.name;
     summary.append(
       principal.kind === "identity"
-        ? address("Who", text(principal.value), "holder")
+        ? address(subscription ? "Who" : "Approved when checked", text(principal.value), "holder")
         : field("Who", principalLabel(grant.principal)),
       field(
         "Token",
@@ -2710,7 +2718,7 @@ async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "
             ? `The payment approval is closed, so ${who(grant, known, true)} can't take any more, and its SOL deposit goes back to whoever paid for it. The approval Solana Subscriptions holds on this account stays.`
             : subscription
               ? "The ended subscription's record is closed, and its SOL deposit goes back to whoever paid for it. The approval Solana Subscriptions holds on this account stays."
-              : `The approval for ${who(grant, known, true)} is cleared. Nothing else changes.`,
+              : "Clears the token account's current delegate approval. If that approval changes before execution, the changed approval may be cleared instead.",
       ),
       field("Network", network().label),
     );
@@ -2818,13 +2826,15 @@ async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "
               throw new Error(
                 cancelling
                   ? `The network reports that the cancellation failed (${JSON.stringify(status.err)}). The subscription is unchanged.`
-                  : `The network reports that the revoke failed (${JSON.stringify(status.err)}). Nothing was removed; the permission is still active.`,
+                  : subscription
+                    ? `The network reports that the revoke failed (${JSON.stringify(status.err)}). Nothing was removed; the permission is still active.`
+                    : `The network reports that this revoke failed (${JSON.stringify(status.err)}). Velon has not verified a change to the token account's delegate approval.`,
               );
             if (status && ["confirmed", "finalized"].includes(String(status.confirmationStatus))) {
               landed = true;
               setAction(
                 "FINALIZING",
-                `${sent.status === "unknown" ? `Velon didn't get a clear answer after sending, but the network reports that the ${cancelling ? "cancellation" : "removal"} landed. ` : ""}${cancelling ? `Cancelled. It stops charging after ${endsAt}. The cancellation` : "Access removed. The removal"} is confirmed on ${network().label.toLowerCase()} at slot ${status.slot}. Velon is waiting for it to be final to verify it and issue the receipt.`,
+                `${sent.status === "unknown" ? `Velon didn't get a clear answer after sending, but the network reports that the ${cancelling ? "cancellation" : "removal"} landed. ` : ""}${cancelling ? `Cancelled. It stops charging after ${endsAt}. The cancellation` : subscription ? "Access removed. The removal" : "The token account revoke"} is confirmed on ${network().label.toLowerCase()} at slot ${status.slot}. Velon is waiting for it to be final to verify it and issue the receipt.`,
               );
               actionResult.append(link("Transaction", sent.signature));
             }
@@ -2875,12 +2885,15 @@ async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "
             network: config.network,
             at: new Date().toISOString(),
             ...(cancelling ? { kind } : {}),
+            ...(!subscription ? { tokenAccountRevoke: true } : {}),
           });
           setAction(
             "VERIFIED",
             cancelling
               ? `Velon read the chain again once it was final: the subscription stops charging after ${endsAt}. Remove it here after that to get its SOL deposit back.`
-              : `Velon read the chain again once it was final: the access is gone on ${network().label.toLowerCase()}.`,
+              : subscription
+                ? `Velon read the chain again once it was final: the access is gone on ${network().label.toLowerCase()}.`
+                : TOKEN_ACCOUNT_REVOKE_PROOF,
           );
           actionResult.append(
             link("Transaction", sent.signature),

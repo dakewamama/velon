@@ -540,3 +540,52 @@ fn requirements_and_wrong_program_owner_are_explicit() {
         Err(Error::InvalidState(_))
     ));
 }
+
+#[test]
+fn owner_revoke_clears_the_delegate_current_at_execution_not_the_reviewed_identity() {
+    let before = state();
+    let reviewed = sdk::compile_state(&DelegateAdapter, &before, &context())
+        .unwrap()
+        .remove(0);
+    let action = sdk::actions(&DelegateAdapter, &reviewed, &before, &context())
+        .unwrap()
+        .remove(0);
+    let mut replaced = state();
+    let mut native = TokenAccount::unpack(&replaced.account.data).unwrap();
+    let replacement = Pubkey::new_from_array([9; 32]);
+    assert_ne!(native.delegate, COption::Some(replacement));
+    native.delegate = COption::Some(replacement);
+    native.delegated_amount = 77;
+    TokenAccount::pack(native, &mut replaced.account.data).unwrap();
+    assert_eq!(
+        action.instructions[0],
+        instruction::revoke(&token::ID, &replaced.address, &native.owner, &[]).unwrap()
+    );
+    let mut svm = Mollusk::default();
+    token::add_program(&mut svm);
+    let result = svm.process_instruction(
+        &action.instructions[0],
+        &[
+            (replaced.address, replaced.account.clone()),
+            (native.owner, replaced.owner.clone()),
+        ],
+    );
+    assert_eq!(result.raw_result, Ok(()));
+    let after = TokenAccount::unpack(
+        &result
+            .resulting_accounts
+            .iter()
+            .find(|(key, _)| *key == replaced.address)
+            .unwrap()
+            .1
+            .data,
+    )
+    .unwrap();
+    assert_eq!(after.delegate, COption::None);
+    assert_eq!(after.delegated_amount, 0);
+    assert_eq!(after.owner, native.owner);
+    assert_eq!(after.amount, native.amount);
+    // Neither the reviewed delegate nor its allowance is in the signed instruction.
+    assert_eq!(action.instructions[0].data, vec![5]);
+    assert_eq!(action.instructions[0].accounts.len(), 2);
+}
