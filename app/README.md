@@ -223,6 +223,16 @@ The control tests under `tests/browser` register an ephemeral
 wallet and use synthetic RPC responses; they prove browser conformance for failure
 cases that cannot be staged on a chain, not chain execution.
 
+## Disposable devnet fixtures
+
+`bun run devnet:subscription` requires `DEVNET_FUNDER` naming a disposable,
+faucet-funded devnet keypair; it never defaults to a personal Solana CLI key.
+The runtime binary (`AUTHZ_BIN`, with `CATALOGER_DIR` if needed) verifies supported
+finalized executable/runtime evidence before fixture creation or funding.
+Existing `.data/devnet` directories are preserved and setup refuses to overwrite
+them. This tool creates a cancelled test subscription; it is not proof of the
+complete live console journey.
+
 ## Scope
 
 The default browser mode replays native fixtures. An explicitly configured finalized

@@ -1,5 +1,4 @@
 import { mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { address, getAddressEncoder, getProgramDerivedAddress, type Address } from "@solana/addresses";
 import { blockhash } from "@solana/rpc-types";
@@ -15,8 +14,9 @@ import {
   getSignatureFromTransaction,
   signTransaction,
 } from "@solana/transactions";
-import { array, integer, object, readJson, text, type Json } from "../src/wire.ts";
+import { array, integer, object, readJson, text, writeJson, type Json } from "../src/wire.ts";
 import { DEVNET_GENESIS } from "../src/control.ts";
+import { tokenCatalogAsync } from "./catalog.ts";
 
 // Layouts follow the generated client of subscriptions 0.5.0.
 const SUBSCRIPTIONS = address("De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44");
@@ -35,7 +35,8 @@ const FUNDING = "0.05";
 const root = resolve(import.meta.dir, "..");
 const dir = `${root}/.data/devnet`;
 const url = process.env.DEVNET_RPC_URL ?? "https://api.devnet.solana.com";
-const funder = process.env.DEVNET_FUNDER ?? `${homedir()}/.config/solana/id.json`;
+const funder = process.env.DEVNET_FUNDER;
+if (!funder) throw new Error("DEVNET_FUNDER must name a disposable devnet test keypair.");
 const bin = (name: string) => (process.env.AGAVE_BIN ? `${process.env.AGAVE_BIN}/${name}` : name);
 const encoder = getAddressEncoder();
 
@@ -143,9 +144,19 @@ const program = object(
 );
 if (program.executable !== true || program.owner !== "BPFLoaderUpgradeab1e11111111111111111111111")
   throw new Error("The subscriptions program is not deployed on devnet.");
-if (await Bun.file(`${dir}/subscriber.json`).exists())
-  throw new Error(`${dir} already holds a fixture. Move it aside to create a new one.`);
-await mkdir(dir, { recursive: true });
+const cataloger = resolve(process.env.CATALOGER_DIR ?? `${root}/../runtime`);
+const binary = process.env.AUTHZ_BIN ?? `${cataloger}/target/debug/authorization-api`;
+const revision = process.env.CATALOGER_REVISION ?? run(["git", "rev-parse", "HEAD"]);
+const catalog = await tokenCatalogAsync(binary, cataloger, url, revision);
+if (
+  catalog.some((entry) => object(entry).cluster !== DEVNET_GENESIS) ||
+  !catalog.some((entry) => object(object(entry).adapter).protocol === "subscriptions")
+)
+  throw new Error("Devnet Subscriptions executable/runtime is not a verified supported deployment.");
+// Failed or completed fixtures keep every key, journal and transaction for inspection.
+await mkdir(resolve(dir, ".."), { recursive: true });
+await mkdir(dir);
+await Bun.write(`${dir}/catalog.json`, writeJson(catalog));
 
 for (const name of ["subscriber", "merchant", "mint"])
   run([bin("solana-keygen"), "new", "--no-bip39-passphrase", "--silent", "--outfile", `${dir}/${name}.json`]);
