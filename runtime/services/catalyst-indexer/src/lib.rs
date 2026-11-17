@@ -637,6 +637,29 @@ impl Journal {
         }
         Ok(record)
     }
+
+    /// Exact retained observation only; never interpolate authority across missing slots.
+    pub async fn at_slot(&self, scope_id: &str, slot: u64) -> Result<Option<Record>, Error> {
+        let ids: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM authority_snapshots WHERE scope_id=? AND observed_slot=? ORDER BY id LIMIT 2",
+        )
+        .bind(scope_id)
+        .bind(slot.to_be_bytes().to_vec())
+        .fetch_all(&self.database)
+        .await?;
+        let mut found = None;
+        for id in ids {
+            let record = self.get(&id).await?.ok_or(Error::ReplayMismatch)?;
+            if record.snapshot.scope_id()? != scope_id || record.snapshot.observation.slot != slot {
+                return Err(Error::ReplayMismatch);
+            }
+            if found.is_some() {
+                return Err(Error::AmbiguousScope);
+            }
+            found = Some(record);
+        }
+        Ok(found)
+    }
 }
 
 #[derive(Serialize)]
@@ -757,6 +780,18 @@ async fn current_snapshot(
 ) -> Result<Json<Record>, StatusCode> {
     journal
         .latest(&scope_id)
+        .await
+        .map_err(scope_error)?
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
+}
+
+async fn historical_snapshot(
+    State(journal): State<Journal>,
+    Path((scope_id, slot)): Path<(String, u64)>,
+) -> Result<Json<Record>, StatusCode> {
+    journal
+        .at_slot(&scope_id, slot)
         .await
         .map_err(scope_error)?
         .map(Json)
@@ -930,6 +965,7 @@ pub fn router(journal: Journal) -> Router {
             get(authorizations),
         )
         .route("/scopes/:scope_id", get(current_snapshot))
+        .route("/scopes/:scope_id/at/:slot", get(historical_snapshot))
         .route(
             "/scopes/:scope_id/authorizations/:address",
             get(current_authorizations),

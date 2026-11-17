@@ -53,6 +53,13 @@ transactions, retaining all event positions within a transaction. Limit is 1–1
 The cursor orders by unsigned slot then signature; signature order is **not**
 execution order within a slot. Transaction index remains unknown.
 
+`GET /scopes/SCOPE/at/SLOT` (also proxied at `/api/scopes/SCOPE/at/SLOT`)
+returns only an exact retained authority observation, with its original SDK and
+runtime revisions. Missing evidence is 404, conflicting observations at that slot
+are 409, and corrupt evidence/index metadata fails closed. It never substitutes a
+nearby or current observation. A snapshot ID identifies observed bytes, not an
+authorization incarnation or an instruction's immediate pre/post-state.
+
 `GET /activity/transactions/CLUSTER/SIGNATURE` returns the retained RPC result
 after checksum verification. The console exposes a validated read-only proxy at
 `/api/activity/transactions/CLUSTER/SIGNATURE`. It does not accept arbitrary URLs.

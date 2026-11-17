@@ -33,6 +33,35 @@ test("provider failure is explicit and existing conflict status survives", async
   expect((await fetch(path)).status).toBe(502);
 });
 
+test("historical slot reads preserve native u64, missing evidence and conflicts without fallback", async () => {
+  let status = 200;
+  const paths: string[] = [];
+  const body = '{"snapshot":{"observation":{"slot":18446744073709551615}},"coverage_complete":false}';
+  const upstream = Bun.serve({
+    port: 0,
+    fetch: (request) => {
+      paths.push(new URL(request.url).pathname);
+      expect(request.headers.get("Authorization")).toBeNull();
+      return new Response(body, { status });
+    },
+  });
+  const server = createServer(String(upstream.url), [], 0);
+  servers.push(upstream, server);
+  const path = `${server.url}api/scopes/${"a".repeat(64)}/at/18446744073709551615`;
+  for (status of [200, 404, 409, 500]) {
+    const response = await fetch(path);
+    expect(response.status).toBe(status);
+    expect(await response.text()).toBe(body);
+  }
+  expect(paths).toEqual(Array(4).fill(`/scopes/${"a".repeat(64)}/at/18446744073709551615`));
+  for (const suffix of ["-1", "18446744073709551616", "01", "invalid"]) {
+    expect((await fetch(path.replace("18446744073709551615", suffix))).status).toBe(404);
+  }
+  expect((await fetch(path, { method: "POST" })).status).toBe(405);
+  expect((await fetch(path + "?upstream=https://example.com")).status).toBe(404);
+  expect(paths).toHaveLength(4);
+});
+
 test("retained transaction evidence is a bounded read path and preserves lossless RPC JSON", async () => {
   const body = '{"slot":18446744073709551615,"meta":{"err":null}}';
   const upstream = Bun.serve({

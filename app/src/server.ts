@@ -54,6 +54,7 @@ export function createServer(
         /^\/api\/(snapshots|scopes)\/([a-f0-9]{64})(?:\/(authorizations|effective|graph)\/([^/]+)|\/(coverage))?$/.exec(
           url.pathname,
         );
+      const historicalSnapshot = /^\/api\/scopes\/[a-f0-9]{64}\/at\/(0|[1-9][0-9]{0,19})$/.exec(url.pathname);
       // Simulation follows the scope: a retained snapshot leaves its finalized bank within a slot.
       // A revoke or, for a running subscription, a cancel: the same simulate-then-verify path.
       const simulate = /^\/api\/scopes\/[a-f0-9]{64}\/actions\/(revoke|cancel)\/([^/]+)$/.exec(url.pathname);
@@ -86,6 +87,7 @@ export function createServer(
             : undefined;
       if (
         (!match &&
+          !historicalSnapshot &&
           !action &&
           !receipt &&
           !transactionEvidence &&
@@ -103,6 +105,7 @@ export function createServer(
           !relay &&
           !mainnet) ||
         (match?.[4] && !isAddress(match[4])) ||
+        (historicalSnapshot && BigInt(historicalSnapshot[1]!) > (1n << 64n) - 1n) ||
         (transactionEvidence && !isAddress(transactionEvidence[1]!)) ||
         (action && !isAddress(action[2]!))
       )

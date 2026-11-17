@@ -337,6 +337,83 @@ async fn native_108_to_122_revoke_removes_grant_and_preserves_technical_and_admi
 }
 
 #[tokio::test]
+async fn historical_slot_reads_never_substitute_current_or_nearby_authority() {
+    let journal = Journal::open("sqlite::memory:").await.unwrap();
+    let before: Snapshot =
+        serde_json::from_str(include_str!("fixtures/owner-pull-60.json")).unwrap();
+    let before = ingest(&journal, before).await;
+    let after = ingest(&journal, revoke(true)).await;
+    let scope_id = scope(&before.snapshot);
+    assert_eq!(scope_id, scope(&after.snapshot));
+    latest(&journal, &after).await;
+    let maximal = ingest(&journal, ordering(spl(), u64::MAX)).await;
+    let app = router(journal);
+    for record in [&before, &after] {
+        let (code, body) = get(
+            &app,
+            &format!("/scopes/{scope_id}/at/{}", record.snapshot.observation.slot),
+        )
+        .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(body, json(record));
+        assert_eq!(body["coverage_complete"], false);
+    }
+    for slot in [0, 107, 109, 121, 123, u64::MAX] {
+        assert_eq!(
+            get(&app, &format!("/scopes/{scope_id}/at/{slot}")).await.0,
+            StatusCode::NOT_FOUND
+        );
+    }
+    for slot in ["-1", "18446744073709551616", "not-a-slot"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/scopes/{scope_id}/at/{slot}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+    let (code, value) = get(
+        &app,
+        &format!("/scopes/{}/at/{}", scope(&maximal.snapshot), u64::MAX),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(value, json(&maximal));
+}
+
+#[tokio::test]
+async fn historical_slot_reads_detect_ambiguity_and_corrupted_index_positions() {
+    let database = Database::new();
+    let journal = Journal::open(&database.url()).await.unwrap();
+    let first = ingest(&journal, spl()).await;
+    assert_eq!(ingest(&journal, spl()).await, first);
+    let scope_id = scope(&first.snapshot);
+    let app = router(journal.clone());
+    let path = format!("/scopes/{scope_id}/at/1");
+    assert_eq!(get(&app, &path).await.0, StatusCode::OK);
+    ingest(&journal, ordering(spl(), 1)).await;
+    assert_eq!(get(&app, &path).await.0, StatusCode::CONFLICT);
+    let pool = SqlitePool::connect(&database.url()).await.unwrap();
+    sqlx::query("UPDATE authority_snapshots SET observed_slot=? WHERE id=?")
+        .bind(2_u64.to_be_bytes().as_slice())
+        .bind(&first.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        get(&app, &format!("/scopes/{scope_id}/at/2")).await.0,
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(journal.get(&first.id).await.unwrap(), Some(first));
+    pool.close().await;
+}
+
+#[tokio::test]
 async fn actual_same_slot_revoke_observations_are_ambiguous_in_either_arrival_order_until_newer() {
     assert_eq!(revoke(false).observation, revoke(true).observation);
     assert_eq!(revoke(false).observation.slot, 122);
