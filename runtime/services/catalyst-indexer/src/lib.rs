@@ -922,6 +922,10 @@ pub fn router(journal: Journal) -> Router {
             "/activity/transactions/:cluster/:signature",
             get(history::transaction),
         )
+        .route(
+            "/activity/blocks/:cluster/:slot",
+            get(history::blocks::evidence),
+        )
         .route("/activity/:cluster/:address", get(history::page))
         .route("/verifications/revoke/:id", get(rpc::retained_revoke))
         .route("/snapshots/:id", get(snapshot))

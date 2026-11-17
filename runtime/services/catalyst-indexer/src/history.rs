@@ -19,6 +19,8 @@ use solana_transaction_status_client_types::{
 use sqlx::Row;
 use std::{collections::BTreeSet, time::Duration};
 
+pub mod blocks;
+
 const PAGE: usize = 25;
 const INVALID: Error = Error::InvalidObservation("invalid historical transaction evidence");
 
@@ -214,6 +216,8 @@ impl Journal {
             let raw: Value = serde_json::from_str(&raw)?;
             let signature: String = row.try_get("signature")?;
             let source: String = row.try_get("source_id")?;
+            let slot = raw["slot"].as_u64().ok_or(INVALID)?;
+            let position = self.activity_position(cluster, slot, &signature).await?;
             let decoded = normalize(cluster, &address.to_string(), &raw, &digest);
             let (entries, mut status) = match decoded {
                 Ok(entries) => {
@@ -229,8 +233,12 @@ impl Journal {
             if !raw["meta"]["err"].is_null() {
                 status = "failed_execution";
             }
-            events.extend(entries);
-            transactions.push(json!({"signature":signature,"source":source,"status":status,
+            events.extend(entries.into_iter().map(|mut event| {
+                event["transaction_index"] = position["transaction_index"].clone();
+                event["block_position"] = position.clone();
+                event
+            }));
+            transactions.push(json!({"signature":signature,"source":source,"status":status,"block_position":position,
                 "evidence":format!("/activity/transactions/{cluster}/{signature}"),"sha256":digest}));
         }
         let gaps: Vec<(String,String,String)> = sqlx::query_as(
@@ -248,9 +256,10 @@ impl Journal {
         } else {
             None
         };
+        let block_gaps = self.block_gaps(cluster, &address.to_string()).await?;
         Ok(
             json!({"schema_version":"1","cluster":cluster,"delegation":address.to_string(),
-            "complete":false,"coverage":{"archive":"unproven","protocols":["subscriptions"],"gaps":gaps,"gap_count":gap_count},
+            "complete":false,"coverage":{"archive":"unproven","protocols":["subscriptions"],"gaps":gaps,"gap_count":gap_count,"block_position_gaps":block_gaps},
             "attribution":"unresolved","transaction_order":"slot_then_signature_not_execution_order",
             "events":events,"transactions":transactions,"next":next}),
         )
@@ -696,10 +705,10 @@ mod tests {
     use axum::{Json, Router, routing::post};
     use std::sync::{Arc, Mutex};
 
-    fn address(byte: u8) -> String {
+    pub(super) fn address(byte: u8) -> String {
         Pubkey::new_from_array([byte; 32]).to_string()
     }
-    fn raw(signature: &str, slot: u64) -> Value {
+    pub(super) fn raw(signature: &str, slot: u64) -> Value {
         let mut event = crate::constants::EVENT_IX_TAG.to_vec();
         event.push(3);
         for byte in 1..=4 {

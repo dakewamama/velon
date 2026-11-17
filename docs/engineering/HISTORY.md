@@ -51,7 +51,8 @@ no successful transfer events.
 `GET /activity/CLUSTER/ADDRESS?limit=25&before=SIGNATURE` pages by retained
 transactions, retaining all event positions within a transaction. Limit is 1–100.
 The cursor orders by unsigned slot then signature; signature order is **not**
-execution order within a slot. Transaction index remains unknown.
+execution order within a slot. A native block ordinal remains unknown unless a
+matching finalized block signature list has been independently retained.
 
 `GET /activity/transactions/CLUSTER/SIGNATURE` returns the retained RPC result
 after checksum verification. The console exposes a validated read-only proxy at
@@ -90,3 +91,48 @@ Tests exercise local HTTP RPC collection, page interruption and restart, receipt
 reconciliation, fair retries, duplicate replay, conflicting bytes, full-u64 values,
 ALT resolution, failed transactions, corruption detection and API pagination.
 These tests do not prove archival completeness or public-chain action execution.
+
+## Optional finalized block positions
+
+`authorization-api history-block SLOT SOURCE` independently fetches one block with
+finalized commitment, signatures-only transaction details and no rewards. It checks
+genesis before and after the request and reuses bounded RPC retries. It neither
+backfills additional transactions nor advances address-history cursors.
+
+The same journal retains the complete serialized RPC result, its raw-content hash,
+cluster, requested slot, source label and a metadata-bound evidence ID. JSON result
+fields are preserved, including unknown fields and exact u64 values; transport
+whitespace and the HTTP/JSON-RPC envelope are not retained. Native `UiConfirmedBlock`,
+`RpcBlockConfig`, hashes and signatures validate the response. Duplicate signatures,
+missing lists, mixed transaction formats and invalid headers cannot supply positions.
+
+`GET /activity/blocks/CLUSTER/SLOT` and
+`authorization-api history-block-evidence CLUSTER SLOT` read retained evidence after
+checksum, metadata and derived-index verification. Activity transactions carry a
+`block_position` object. Events additionally carry `transaction_index`, the ordinal
+in the provider's finalized block signature vector. This does not establish physical
+execution timing. Pagination continues to use slot/signature order, so callers must
+not treat page order as block order.
+
+Writes of the raw block, signature positions and successful attempt resolution are
+atomic. Retries are idempotent. Null/pruned/failed replies produce durable visible
+attempts; malformed/conflicting result JSON is retained in
+`activity_block_attempts`. Coverage gaps expose attempt IDs and reason metadata;
+raw failed replies are inspected in that SQLite table, without a separate read API.
+A successful retry resolves availability/data gaps from that source without deleting their original
+response evidence. Byte-different finalized replies remain unresolved conflicts;
+a repeat of the first reply does not automatically choose a winner. A late transaction
+missing from an already stored block, or assigned another slot, invalidates position
+claims for the whole affected block while preserving both facts.
+
+This feature is optional and operator-invoked. There is no automatic block-range
+completion or conflict-resolution policy. Provider labels are not authenticated
+identities, and finalized RPC replies are not cryptographic block proofs. Coverage
+stays incomplete, historical deployment interpretation stays unverified and
+incarnation attribution stays unresolved. Failed transactions can have block positions
+but never become successful transfers.
+
+Migration `20261117000000` adds tables without changing retained transaction/event
+bytes. Restart and old-schema migration are tested. Older rollback binaries whose
+migrator rejects later migrations need a compatible rollback build; do not delete
+these tables or evidence to make an old binary start.
