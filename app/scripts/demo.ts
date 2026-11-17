@@ -79,9 +79,14 @@ const definitions = [
   { name: "SPL delegate", files: ["spl-snapshot.json"] },
 ];
 const scenarios = definitions.map(({ name, files }) => {
-  const records = files.map((file) =>
-    object(readJson(command([binary, "import", `${fixtures}/catalog.json`, `${fixtures}/${file}`], env))),
-  );
+  const records = files.map((file) => {
+    const record = object(
+      readJson(command([binary, "import", `${fixtures}/catalog.json`, `${fixtures}/${file}`], env)),
+    );
+    if (record.sdk_revision !== CATALOGER_REVISION)
+      throw new Error("Native runtime revision does not match CATALOGER_REVISION.");
+    return record;
+  });
   for (const record of records) command([binary, "replay", text(record.id)], env);
   const latest = object(readJson(command([binary, "latest", text(records.at(-1)!.id)], env)));
   const first = records[0]!;
