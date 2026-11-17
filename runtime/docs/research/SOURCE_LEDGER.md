@@ -216,3 +216,24 @@ positions additionally require unique CPI groups referencing real outer instruct
 - New simulations include the fixed budget. Verification accepts the original
   single-revoke message or the exact new budget-plus-revoke message, retaining
   historical receipt replay without accepting arbitrary instructions or fee edits.
+
+## Finalized block positions
+
+- Agave 4.3.2, `transaction-status/src/lib.rs`, `ConfirmedBlock` encoding:
+  https://github.com/anza-xyz/agave/blob/v4.3.2/transaction-status/src/lib.rs.
+  TARGETED SOURCE: signatures-only encoding maps the existing transaction vector
+  without sorting or filtering it. Existing locked `RpcBlockConfig`,
+  `UiConfirmedBlock`, hash and signature types are reused, not reimplemented.
+  The official [getBlock contract](https://solana.com/docs/rpc/http/getblock)
+  permits null results and finalized commitment; neither RPC success nor an empty
+  result proves archive coverage.
+- Yellowstone's `SubscribeUpdateTransactionInfo.index` and block metadata:
+  https://github.com/rpcpool/yellowstone-grpc/blob/master/yellowstone-grpc-proto/proto/geyser.proto.
+  TARGETED SOURCE: transaction position is explicit transport evidence, separate
+  from signature identity and block metadata. No streaming dependency introduced.
+- Microscope `fb225510424acc349446d61d2f4d6f7c2dc40dc4`,
+  `crates/microscope-indexer/src/rpc_polling/checkpoint.rs` and `datasource.rs`:
+  TARGETED SOURCE of cluster-bound checkpoint identity, corruption quarantine,
+  reconnect and replay handling. Reuse: PATTERN ONLY. The existing SQLite journal
+  already supplies atomic durable evidence; a second checkpoint store/pipeline
+  is unnecessary for one optional block reconciliation operation. No code copied.

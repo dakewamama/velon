@@ -58,6 +58,27 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let database_url = std::env::var("DATABASE_URL")?;
     let journal = Journal::open(&database_url).await?;
     match args.as_slice() {
+        [command, slot, source] if command == "history-block" => {
+            let client = RpcClient::new_with_timeout_and_commitment(
+                std::env::var("RPC_URL")?,
+                Duration::from_secs(15),
+                CommitmentConfig::finalized(),
+            );
+            let result = catalyst_indexer::history::blocks::collect(
+                &journal,
+                &client,
+                slot.parse()?,
+                source,
+            )
+            .await?;
+            println!("{}", serde_json::to_string(&result)?);
+        }
+        [command, cluster, slot] if command == "history-block-evidence" => {
+            println!(
+                "{}",
+                serde_json::to_string(&journal.activity_block(cluster, slot.parse()?).await?)?
+            );
+        }
         [command, limit, source] if command == "history-worker" => {
             let limit = limit.parse()?;
             if !(1..=100).contains(&limit) {
@@ -194,7 +215,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         _ => {
             return Err(
-                "usage: authorization-api capture PROGRAM | observe CATALOG SCOPE | import CATALOG SNAPSHOT | replay ID | simulate-revoke ID SOURCE | latest ID | serve ADDRESS | history-backfill ADDRESS PAGES SOURCE | history-recent ADDRESS PAGES SOURCE | history-reconcile LIMIT SOURCE | history-worker LIMIT SOURCE | history CLUSTER ADDRESS"
+                "usage: authorization-api capture PROGRAM | observe CATALOG SCOPE | import CATALOG SNAPSHOT | replay ID | simulate-revoke ID SOURCE | latest ID | serve ADDRESS | history-backfill ADDRESS PAGES SOURCE | history-recent ADDRESS PAGES SOURCE | history-reconcile LIMIT SOURCE | history-worker LIMIT SOURCE | history CLUSTER ADDRESS | history-block SLOT SOURCE | history-block-evidence CLUSTER SLOT"
                     .into(),
             );
         }
