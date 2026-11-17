@@ -80,6 +80,35 @@ test("retained transaction evidence is a bounded read path and preserves lossles
   expect((await fetch(path.replace("1".repeat(32), "invalid"))).status).toBe(404);
 });
 
+test("retained block evidence is read-only, bounded and preserves native integers and conflicts", async () => {
+  let status = 200;
+  const paths: string[] = [];
+  const body =
+    '{"slot":"18446744073709551615","position_status":"conflict","result":{"blockHeight":18446744073709551615}}';
+  const upstream = Bun.serve({
+    port: 0,
+    fetch(request) {
+      paths.push(new URL(request.url).pathname);
+      return new Response(body, { status });
+    },
+  });
+  const server = createServer(String(upstream.url), [], 0);
+  servers.push(upstream, server);
+  const path = `${server.url}api/activity/blocks/${"1".repeat(32)}/18446744073709551615`;
+  for (status of [200, 404, 409, 500]) {
+    const response = await fetch(path);
+    expect(response.status).toBe(status);
+    expect(await response.text()).toBe(body);
+  }
+  expect(paths).toEqual(Array(4).fill(`/activity/blocks/${"1".repeat(32)}/18446744073709551615`));
+  for (const slot of ["-1", "01", "18446744073709551616", "invalid"])
+    expect((await fetch(path.replace("18446744073709551615", slot))).status).toBe(404);
+  expect((await fetch(path.replace("1".repeat(32), "invalid"))).status).toBe(404);
+  expect((await fetch(path + "?upstream=https://example.com")).status).toBe(404);
+  expect((await fetch(path, { method: "POST" })).status).toBe(405);
+  expect(paths).toHaveLength(4);
+});
+
 const revokePath = `/api/scopes/${"a".repeat(64)}/actions/revoke/11111111111111111111111111111111`;
 const verifyPath = `/api/snapshots/${"b".repeat(64)}/actions/revoke/11111111111111111111111111111111/verify`;
 const actionHeaders = { "X-Velon-Action": "revoke" };
