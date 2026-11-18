@@ -1,8 +1,9 @@
 # Controlled Subscriptions journey
 
-This run uses disposable devnet SOL and a newly created test token. It has not
-been executed against devnet: the available disposable funder is unfunded.
-Offline checks and native execution fixtures do not substitute for this run.
+This run uses disposable devnet SOL and a newly created test token. The complete
+desktop browser journey passed on 2026-11-18 against real Devnet RPC and native
+program execution. This is Devnet action evidence, not a mainnet action test or
+independent security review.
 
 Requirements: the pinned Solana CLI, `solana-keygen`, `spl-token`, Bun, and an
 optimized `authorization-api` built from the same clean commit as the app.
@@ -70,3 +71,50 @@ and exact account roles are compared with the official 0.5.0 Rust client's nativ
 execution trace in `sdk/tests/fixtures/subscriptions-lifecycle.json`; the existing
 native lifecycle test regenerates that trace. No production Kit dependency changes
 or new transaction framework are introduced.
+
+## Executed evidence — 2026-11-18 UTC
+
+App and optimized native runtime revision:
+`0393ff62ac26dd5865ab9f1d9b00463f9839023b`.
+Subscriptions executable: padded SHA-256
+`2675ad1d2b5068d47fc5d169156cf4859a9c21c0406ce63e3828e3b7320fddbf`,
+deployment slot `506642674`. The fixture used classic SPL Token. The different
+Devnet Token-2022 executable remained unverified and was not used.
+
+The test connected a generated disposable wallet, discovered subscription
+`J3spvkEJTs9eZCAhRmWpkwHiFwf7qsawUefbQcXASntL`, read its verified native terms,
+displayed its merchant-provided name as unverified, and checked the actual 40-unit
+charge, mint, puller and receiver token account. It then reviewed, signed and
+cancelled through the console and independently checked the finalized transaction,
+exact native end time, unchanged shared token approval and durable receipt.
+
+- [Finalized payment](https://explorer.solana.com/tx/3ea8dPbuDNUNE71wS4dqhRBFcaG1P9AwUtLSwFWVtTjiBMg1KfPwGwwLFyiF8mdgLA8mcWDDVvZkpS3FYegjWb5E?cluster=devnet).
+- [Finalized cancellation](https://explorer.solana.com/tx/2o1BSTRXJ7C1TzaY6DTqJ4qByrynFSt6BwGmMZ7NpbqQkBPeah5oeAzW8uL1BhvGNb3Y6Zvc77RkCoeDa4sGCVNi?cluster=devnet), slot `523576548`.
+- Verification receipt: `e08ac74c6f9228dd92e66355a02d063c6dc07a0e82619736ca58244d1ccb7f31`.
+
+The command documented above reported **1 passed (26.4s)**. The same revision's
+app unit tests reported **97 passed**, browser regression tests with `--workers=2`
+reported **102 passed**, and TypeScript typechecking passed. The initial
+nine-worker browser run had process crashes; the bounded two-worker run passed.
+
+Earlier live attempts exposed and fixed history serialization of exact integers
+and an asynchronous account lookup overwriting the merchant disclosure. The live
+test also needed distinct selectors for transaction and retained-evidence links.
+One attempt stopped before submission when RPC revalidation failed; its trace
+contained zero `sendTransaction` calls. Another cancellation succeeded but the
+test's subsequent independent read hit a rate limit; those checks were completed
+without resubmission. The final run above passed from creation through proof.
+Only the test's read requests retry bounded 429/503 responses; signed submissions
+are never retried by the harness. Receipts are saved before follow-up reads.
+
+Private artifacts outside Git retain the fixture keys, native attempts, RPC
+transaction evidence, cancellation receipt, finalized screenshot, checksummed
+runtime executable and coherent SQLite backup. A separate restore replayed all
+10 retained snapshots without RPC and retained the verification receipt. Production
+data and public sites were unchanged.
+
+Historical account-incarnation and historical executable attribution still display
+as unresolved; the successful current-state control does not resolve those claims.
+The run used a controlled test wallet implementing Wallet Standard, not a human
+wallet extension or mobile wallet application. Mobile browser regressions passed;
+this live run exercised the desktop configuration.
