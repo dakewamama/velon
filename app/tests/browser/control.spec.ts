@@ -421,7 +421,7 @@ async function browserProvider(
       },
     });
   });
-  return { counts: () => ({ sends, polls, observes }) };
+  return { counts: () => ({ sends, polls, observes }), scope, view };
 }
 
 async function connectAndReview(page: Page) {
@@ -638,6 +638,68 @@ test("an active subscription and its technical approval offer no revoke", async 
   await expect(card(page, technical.id)).toBeVisible();
   await expect(page.getByRole("button", { name: "Remove access", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /remove access/i })).toHaveCount(0);
+});
+
+test("a delayed wallet lookup preserves the merchant's unverified plan label", async ({ page }) => {
+  const provider = await browserProvider(page, "success", "active");
+  await page.route("**/api/live/spl/owned", (route) =>
+    route.fulfill({
+      json: {
+        accounts: [
+          {
+            program: "subscriptions",
+            source: delegation,
+            owner: route.request().postDataJSON().owner,
+            delegate: derived.principal.value,
+            mint: fixture.grant.constraints.value.asset.id,
+            amount: "100",
+            decimals: 0,
+            extensions: [],
+            delegationKind: "subscription",
+            planName: "Merchant's own name",
+          },
+        ],
+        skipped: 0,
+        subscriptionsUnread: false,
+      },
+    }),
+  );
+  await page.route("**/api/live/spl/observe", (route) =>
+    route.fulfill({
+      json: {
+        scope_id: provider.scope,
+        views: { [delegation]: provider.view() },
+      },
+    }),
+  );
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let finished!: () => void;
+  const lookup = new Promise<void>((resolve) => {
+    finished = resolve;
+  });
+  await page.route("**/wallet-test-rpc", async (route) => {
+    const request = route.request().postDataJSON();
+    if (request.method !== "getAccountInfo" || request.params[0] !== derived.principal.value)
+      return route.fallback();
+    await gate;
+    await route.fallback();
+    finished();
+  });
+  await page.goto("/app");
+  await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+  const permission = card(page, derived.id);
+  await expect(permission.locator(".delegate strong")).toHaveText("Merchant's own name");
+  release();
+  await lookup;
+  await page.evaluate(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+  );
+  await expect(permission.locator(".delegate strong")).toHaveText("Merchant's own name");
+  await expect(permission.getByText("Plan name set by the merchant", { exact: true })).toBeVisible();
+  await expect(permission.locator(".delegate")).toHaveAttribute("title", /not verified/);
 });
 
 test("incomplete address history never claims the current subscription has no past charges", async ({

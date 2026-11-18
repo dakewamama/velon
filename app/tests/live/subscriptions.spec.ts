@@ -21,11 +21,19 @@ test("an active devnet subscription has a charge and the console cancels it with
   expect(fixture.cluster).toBe(DEVNET_GENESIS);
   expect(fixture.merchantIdentity).toBe("unverified");
   const rpc = async (method: string, params: unknown[] = []) => {
-    const reply = await request.post(rpcUrl!, { data: { jsonrpc: "2.0", id: 1, method, params } });
-    expect(reply.ok()).toBe(true);
-    const body = await reply.json();
-    expect(body.error).toBeUndefined();
-    return body.result;
+    // Only reads may retry; signed submissions belong exclusively to the console.
+    expect(method.startsWith("get")).toBe(true);
+    for (let attempt = 0; ; attempt++) {
+      const reply = await request.post(rpcUrl!, { data: { jsonrpc: "2.0", id: 1, method, params } });
+      if ((reply.status() === 429 || reply.status() === 503) && attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+        continue;
+      }
+      expect(reply.ok()).toBe(true);
+      const body = await reply.json();
+      expect(body.error).toBeUndefined();
+      return body.result;
+    }
   };
   expect(await rpc("getGenesisHash")).toBe(DEVNET_GENESIS);
   const configuration = await request.get("/api/control");
@@ -144,7 +152,13 @@ test("an active devnet subscription has a charge and the console cancels it with
     receiverTokenAccount: fixture.receiver,
     finality: "finalized_rpc",
   });
-  await expect(card.locator(`.charges a[href*="${chargeSignature}"]`)).toBeVisible();
+  await expect(
+    card.locator(`.charges a[href="https://explorer.solana.com/tx/${chargeSignature}?cluster=devnet"]`),
+  ).toHaveText("Transaction");
+  await card.getByText("Historical transaction evidence", { exact: true }).click();
+  await expect(
+    card.locator(`.charges a[href="/api/activity/transactions/${DEVNET_GENESIS}/${chargeSignature}"]`),
+  ).toBeVisible();
   await card.getByRole("button", { name: "Cancel subscription", exact: true }).click();
   await expect(page.getByRole("dialog")).toContainText("It can still charge until");
   await page.getByRole("button", { name: "Confirm in wallet", exact: true }).click();
@@ -155,6 +169,17 @@ test("an active devnet subscription has a charge and the console cancels it with
   const verification = values.at(-1)!;
   const href = (await page.locator("#action-result dd a").getAttribute("href"))!;
   const signature = new URL(href).pathname.split("/").pop()!;
+  const proof = await request.get(`/api/verifications/revoke/${verification}`);
+  expect(proof.ok()).toBe(true);
+  const receipt = await proof.json();
+  expect(receipt.verification_id).toBe(verification);
+  // Keep success evidence even if a later independent RPC read is unavailable.
+  writeFileSync(
+    resolve(dirname(fixturePath!), `console-receipt-${signature}.json`),
+    JSON.stringify({ signature, verification, receipt }, null, 2),
+    { flag: "wx", mode: 0o600 },
+  );
+  await page.screenshot({ path: resolve(dirname(fixturePath!), "console-finalized.png"), fullPage: true });
   const cancelled = await rpc("getTransaction", [
     signature,
     { commitment: "finalized", encoding: "json", maxSupportedTransactionVersion: 0 },
@@ -165,10 +190,6 @@ test("an active devnet subscription has a charge and the console cancels it with
   const after = await account(fixture.subscription);
   expect(after.bytes.readBigInt64LE(147)).toBe(before.bytes.readBigInt64LE(139) + 3600n);
   expect((await account(fixture.source)).bytes).toEqual(approval);
-  const proof = await request.get(`/api/verifications/revoke/${verification}`);
-  expect(proof.ok()).toBe(true);
-  const receipt = await proof.json();
-  expect(receipt.verification_id).toBe(verification);
   writeFileSync(
     resolve(dirname(fixturePath!), `console-cancel-${signature}.json`),
     JSON.stringify(
