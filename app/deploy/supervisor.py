@@ -1,15 +1,13 @@
-import hashlib,json,os,pathlib,signal,subprocess,time,urllib.request
+import json,os,pathlib,signal,subprocess,time,urllib.request
 from evidence_storage import require_persistent_database
+from release_artifacts import verify
 os.sched_setaffinity(0, sorted(os.sched_getaffinity(0))[:2])
 root=pathlib.Path(os.environ.get('VELON_ROOT','/opt/velon'))
 # A second instance (another network) runs from its own root on its own three ports.
 base=int(os.environ.get('VELON_PORT','3400'))
 app=root/'app'
 logs=root/'logs';logs.mkdir(exist_ok=True)
-manifest=json.loads((root/'artifacts.json').read_text())
-for artifact in manifest['artifacts']:
- if hashlib.sha256((root/'bin'/artifact['name']).read_bytes()).hexdigest()!=artifact['sha256']:
-  raise SystemExit('Binary checksum mismatch: '+artifact['name'])
+manifest=verify(root)
 origin=os.environ.get('PUBLIC_DEMO_ORIGIN','https://velon-eta.vercel.app')
 network=os.environ.get('VELON_NETWORK','localnet')
 if network not in ('localnet','mainnet'):raise SystemExit('VELON_NETWORK must be localnet or mainnet')

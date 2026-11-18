@@ -5,6 +5,8 @@ validation_stage=identity
 trap 'validation_exit=$?; printf "VELON_VALIDATION_EXIT=%s STAGE=%s\n" "$validation_exit" "$validation_stage"; exit "$validation_exit"' EXIT
 export VELON_REVISION="${RAILWAY_GIT_COMMIT_SHA:-${VELON_REVISION:-}}"
 [[ "$VELON_REVISION" =~ ^[a-f0-9]{40}$ ]] || { echo "An exact source commit is required" >&2; exit 1; }
+[[ "$VELON_REVISION" == "$(git rev-parse HEAD)" ]] || { echo "Source checkout does not match VELON_REVISION" >&2; exit 1; }
+[[ -z "$(git status --porcelain --untracked-files=normal)" ]] || { echo "Source checkout has uncommitted files" >&2; exit 1; }
 printf 'VELON_VALIDATION_REVISION=%s\n' "$VELON_REVISION"
 rustc --version
 node --version

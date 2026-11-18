@@ -6,3 +6,7 @@ app/dist
 app/site
 app/.data
 app/test-results
+**/.env*
+**/.vercel
+**/__pycache__
+**/*.pyc

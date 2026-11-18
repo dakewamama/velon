@@ -29,20 +29,10 @@ RUN cd runtime && cargo build --release --locked --bin authorization-api \
 RUN git config --global url."https://github.com/".insteadOf ssh://git@github.com/ \
   && cd app && npm ci --omit=dev --ignore-scripts && bun run build
 RUN cp -r app /opt/velon/app \
-  && cp app/deploy/supervisor.py app/deploy/evidence_storage.py /opt/velon/ \
+  && cp app/deploy/supervisor.py app/deploy/evidence_storage.py app/deploy/release_artifacts.py /opt/velon/ \
   && install -D -m 0644 scripts/evidence_backup.py /opt/velon/tools/evidence_backup.py \
   && cp -r runtime /opt/velon/cataloger && rm -rf /opt/velon/cataloger/target \
-  && python3 - <<'PY'
-import hashlib, json, os, pathlib
-root = pathlib.Path("/opt/velon")
-artifacts = [
-    {"name": name, "size": (root / "bin" / name).stat().st_size,
-     "sha256": hashlib.sha256((root / "bin" / name).read_bytes()).hexdigest()}
-    for name in ("authorization-api", "bun")
-]
-manifest = {"revision": os.environ["VELON_REVISION"], "artifacts": artifacts}
-(root / "artifacts.json").write_text(json.dumps(manifest, indent=2) + "\n")
-PY
+  && python3 -B /opt/velon/release_artifacts.py /opt/velon "$VELON_REVISION" > /opt/velon/artifacts.json
 
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates python3 \
@@ -53,4 +43,4 @@ USER ubuntu
 # come from the host's secret settings.
 ENV VELON_ROOT=/opt/velon VELON_NETWORK=mainnet VELON_PORT=7858 PORT=7860
 EXPOSE 7860
-CMD ["python3", "/opt/velon/supervisor.py"]
+CMD ["python3", "-B", "/opt/velon/supervisor.py"]
