@@ -55,6 +55,23 @@ and revision mismatches fail closed. It makes no blockchain requests or mutation
 It proves agreement with the reviewed manifest, not independent source-build
 reproducibility or evidence health. An approved manifest must be trusted separately.
 
+The frontend sends its embedded build revision with API actions and same-origin
+RPC requests. The proxy forwards that value unchanged. In a versioned deployment,
+the gateway rejects missing/mismatched revisions before action preparation,
+revalidation or `sendTransaction`; the local relay also fences submissions.
+Legacy tabs therefore cannot use the new relay while bypassing new review checks.
+Finality verification and retained receipts remain readable for recovery. A 409
+is not proof that a previous transaction was never submitted. This header is a
+compatibility fence, not authentication or proof that a client performed revalidation.
+
+Publish release work to `wip`; do not change `main`. GitHub's console workflow is
+manual-only. During cutover preparation, Railway production's watch pattern is
+held at `.velon-production-release/**` (an absent path), so code publication does
+not replace the old evidence container. The active deployment remains unchanged.
+Keep that hold until evidence migration, artifact checks and explicit production
+deployment authorization are complete; restore intentional release triggers as
+part of the approved rollout rather than enabling an unreviewed automatic deploy.
+
 ## Collect operational evidence
 
 On the server, with its existing secrets available only in the environment:

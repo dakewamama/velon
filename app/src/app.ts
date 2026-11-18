@@ -80,6 +80,7 @@ import {
 } from "./plain.ts";
 import {
   call,
+  expectedRelease,
   array,
   authorization,
   compare,
@@ -145,8 +146,6 @@ async function get(path: string, signal?: AbortSignal): Promise<Json> {
   return readJson(await response.text());
 }
 
-const expectedRelease = () =>
-  document.querySelector<HTMLMetaElement>('meta[name="velon-backend-revision"]')?.content;
 async function matchBackendRelease(signal?: AbortSignal) {
   const expected = expectedRelease();
   if (expected) requireRelease(await get("control", signal), expected);

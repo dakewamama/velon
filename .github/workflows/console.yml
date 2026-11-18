@@ -1,12 +1,11 @@
-# Ships the console to Vercel once Railway runs the same commit,
-# so the page never gets ahead of the backend it calls.
+# Manual fallback only. Release validation runs on Railway; publishing wip
+# must not ship the console before the approved production cutover.
 name: console
 
 on:
-  push:
-    branches: [wip]
+  workflow_dispatch:
 
-# A newer push stops an older run; the newer run ships its own console.
+# A newer manual invocation stops an older invocation.
 concurrency:
   group: console-production
   cancel-in-progress: true

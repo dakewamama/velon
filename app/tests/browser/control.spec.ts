@@ -504,7 +504,7 @@ test("a hosted console refuses a backend from another release before enabling wa
 });
 
 test("a hosted console with the matching release can review the verified action", async ({ page }) => {
-  await browserProvider(page);
+  const provider = await browserProvider(page);
   const revision = "a".repeat(40);
   await page.route("**/api/control", (route) =>
     route.fulfill({
@@ -527,9 +527,20 @@ test("a hosted console with the matching release can review the verified action"
       ),
     });
   });
+  await page.route("**/api/**/actions/**", (route) => {
+    expect(route.request().headers()["x-velon-release"]).toBe(revision);
+    return route.fallback();
+  });
+  await page.route("**/wallet-test-rpc", (route) => {
+    expect(route.request().headers()["x-velon-release"]).toBe(revision);
+    return route.fallback();
+  });
   await connectAndReview(page);
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.locator("#notice")).not.toContainText("different releases");
+  await page.getByRole("button", { name: "Confirm in wallet" }).click();
+  await expect(page.getByRole("heading", { name: "Removed and verified", exact: true })).toBeVisible();
+  expect(provider.counts()).toEqual({ sends: 1, polls: 2, observes: 1 });
 });
 
 for (const mode of [

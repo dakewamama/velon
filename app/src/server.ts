@@ -28,7 +28,7 @@ export type Live = {
   /// Test bench only: gives a visitor's wallet a funded token account on that ledger.
   fund?: (owner: string) => Promise<Response>;
   /// Forwards the browser's allowed JSON-RPC calls to a cluster that refuses browser origins.
-  relay?: (body: string) => Promise<Response>;
+  relay?: (body: string, clientRevision?: string | null) => Promise<Response>;
 };
 
 export function createServer(
@@ -153,7 +153,7 @@ export function createServer(
         if (request.headers.get("X-Velon-Action") !== "rpc")
           return new Response("Action header required", { status: 403 });
         return request.headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase() === "application/json"
-          ? relay(await request.text())
+          ? relay(await request.text(), request.headers.get("X-Velon-Release"))
           : new Response("JSON body required", { status: 415 });
       }
       if (discover) return discover();

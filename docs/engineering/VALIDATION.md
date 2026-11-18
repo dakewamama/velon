@@ -3,7 +3,8 @@
 The isolated Railway project `velon-validation`, environment `validation`, runs
 `app/deploy/validate.Dockerfile` and `scripts/validate.sh`. It has no public domain,
 production credentials, persistent evidence volume or production service bindings.
-Its source is pinned to an explicit commit of `release/production-correctness`.
+Its source is pinned to an explicit published commit. Implementation uses a dedicated
+working branch; accepted work is published to `wip`, leaving `main` unchanged.
 Restart policy is NEVER; execution is bounded to 50 minutes plus shutdown time.
 
 The runner uses Node 22.16.0 and Bun 1.3.14 with verified download checksums, Rust

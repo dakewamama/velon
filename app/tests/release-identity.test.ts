@@ -62,6 +62,7 @@ test("mainnet launcher serves its live scenario without importing recorded fixtu
   const port = reserve();
   const runtimePort = reserve();
   let redirectedSubmissions = 0;
+  let submittedToProvider = 0;
   const redirected = Bun.serve({
     port: 0,
     fetch: () => {
@@ -71,10 +72,13 @@ test("mainnet launcher serves its live scenario without importing recorded fixtu
   });
   const rpc = Bun.serve({
     port: 0,
-    fetch: async (request) =>
-      (await request.json()).method === "sendTransaction"
-        ? new Response(null, { status: 307, headers: { Location: String(redirected.url) } })
-        : Response.json({ jsonrpc: "2.0", id: 1, result: cluster }),
+    fetch: async (request) => {
+      if ((await request.json()).method === "sendTransaction") {
+        submittedToProvider++;
+        return new Response(null, { status: 307, headers: { Location: String(redirected.url) } });
+      }
+      return Response.json({ jsonrpc: "2.0", id: 1, result: cluster });
+    },
   });
   await writeFile(join(dir, "Cargo.toml"), "# isolated launcher orchestration fixture\n");
   await writeFile(
@@ -107,6 +111,7 @@ else if (process.argv[2] === "serve") {
         AUTHZ_BIN: binary,
         CATALOGER_DIR: dir,
         CATALOGER_REVISION: revision,
+        VELON_REVISION: revision,
         DATABASE_URL: `sqlite://${journal}`,
         LIVE_NETWORK: "mainnet",
         RPC_URL: String(rpc.url),
@@ -165,7 +170,7 @@ else if (process.argv[2] === "serve") {
     expect(history.status).toBe(200);
     expect(history.headers.get("Cache-Control")).toBe("no-store");
     expect(await history.text()).toContain('"period_end_ts":9223372036854775807');
-    const submission = await fetch(`http://127.0.0.1:${port}/rpc`, {
+    const legacy = await fetch(`http://127.0.0.1:${port}/rpc`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Velon-Action": "rpc" },
       body: JSON.stringify({
@@ -175,7 +180,20 @@ else if (process.argv[2] === "serve") {
         params: ["dummy-unit-test-bytes"],
       }),
     });
+    expect(legacy.status).toBe(409);
+    expect(submittedToProvider).toBe(0);
+    const submission = await fetch(`http://127.0.0.1:${port}/rpc`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Velon-Action": "rpc", "X-Velon-Release": revision },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "sendTransaction",
+        params: ["dummy-unit-test-bytes"],
+      }),
+    });
     expect(submission.status).toBe(502);
+    expect(submittedToProvider).toBe(1);
     expect(redirectedSubmissions).toBe(0);
     child.kill("SIGINT");
     expect(await child.exited).toBe(0);

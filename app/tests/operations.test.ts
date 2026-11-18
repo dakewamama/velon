@@ -8,11 +8,13 @@ test("operator measurements include rejected calls and RPC errors without leakin
   let upstreamCalls = 0;
   let probes = 0;
   let streaming = false;
+  let appCalls = 0;
   const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
   const app = Bun.serve({
     port: 0,
-    fetch: () =>
-      streaming
+    fetch: () => {
+      appCalls++;
+      return streaming
         ? new Response(
             new ReadableStream<Uint8Array>({
               start(controller) {
@@ -21,7 +23,8 @@ test("operator measurements include rejected calls and RPC errors without leakin
               },
             }),
           )
-        : Response.json({ cluster: "expected-genesis" }),
+        : Response.json({ cluster: "expected-genesis" });
+    },
   });
   const rpc = Bun.serve({
     port: 0,
@@ -46,6 +49,7 @@ test("operator measurements include rejected calls and RPC errors without leakin
       GATEWAY_PORT: String(port),
       GATEWAY_APP: String(app.url),
       RPC_URL: String(rpc.url) + "private-key",
+      VELON_REVISION: "a".repeat(40),
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -67,10 +71,52 @@ test("operator measurements include rejected calls and RPC errors without leakin
     expect((await fetch(url + "/operations")).status).toBe(401);
     expect((await fetch(url + "/api/snapshots/private-wallet-address")).status).toBe(401);
     expect((await fetch(url + "/operations", { method: "POST", headers })).status).toBe(405);
+    const before = appCalls;
+    for (const claim of [undefined, "b".repeat(40)]) {
+      const versioned = { ...headers, ...(claim ? { "X-Velon-Release": claim } : {}) };
+      for (const path of ["/api/scopes/s/actions/revoke/k", "/api/snapshots/s/actions/cancel/k/revalidate"]) {
+        const reply = await fetch(url + path, { method: "POST", headers: versioned });
+        expect(reply.status).toBe(409);
+        expect(await reply.text()).toContain("earlier transaction");
+      }
+      expect(
+        (
+          await fetch(url + "/rpc", {
+            method: "POST",
+            headers: { ...versioned, "X-Velon-Action": "rpc", "Content-Type": "application/json" },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "sendTransaction",
+              params: ["dummy-bytes"],
+            }),
+          })
+        ).status,
+      ).toBe(409);
+    }
+    expect(upstreamCalls).toBe(0);
+    expect(appCalls).toBe(before);
+    expect(
+      (
+        await fetch(url + "/api/scopes/s/actions/revoke/k", {
+          method: "POST",
+          headers: { ...headers, "X-Velon-Release": "a".repeat(40) },
+        })
+      ).status,
+    ).toBe(200);
+    // Finality reconciliation remains available to an already-submitted legacy transaction.
+    expect(
+      (await fetch(url + "/api/snapshots/s/actions/revoke/k/verify", { method: "POST", headers })).status,
+    ).toBe(200);
     const call = () =>
       fetch(url + "/rpc", {
         method: "POST",
-        headers: { ...headers, "X-Velon-Action": "rpc", "Content-Type": "application/json" },
+        headers: {
+          ...headers,
+          "X-Velon-Action": "rpc",
+          "Content-Type": "application/json",
+          "X-Velon-Release": "a".repeat(40),
+        },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBlockHeight" }),
       });
     const throttled = await call();

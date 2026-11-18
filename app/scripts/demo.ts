@@ -907,7 +907,7 @@ if (process.env.RPC_URL) {
       // Shows the visitor when a sent revoke has landed; display only, never evidence.
       "getSignatureStatuses",
     ]);
-    live.relay = async (body) => {
+    live.relay = async (body, clientRevision) => {
       let input: unknown;
       try {
         input = JSON.parse(body);
@@ -917,6 +917,18 @@ if (process.env.RPC_URL) {
       const call = input as { jsonrpc?: unknown; method?: unknown; params?: unknown } | null;
       if (!call || Array.isArray(call) || call.jsonrpc !== "2.0" || !methods.has(String(call.method)))
         return new Response("RPC method refused", { status: 403 });
+      if (
+        call.method === "sendTransaction" &&
+        process.env.VELON_REVISION &&
+        clientRevision !== process.env.VELON_REVISION
+      )
+        return Response.json(
+          {
+            error:
+              "Console release changed. Refresh before a new action; an earlier submission may still need verification.",
+          },
+          { status: 409 },
+        );
       // The console only asks who owns an account, never for its data.
       if (call.method === "getAccountInfo") {
         const slice = (Array.isArray(call.params) ? call.params[1] : undefined) as

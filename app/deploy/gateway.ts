@@ -3,6 +3,20 @@ import { infrastructureHealth } from "./health.ts";
 import { Operations, trackResponse } from "./operations.ts";
 import { rpcResponse } from "../scripts/rpc-response.ts";
 const operations = new Operations(process.env.VELON_REVISION);
+const revision = process.env.VELON_REVISION;
+if (revision && !/^[a-f0-9]{40}$/.test(revision)) throw new Error("Invalid deployed revision.");
+function mismatched(request: Request) {
+  return revision && request.headers.get("X-Velon-Release") !== revision;
+}
+function stale(headers: Headers) {
+  return Response.json(
+    {
+      error:
+        "Console release changed. Refresh before a new action; this does not establish whether an earlier transaction landed.",
+    },
+    { status: 409, headers },
+  );
+}
 setInterval(
   () => console.log("VELON_OPERATIONS=" + JSON.stringify(operations.snapshot(active))),
   60000,
@@ -188,6 +202,13 @@ async function handle(request: Request): Promise<Response> {
     return health(headers);
   }
   if (!authorized(request)) return new Response("Unauthorized", { status: 401, headers });
+  if (
+    request.method === "POST" &&
+    /\/actions\/(revoke|cancel)\//.test(url.pathname) &&
+    !url.pathname.endsWith("/verify") &&
+    mismatched(request)
+  )
+    return stale(headers);
   if (url.pathname === "/operations") {
     if (!token) return new Response("Operator authentication required", { status: 401, headers });
     if (request.method !== "GET") return new Response("GET required", { status: 405, headers });
@@ -199,7 +220,7 @@ async function handle(request: Request): Promise<Response> {
     return new Response("Too many requests; retry in a minute", { status: 429, headers });
   try {
     const forward = new Headers();
-    for (const key of ["Content-Type", "X-Velon-Action"]) {
+    for (const key of ["Content-Type", "X-Velon-Action", "X-Velon-Release"]) {
       const value = request.headers.get(key);
       if (value) forward.set(key, value);
     }
@@ -219,6 +240,7 @@ async function handle(request: Request): Promise<Response> {
         return new Response("Action header required", { status: 403, headers });
       if (!input || Array.isArray(input) || input.jsonrpc !== "2.0" || !methods.has(input.method))
         return new Response("RPC method refused", { status: 403, headers });
+      if (input.method === "sendTransaction" && mismatched(request)) return stale(headers);
       // The console only asks who owns an account, never for its data.
       if (input.method === "getAccountInfo" && input.params?.[1]?.dataSlice?.length !== 0)
         return new Response("Account data refused", { status: 403, headers });

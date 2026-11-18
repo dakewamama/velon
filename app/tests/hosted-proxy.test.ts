@@ -86,3 +86,15 @@ test("pending and unavailable remain failures", async () => {
   });
   expect((await call("api/control")).status).toBe(502);
 });
+test("the proxy forwards the client's release claim unchanged and never invents one", async () => {
+  let observed: unknown;
+  mockFetch(async (_url, init) => {
+    observed = (init!.headers as Record<string, string>)["x-velon-release"];
+    return new Response("{}");
+  });
+  const revision = "a".repeat(40);
+  await call("api/control", undefined, undefined, { "x-velon-release": revision });
+  expect(observed).toBe(revision);
+  await call("api/control");
+  expect(observed).toBeUndefined();
+});

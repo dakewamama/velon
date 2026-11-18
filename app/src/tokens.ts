@@ -1,4 +1,5 @@
 import { avatar } from "./icons.ts";
+import { releaseHeaders } from "./wire.ts";
 import solLogo from "./assets/tokens/sol.png";
 import usdcLogo from "./assets/tokens/usdc.png";
 import usdtLogo from "./assets/tokens/usdt.svg";
@@ -109,8 +110,10 @@ export type Delegate = {
 
 /// The console's own RPC relay only answers requests that carry its header; any other endpoint,
 /// such as a local validator, is called plainly so no CORS preflight is needed.
-export function rpcHeaders(rpcUrl: string): { "X-Velon-Action"?: "rpc" } {
-  return new URL(rpcUrl, location.href).origin === location.origin ? { "X-Velon-Action": "rpc" } : {};
+export function rpcHeaders(rpcUrl: string): { "X-Velon-Action"?: "rpc"; "X-Velon-Release"?: string } {
+  return new URL(rpcUrl, location.href).origin === location.origin
+    ? { "X-Velon-Action": "rpc", ...releaseHeaders() }
+    : {};
 }
 
 /// What the chain says a delegate key is. Display only; the RPC's answer is not evidence.

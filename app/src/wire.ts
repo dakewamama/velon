@@ -6,12 +6,24 @@ export type ObjectValue = { [key: string]: Json };
 
 export const readJson = (value: string): Json =>
   parse(value, undefined, { parseNumber: parseNumberAndBigInt }) as Json;
+export const expectedRelease = (): string | undefined =>
+  typeof document === "undefined"
+    ? undefined
+    : document.querySelector<HTMLMetaElement>('meta[name="velon-backend-revision"]')?.content;
+export function releaseHeaders(): Record<string, string> {
+  const revision = expectedRelease();
+  return revision && /^[a-f0-9]{40}$/.test(revision) ? { "X-Velon-Release": revision } : {};
+}
 // Every request carries a deadline, so one hung proxy call cannot freeze a polling loop.
 export async function call(input: string, init: RequestInit = {}, ms = 30000): Promise<Response> {
   const deadline = AbortSignal.timeout(ms);
+  const headers = new Headers(init.headers);
+  if (input.startsWith("/api/"))
+    for (const [name, value] of Object.entries(releaseHeaders())) headers.set(name, value);
   try {
     return await fetch(input, {
       ...init,
+      headers,
       signal: init.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
     });
   } catch (error) {
