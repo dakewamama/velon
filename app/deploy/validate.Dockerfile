@@ -15,8 +15,16 @@ RUN curl --retry 3 -fsSL https://sh.rustup.rs -o /tmp/rustup.sh \
     && sh /tmp/rustup.sh -y --profile minimal --default-toolchain 1.97.1 \
     && /root/.cargo/bin/rustup component add rustfmt clippy
 ENV PATH=/root/.cargo/bin:/usr/local/bin:$PATH
+ARG VELON_REVISION
+ARG RAILWAY_GIT_COMMIT_SHA
+ENV VELON_REVISION=${VELON_REVISION:-$RAILWAY_GIT_COMMIT_SHA}
 WORKDIR /workspace
-COPY . .
+RUN test "${#VELON_REVISION}" -eq 40 \
+    && git init --quiet . \
+    && git remote add origin https://github.com/dakewamama/velon.git \
+    && git fetch --quiet --depth=1 origin "$VELON_REVISION" \
+    && git checkout --quiet --detach FETCH_HEAD \
+    && test "$(git rev-parse HEAD)" = "$VELON_REVISION"
 RUN cd app && GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf \
     GIT_CONFIG_VALUE_0=ssh://git@github.com/ npm ci --ignore-scripts --no-audit --no-fund
 RUN cd sdk && bun install --frozen-lockfile

@@ -27,10 +27,12 @@ checkout before building. Production image startup uses manifest format 2, cover
 all immutable files, including application code, installed dependencies and recovery
 tools. Missing, added or changed files, modes and symlink targets fail verification.
 Only `logs/` and `app/.data/` are mutable; source links cannot target either location.
-Docker excludes dotenv files, Vercel settings and Python bytecode caches. This checks
+Docker excludes dotenv files, Vercel settings and Python bytecode caches. Both image
+recipes fetch their declared commit from the public Velon repository and verify HEAD;
+unpushed local changes are not image inputs. This checks
 artifact consistency, not authenticity against an attacker who can replace both
-the manifest and verifier. The Docker context's source provenance and complete image
-execution remain separate release gates.
+the manifest and verifier. Complete image execution and reproducible base/system
+dependencies remain separate release gates.
 
 GitHub Actions remains an available validation definition, but billing prevented
 its jobs from starting. Railway runs the commands independently; a Railway

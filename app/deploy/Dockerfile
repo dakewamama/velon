@@ -22,7 +22,12 @@ ARG RAILWAY_GIT_COMMIT_SHA
 ENV VELON_REVISION=${VELON_REVISION:-${RENDER_GIT_COMMIT:-$RAILWAY_GIT_COMMIT_SHA}}
 RUN test "${#VELON_REVISION}" -eq 40
 WORKDIR /src
-COPY . .
+# Fetching the declared immutable commit binds source identity without copying Git credentials.
+RUN git init --quiet . \
+  && git remote add origin https://github.com/dakewamama/velon.git \
+  && git fetch --quiet --depth=1 origin "$VELON_REVISION" \
+  && git checkout --quiet --detach FETCH_HEAD \
+  && test "$(git rev-parse HEAD)" = "$VELON_REVISION"
 RUN cd runtime && cargo build --release --locked --bin authorization-api \
   && install -D target/release/authorization-api /opt/velon/bin/authorization-api
 # The lockfile names a GitHub dependency over SSH; the image fetches it over HTTPS.
