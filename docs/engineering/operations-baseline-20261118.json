@@ -1,0 +1,129 @@
+{
+  "baseline": "2026-11-18 UTC",
+  "production_revision": "0e0d8c78f012e565632e3ca88ababb84c636706a",
+  "parity": "manually_matched_legacy_artifacts; automatic enforcement not deployed",
+  "frontend_checks": [
+    {
+      "asset": "index.html",
+      "expected": "75860fe38698015c26a401669c3981d7913b3407119fe4dbb0f8572a72b127d6",
+      "observed": "75860fe38698015c26a401669c3981d7913b3407119fe4dbb0f8572a72b127d6"
+    },
+    {
+      "asset": "console-wzgv0fqg.css",
+      "expected": "279eb45593dfc3bf6fd964cb3bd73abcdc468684aa3bb44febcbea65a13b845a",
+      "observed": "279eb45593dfc3bf6fd964cb3bd73abcdc468684aa3bb44febcbea65a13b845a"
+    },
+    {
+      "asset": "console-1bpb9tg2.js",
+      "expected": "450e1d4596ab9e5a97d9bdcfb839aa7e9c0c6723cdcb88eedab3668f31dec78f",
+      "observed": "450e1d4596ab9e5a97d9bdcfb839aa7e9c0c6723cdcb88eedab3668f31dec78f"
+    }
+  ],
+  "public_control": {
+    "network": "mainnet",
+    "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+    "apiVersion": null,
+    "revision": null
+  },
+  "backend": {
+    "path": "artifacts.json",
+    "sha256": "085c283433b377ec1f823bfe517e635885179c56d992c36ce18ca3878c085193",
+    "bytes": 378,
+    "revision": "0e0d8c78f012e565632e3ca88ababb84c636706a",
+    "format": null,
+    "artifacts": [
+      {
+        "name": "authorization-api",
+        "size": 23213376,
+        "sha256": "4846083a453359e4b15734409ebdf3159db26233a3f39c1b131ddd18b8702b08"
+      },
+      {
+        "name": "bun",
+        "size": 92752752,
+        "sha256": "9fd36f87e4b90b07632b987a2e4ec81ca15a62c81bf983190cea6d715be2ad74"
+      }
+    ]
+  },
+  "operational_evidence": {
+    "format": 1,
+    "observed_at": "2026-11-18T09:16:29.270553+00:00",
+    "production_readiness": "not_certified",
+    "alerts": [
+      "legacy_schema_without_history_telemetry",
+      "no_finalized_activity_retained",
+      "backup_freshness_unknown"
+    ],
+    "journal": {
+      "state": "readable",
+      "quick_check": true,
+      "foreign_key_check": true,
+      "latest_migration": "20261105000000",
+      "missing_operational_tables": [
+        "activity_backfill",
+        "activity_block_attempts",
+        "activity_gaps",
+        "activity_transactions",
+        "webhook_receipts"
+      ],
+      "counts": {
+        "authority_snapshots": 3,
+        "revoke_verifications": 0
+      },
+      "checksum_samples": {
+        "authority_snapshots": 3
+      },
+      "invalid_checksums": 0,
+      "observation_sample": {
+        "fixture": 3,
+        "finalized": 0,
+        "other": 0
+      },
+      "latest_sampled_finalized_observations": {},
+      "checksum_scope": "latest 20 snapshots, latest 200 rows per other evidence table; not native semantic replay",
+      "retained_tips": [],
+      "backfill": null,
+      "unreconciled_webhook_signatures": null,
+      "unresolved_block_attempts": null,
+      "archive_coverage": "unproven",
+      "historical_attribution": "unresolved"
+    },
+    "rpc": {
+      "state": "reachable",
+      "cluster": "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+      "finalized_slot": "470881405",
+      "probe_milliseconds": 82.64,
+      "scope": "two read requests; not an availability or rate-limit guarantee"
+    },
+    "backup": {
+      "state": "verified",
+      "sha256": "60b78470ad6cc1e168577df1b1be5fcb1d3dd2e641e728501630e4fc90621a27",
+      "bytes": 94208,
+      "created_at": null,
+      "age_seconds": null,
+      "offsite_retention": "unverified"
+    },
+    "monitoring": {
+      "alert_delivery": "not_configured",
+      "backup_schedule": "not_verified",
+      "slo_attainment": "unmeasured"
+    },
+    "database_unchanged": true,
+    "rpc_configuration": {
+      "upstream_configured": true,
+      "shared_public_endpoint": false
+    }
+  },
+  "gateway_log_sample": {
+    "counts_by_status": {
+      "200": 57
+    },
+    "samples": 57,
+    "first": "2026-11-15T17:08:38.163Z",
+    "last": "2026-11-18T09:01:15.836Z",
+    "min_ms": 0,
+    "max_ms": 6620,
+    "unparsed_lines": 0,
+    "limitation": "retained file only, excludes requests not logged by this version"
+  },
+  "scope": "Read-only observations; not a release approval or SLO attainment claim"
+}

@@ -13,6 +13,12 @@ import urllib.parse
 import urllib.request
 
 from evidence_backup import verify
+from urllib.request import HTTPRedirectHandler
+
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *args):
+        return None
 
 
 def journal_status(database):
@@ -23,7 +29,7 @@ def journal_status(database):
         integrity = conn.execute("PRAGMA quick_check").fetchall() == [("ok",)]
         foreign_keys = not conn.execute("PRAGMA foreign_key_check").fetchall()
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        required = {"authority_snapshots", "activity_transactions", "activity_backfill", "activity_gaps",
+        required = {"authority_snapshots", "trigger_events", "activity_transactions", "activity_backfill", "activity_gaps",
                     "activity_block_attempts", "webhook_receipts", "revoke_verifications"}
         counts = {name: conn.execute("SELECT count(*) FROM " + name).fetchone()[0]
                   for name in sorted(required & tables)}
@@ -32,6 +38,8 @@ def journal_status(database):
         sampled = {}
         observations = {"fixture": 0, "finalized": 0, "other": 0}
         latest_observations = {}
+        def valid(raw, expected):
+            return isinstance(raw, str) and isinstance(expected, str) and hashlib.sha256(raw.encode()).hexdigest() == expected
         # Bounded checksum samples; structural checks above are database-wide.
         for table, column, checksum in [("authority_snapshots", "record", "record_sha256"),
                                         ("activity_transactions", "raw_json", "sha256"),
@@ -42,10 +50,10 @@ def journal_status(database):
             limit = 20 if table == "authority_snapshots" else 200
             rows = conn.execute(f"SELECT {column},{checksum} FROM {table} ORDER BY rowid DESC LIMIT ?", (limit,)).fetchall()
             sampled[table] = len(rows)
-            invalid += sum(hashlib.sha256(raw.encode()).hexdigest() != expected for raw, expected in rows)
+            invalid += sum(not valid(raw, expected) for raw, expected in rows)
             if table == "authority_snapshots":
                 for raw, expected in rows:
-                    if hashlib.sha256(raw.encode()).hexdigest() != expected:
+                    if not valid(raw, expected):
                         continue
                     try:
                         observation = json.loads(raw)["snapshot"]["observation"]
@@ -75,7 +83,8 @@ def journal_status(database):
             block_gaps = conn.execute("SELECT count(*) FROM activity_block_attempts WHERE resolved=0").fetchone()[0]
         pending = None
         if {"webhook_receipts", "activity_transactions"} <= tables:
-            pending = conn.execute("SELECT count(DISTINCT signature) FROM webhook_receipts r WHERE NOT EXISTS "
+            pending = conn.execute("SELECT count(DISTINCT signature) FROM "
+                                   "(SELECT signature FROM webhook_receipts UNION ALL SELECT signature FROM trigger_events) r WHERE NOT EXISTS "
                                    "(SELECT 1 FROM activity_transactions t WHERE t.signature=r.signature)").fetchone()[0]
         healthy_bytes = integrity and foreign_keys and invalid == 0 and all(row[1] for row in migrations)
         return {"state": "readable" if healthy_bytes else "invalid", "quick_check": integrity,
@@ -87,6 +96,7 @@ def journal_status(database):
                 "checksum_scope": "latest 20 snapshots, latest 200 rows per other evidence table; not native semantic replay",
                 "retained_tips": tips, "backfill": checkpoints,
                 "unreconciled_webhook_signatures": pending, "unresolved_block_attempts": block_gaps,
+                "provisional_scope": "legacy/webhook signatures lack cluster provenance; matching signatures alone do not prove attribution",
                 "archive_coverage": "unproven", "historical_attribution": "unresolved"}
 
 
@@ -122,7 +132,28 @@ def rpc_status(url, expected_cluster=None):
         return {"state": "unavailable"}
 
 
-def report(database, backup=None, rpc=None, expected_cluster=None):
+def gateway_status(url):
+    parsed = urllib.parse.urlsplit(url)
+    if (parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost")
+            or parsed.username or parsed.password or parsed.path not in ("", "/")
+            or parsed.query or parsed.fragment):
+        return {"state": "invalid_configuration"}
+    token = os.environ.get("GATEWAY_TOKEN")
+    if not token:
+        return {"state": "operator_authentication_unconfigured"}
+    try:
+        req = urllib.request.Request(url.rstrip("/") + "/operations",
+                                     headers={"Authorization": "Bearer " + token})
+        with urllib.request.build_opener(NoRedirect).open(req, timeout=5) as response:
+            body = json.loads(response.read(65537))
+        if body.get("format") != 1 or body.get("evidence") != "not_assessed":
+            raise ValueError("Unsupported measurements")
+        return {"state": "available", "measurements": body}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {"state": "unavailable"}
+
+
+def report(database, backup=None, rpc=None, expected_cluster=None, gateway=None):
     result = {"format": 1, "observed_at": datetime.now(timezone.utc).isoformat(),
               "production_readiness": "not_certified", "alerts": []}
     try:
@@ -170,6 +201,9 @@ def report(database, backup=None, rpc=None, expected_cluster=None):
         result["alerts"].append("backup_unverified")
     result["monitoring"] = {"alert_delivery": "not_configured", "backup_schedule": "not_verified",
                             "slo_attainment": "unmeasured"}
+    result["gateway"] = gateway_status(gateway) if gateway else {"state": "not_probed"}
+    if gateway and result["gateway"]["state"] != "available":
+        result["alerts"].append("gateway_measurements_unavailable")
     return result
 
 
@@ -179,7 +213,9 @@ if __name__ == "__main__":
     parser.add_argument("--backup", type=Path)
     parser.add_argument("--probe-rpc", action="store_true", help="Read RPC_URL from the environment; never printed")
     parser.add_argument("--cluster")
+    parser.add_argument("--gateway", help="Loopback gateway origin; uses server-side GATEWAY_TOKEN")
     args = parser.parse_args()
-    result = report(args.database, args.backup, os.environ.get("RPC_URL", "") if args.probe_rpc else None, args.cluster)
+    upstream = (os.environ.get("RPC_URL") or os.environ.get("UPSTREAM_RPC_URL", "")) if args.probe_rpc else None
+    result = report(args.database, args.backup, upstream, args.cluster, args.gateway)
     print(json.dumps(result, indent=2))
     raise SystemExit(1 if result["alerts"] else 0)

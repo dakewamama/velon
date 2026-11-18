@@ -11,7 +11,7 @@ import stat
 
 REQUIRED = {
     "bin/authorization-api", "bin/bun", "supervisor.py", "evidence_storage.py",
-    "release_artifacts.py", "tools/evidence_backup.py", "tools/verify_release_image.py", "app/package.json",
+    "release_artifacts.py", "tools/evidence_backup.py", "tools/operations_report.py", "tools/verify_release_image.py", "app/package.json",
     "app/scripts/demo.ts", "app/deploy/gateway.ts", "app/src/server.ts",
     "cataloger/Cargo.toml",
 }

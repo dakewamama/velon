@@ -37,6 +37,7 @@ RUN git config --global url."https://github.com/".insteadOf ssh://git@github.com
 RUN cp -r app /opt/velon/app \
   && cp app/deploy/supervisor.py app/deploy/evidence_storage.py app/deploy/release_artifacts.py /opt/velon/ \
   && install -D -m 0644 scripts/evidence_backup.py /opt/velon/tools/evidence_backup.py \
+  && install -D -m 0644 scripts/operations_report.py /opt/velon/tools/operations_report.py \
   && install -D -m 0644 scripts/verify_release_image.py /opt/velon/tools/verify_release_image.py \
   && cp -r runtime /opt/velon/cataloger && rm -rf /opt/velon/cataloger/target \
   && python3 -B /opt/velon/release_artifacts.py /opt/velon "$VELON_REVISION" > /opt/velon/artifacts.json

@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { infrastructureHealth } from "./health.ts";
 import { Operations } from "./operations.ts";
-const operations = new Operations();
+const operations = new Operations(process.env.VELON_REVISION);
 setInterval(() => console.log("VELON_OPERATIONS=" + JSON.stringify(operations.snapshot())), 60000).unref();
 // Public edge of the hosted console. Only the Vercel proxy holds the token that reaches this
 // port (a Daytona preview token, or GATEWAY_TOKEN on a host that serves the port publicly), so

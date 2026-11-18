@@ -1,5 +1,6 @@
 // Bounded, process-local measurements. No wallet, IP, path, key or request-body labels.
 export class Operations {
+  constructor(private revision?: string) {}
   private started = new Date().toISOString();
   private requests = new Map<
     string,
@@ -37,6 +38,7 @@ export class Operations {
   snapshot() {
     return {
       format: 1,
+      revision: this.revision && /^[a-f0-9]{40}$/.test(this.revision) ? this.revision : null,
       observedAt: new Date().toISOString(),
       startedAt: this.started,
       scope: "gateway process since startup; counters reset on restart",
