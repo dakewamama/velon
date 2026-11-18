@@ -84,9 +84,9 @@ SPL fixture evidence through the actual runtime, backs up with a WAL writer open
 restores and replays the exact record. It checks maximum-u64 decimal storage,
 non-overwrite, corruption rejection, missing source and interrupted backup rejection.
 
-This is local recovery conformance. No production backup, loss window, recovery
-duration, deployment rollback or offsite retention has been measured. RPO and RTO
-remain operational release gates, not achieved SLOs.
+This is local recovery conformance. The production export rehearsal below adds
+retained-data evidence. Production cutover, deployment rollback, loss windows and
+offsite retention remain operational release gates, not achieved SLOs.
 
 ## Release startup and older records
 
@@ -109,3 +109,35 @@ the live scenario without fixture imports; the old record and its stored SHA-256
 were identical afterward. RPC/genesis and catalog inputs were controlled test
 fixtures; this proves local upgrade/startup preservation, not mainnet compatibility
 or restoration of retained production data.
+
+## Retained production export rehearsal — 2026-11-18 UTC
+
+Read-only inventory of the running Railway container found the revision-scoped
+`observations-0e0d8c78f012e565632e3ca88ababb84c636706a.db` journal (94,208 bytes).
+An online SQLite backup was created in a new private temporary directory and
+exported to a private directory outside Git in the engineering workspace.
+The original journal was not migrated, replaced or deleted. No service restart,
+volume attachment or production deployment occurred.
+
+The exported backup passed checksum, integrity, foreign-key and migration-metadata
+verification. SHA-256:
+`60b78470ad6cc1e168577df1b1be5fcb1d3dd2e641e728501630e4fc90621a27`.
+It contains three authority snapshots, zero trigger events, zero revoke
+verifications and eight successful migrations. These counts describe retained
+records, not complete blockchain history.
+
+The actual production executable was also exported (23,213,376 bytes), SHA-256
+`4846083a453359e4b15734409ebdf3159db26233a3f39c1b131ddd18b8702b08`.
+All three snapshots replayed successfully with that executable on a restored copy.
+The release `82411f13e1636663859ba13a9154e7a79a5a153a` executable applied the two
+new migrations to another copy; all snapshot columns and values remained exactly
+equal, integrity returned `ok`, and foreign-key checking returned no errors.
+A separate restore of the original backup again replayed all three snapshots with
+the archived production executable. The original backup checksum stayed unchanged.
+
+Private artifacts include the backup manifest, inventory, archived executable,
+replay results and migration/rollback report. They are deliberately not committed.
+This proves exported-data recovery and migration preservation on local copies;
+it does not prove a Railway volume cutover, whole-service rollback, automated
+backup retention or an achieved recovery-time objective. A fresh coherent backup
+is required immediately before cutover because the running service may add data.
