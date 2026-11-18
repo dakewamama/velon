@@ -87,3 +87,25 @@ non-overwrite, corruption rejection, missing source and interrupted backup rejec
 This is local recovery conformance. No production backup, loss window, recovery
 duration, deployment rollback or offsite retention has been measured. RPO and RTO
 remain operational release gates, not achieved SLOs.
+
+## Release startup and older records
+
+Mainnet startup checks the executable's embedded revision with `authorization-api
+identity` before opening a journal or making RPC calls. The private loopback
+`GET /identity` endpoint is a process-readiness check, not evidence health.
+Recorded example imports are disabled in mainnet mode; local/recorded examples
+remain available. This prevents stable fixture IDs from conflicting with retained
+records interpreted by an older SDK. Record IDs and retained bytes are unchanged.
+
+Older records keep their original SDK revision. Replay them with the matching
+archived executable and dependencies against an isolated copy of the pre-migration
+backup. Never overwrite their revision or reinterpret them as current records to
+make an upgrade start, and do not run an older executable against the only migrated
+journal. Preserve and checksum both the original backup and archived artifacts.
+
+The cross-release check used a real `0e0d8c78` runtime to import an SPL fixture,
+then started the new runtime and mainnet launcher on that SQLite journal. It served
+the live scenario without fixture imports; the old record and its stored SHA-256
+were identical afterward. RPC/genesis and catalog inputs were controlled test
+fixtures; this proves local upgrade/startup preservation, not mainnet compatibility
+or restoration of retained production data.

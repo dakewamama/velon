@@ -43,6 +43,10 @@ fn redact(message: &str) -> String {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.as_slice() == ["identity"] {
+        println!("{}", catalyst_indexer::identity());
+        return Ok(());
+    }
     if let [command, program] = args.as_slice()
         && command == "capture"
     {
@@ -215,7 +219,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         _ => {
             return Err(
-                "usage: authorization-api capture PROGRAM | observe CATALOG SCOPE | import CATALOG SNAPSHOT | replay ID | simulate-revoke ID SOURCE | latest ID | serve ADDRESS | history-backfill ADDRESS PAGES SOURCE | history-recent ADDRESS PAGES SOURCE | history-reconcile LIMIT SOURCE | history-worker LIMIT SOURCE | history CLUSTER ADDRESS | history-block SLOT SOURCE | history-block-evidence CLUSTER SLOT"
+                "usage: authorization-api identity | capture PROGRAM | observe CATALOG SCOPE | import CATALOG SNAPSHOT | replay ID | simulate-revoke ID SOURCE | latest ID | serve ADDRESS | history-backfill ADDRESS PAGES SOURCE | history-recent ADDRESS PAGES SOURCE | history-reconcile LIMIT SOURCE | history-worker LIMIT SOURCE | history CLUSTER ADDRESS | history-block SLOT SOURCE | history-block-evidence CLUSTER SLOT"
                     .into(),
             );
         }

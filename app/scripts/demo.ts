@@ -69,15 +69,23 @@ if (!prebuilt)
   ]);
 const binary =
   prebuilt ?? `${resolve(cataloger, process.env.CARGO_TARGET_DIR ?? "target")}/release/authorization-api`;
+// Ask the executable before opening/importing any journal, including a retained live journal.
+const identity = object(readJson(command([binary, "identity"])));
+if (identity.sdk_revision !== CATALOGER_REVISION)
+  throw new Error("Native runtime revision does not match CATALOGER_REVISION.");
+const mainnet = process.env.LIVE_NETWORK === "mainnet";
+if (mainnet && !process.env.RPC_URL) throw new Error("Mainnet mode requires RPC_URL.");
 const env = {
   ...process.env,
   DATABASE_URL: process.env.DATABASE_URL ?? `sqlite://${dataDir}/observations-${CATALOGER_REVISION}.db`,
 };
 const fixtures = `${cataloger}/services/catalyst-indexer/tests/fixtures`;
-const definitions = [
-  { name: "Subscriptions", files: ["owner-pull-60.json", "revoke-cancelled-after.json"] },
-  { name: "SPL delegate", files: ["spl-snapshot.json"] },
-];
+const definitions = mainnet
+  ? []
+  : [
+      { name: "Subscriptions", files: ["owner-pull-60.json", "revoke-cancelled-after.json"] },
+      { name: "SPL delegate", files: ["spl-snapshot.json"] },
+    ];
 const scenarios = definitions.map(({ name, files }) => {
   const records = files.map((file) => {
     const record = object(
@@ -1213,21 +1221,24 @@ const runtime = Bun.spawn([binary, "serve", `127.0.0.1:${runtimePort}`], {
   stderr: "inherit",
 });
 let server: ReturnType<typeof Bun.serve> | undefined;
-async function shutdown() {
+let stopping = false;
+async function shutdown(exitCode = 0) {
+  stopping = true;
   server?.stop(true);
   runtime.kill("SIGINT");
   await runtime.exited;
   // Background loops (the approval feeds, catalog refresh) would otherwise keep the process alive.
-  process.exit(0);
+  process.exit(exitCode);
 }
-process.once("SIGINT", shutdown);
-process.once("SIGTERM", shutdown);
+process.once("SIGINT", () => void shutdown());
+process.once("SIGTERM", () => void shutdown());
 try {
   let ready = false;
   for (let attempt = 0; attempt < 50; attempt++) {
     if (runtime.exitCode !== null) throw new Error("Observation API exited before startup.");
     try {
-      ready = (await fetch(`${runtimeUrl}/scopes/${scenarios[0]!.scope}`)).ok;
+      const response = await fetch(`${runtimeUrl}/identity`);
+      ready = response.ok && object(readJson(await response.text())).sdk_revision === CATALOGER_REVISION;
       if (ready) break;
     } catch {
       /* The API may still be binding its socket. */
@@ -1252,9 +1263,11 @@ try {
   const exitCode = await runtime.exited;
   server?.stop(true);
   // The runtime stopping on its own is a failure; exit so a supervisor sees it and restarts.
-  console.error(`Observation API exited with code ${exitCode}.`);
-  process.exit(exitCode || 1);
+  if (!stopping) {
+    console.error(`Observation API exited with code ${exitCode}.`);
+    process.exit(exitCode || 1);
+  }
 } catch (error) {
-  await shutdown();
-  throw error;
+  console.error("Console startup failed:", error instanceof Error ? error.message : "Unknown error");
+  await shutdown(1);
 }

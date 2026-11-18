@@ -38,6 +38,11 @@ pub mod types;
 pub const SDK_REVISION: &str = env!("VELON_REVISION");
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Executable identity only. This does not assert RPC, journal or evidence freshness.
+pub fn identity() -> serde_json::Value {
+    serde_json::json!({"sdk_revision": SDK_REVISION, "runtime_version": RUNTIME_VERSION})
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Origin {
@@ -953,6 +958,7 @@ async fn current_graph(
 
 pub fn router(journal: Journal) -> Router {
     Router::new()
+        .route("/identity", get(|| async { Json(identity()) }))
         .route(
             "/activity/transactions/:cluster/:signature",
             get(history::transaction),
