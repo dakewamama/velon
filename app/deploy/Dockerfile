@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g npm@10.9.9 && npm --version
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.97.1
 ENV PATH=/root/.cargo/bin:$PATH
+ENV CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
 # Bun is pinned by checksum; the supervisor checks it again at every start.
 RUN curl -fsSL -o /tmp/bun.zip https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64.zip \
   && unzip -q /tmp/bun.zip -d /tmp \
@@ -36,6 +37,7 @@ RUN git config --global url."https://github.com/".insteadOf ssh://git@github.com
 RUN cp -r app /opt/velon/app \
   && cp app/deploy/supervisor.py app/deploy/evidence_storage.py app/deploy/release_artifacts.py /opt/velon/ \
   && install -D -m 0644 scripts/evidence_backup.py /opt/velon/tools/evidence_backup.py \
+  && install -D -m 0644 scripts/verify_release_image.py /opt/velon/tools/verify_release_image.py \
   && cp -r runtime /opt/velon/cataloger && rm -rf /opt/velon/cataloger/target \
   && python3 -B /opt/velon/release_artifacts.py /opt/velon "$VELON_REVISION" > /opt/velon/artifacts.json
 

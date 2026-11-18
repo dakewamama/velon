@@ -34,6 +34,13 @@ artifact consistency, not authenticity against an attacker who can replace both
 the manifest and verifier. Complete image execution and reproducible base/system
 dependencies remain separate release gates.
 
+An isolated production-image run can override the service command with
+`python3 -B /opt/velon/tools/verify_release_image.py`. It verifies the packaged
+manifest and toolchain, imports and replays native SPL fixture evidence, then
+backs up, restores and replays it using only a fresh temporary database. A matching
+`VELON_RELEASE_IMAGE_RESULT` and `VELON_RELEASE_IMAGE_PASS` certify those checks;
+they do not establish production storage persistence or public-chain execution.
+
 GitHub Actions remains an available validation definition, but billing prevented
 its jobs from starting. Railway runs the commands independently; a Railway
 deployment status alone is not a test result. Check the final marker, JSON commit
