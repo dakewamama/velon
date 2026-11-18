@@ -61,9 +61,20 @@ test("mainnet launcher serves its live scenario without importing recorded fixtu
   };
   const port = reserve();
   const runtimePort = reserve();
+  let redirectedSubmissions = 0;
+  const redirected = Bun.serve({
+    port: 0,
+    fetch: () => {
+      redirectedSubmissions++;
+      return Response.json({ jsonrpc: "2.0", id: 1, result: "unexpected" });
+    },
+  });
   const rpc = Bun.serve({
     port: 0,
-    fetch: () => Response.json({ jsonrpc: "2.0", id: 1, result: cluster }),
+    fetch: async (request) =>
+      (await request.json()).method === "sendTransaction"
+        ? new Response(null, { status: 307, headers: { Location: String(redirected.url) } })
+        : Response.json({ jsonrpc: "2.0", id: 1, result: cluster }),
   });
   await writeFile(join(dir, "Cargo.toml"), "# isolated launcher orchestration fixture\n");
   await writeFile(
@@ -100,6 +111,7 @@ else if (process.argv[2] === "serve") {
         LIVE_NETWORK: "mainnet",
         RPC_URL: String(rpc.url),
         PUBLIC_RPC_URL: String(rpc.url),
+        RPC_RELAY: "1",
         LIVE_CATALOG: join(dir, "catalog.json"),
         MAINNET_RPC_URL: "",
         DEVNET_RPC_URL: "",
@@ -153,6 +165,18 @@ else if (process.argv[2] === "serve") {
     expect(history.status).toBe(200);
     expect(history.headers.get("Cache-Control")).toBe("no-store");
     expect(await history.text()).toContain('"period_end_ts":9223372036854775807');
+    const submission = await fetch(`http://127.0.0.1:${port}/rpc`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Velon-Action": "rpc" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "sendTransaction",
+        params: ["dummy-unit-test-bytes"],
+      }),
+    });
+    expect(submission.status).toBe(502);
+    expect(redirectedSubmissions).toBe(0);
     child.kill("SIGINT");
     expect(await child.exited).toBe(0);
     child = launch();
@@ -173,5 +197,6 @@ else if (process.argv[2] === "serve") {
     child.kill("SIGINT");
     await child.exited;
     rpc.stop(true);
+    redirected.stop(true);
   }
 }, 15000);

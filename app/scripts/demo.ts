@@ -935,6 +935,7 @@ if (process.env.RPC_URL) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(checked),
+          redirect: "error",
           signal: AbortSignal.timeout(45000),
         });
         const reply = rpcResponse(await response.text(), response.status, checked.id);
