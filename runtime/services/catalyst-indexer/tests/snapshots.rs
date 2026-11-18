@@ -33,6 +33,29 @@ const AUTHORITY: &str = "C6SqwcnpGmWGkM3UuWJ2w58UZvYrgUxQaAFem6wPSBW6";
 const SOURCE: &str = "HwD4QpS4bsutLbWZWhbmFUZfkXC5Au1DbkzYEzjDgps8";
 const PLAN: &str = "3DztDM68WwtEuWfnPeP4CsEijJaX1tp5x9YszSsSguvJ";
 
+#[test]
+fn executable_identity_needs_no_database_or_rpc() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_authorization-api"))
+        .arg("identity")
+        .env_remove("DATABASE_URL")
+        .env_remove("RPC_URL")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value, catalyst_indexer::identity());
+    assert_eq!(value["sdk_revision"], SDK_REVISION);
+    assert!(value.get("healthy").is_none());
+}
+
+#[tokio::test]
+async fn private_identity_route_names_executable_without_claiming_evidence_health() {
+    let journal = Journal::open("sqlite::memory:").await.unwrap();
+    let (status, value) = get(&router(journal), "/identity").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(value, catalyst_indexer::identity());
+}
+
 // The recorded fixture catalog names the standalone SDK commit its adapters were captured from.
 const FIXTURE_ADAPTER_REVISION: &str = "54ed06aa3a7c8a31268dface42d0bf27ca4adaee";
 
