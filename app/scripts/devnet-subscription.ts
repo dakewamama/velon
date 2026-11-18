@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { address, getAddressEncoder, getProgramDerivedAddress, type Address } from "@solana/addresses";
 import { blockhash } from "@solana/rpc-types";
@@ -17,6 +17,7 @@ import {
 import { array, integer, object, readJson, text, writeJson, type Json } from "../src/wire.ts";
 import { DEVNET_GENESIS } from "../src/control.ts";
 import { tokenCatalogAsync } from "./catalog.ts";
+import { fixtureMode, requireDisposableFunding, subscriptionCharge } from "./devnet-journey.ts";
 
 // Layouts follow the generated client of subscriptions 0.5.0.
 const SUBSCRIPTIONS = address("De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44");
@@ -33,7 +34,8 @@ const PERIOD_HOURS = 1n;
 const FUNDING = "0.05";
 
 const root = resolve(import.meta.dir, "..");
-const dir = `${root}/.data/devnet`;
+const mode = fixtureMode(process.env.DEVNET_FIXTURE_MODE);
+const dir = resolve(process.env.DEVNET_FIXTURE_DIR ?? `${root}/.data/devnet`);
 const url = process.env.DEVNET_RPC_URL ?? "https://api.devnet.solana.com";
 const funder = process.env.DEVNET_FUNDER;
 if (!funder) throw new Error("DEVNET_FUNDER must name a disposable devnet test keypair.");
@@ -51,6 +53,7 @@ async function rpc(method: string, params: Json[] = []): Promise<Json> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    signal: AbortSignal.timeout(30_000),
   });
   const reply = object(readJson(await response.text()));
   if (reply.result === undefined) throw new Error(`RPC ${method} failed: ${JSON.stringify(reply.error)}`);
@@ -104,6 +107,24 @@ async function send(
   );
   const transaction = await signTransaction(signers, compileTransaction(message));
   const signature = getSignatureFromTransaction(transaction);
+  // Persist the known signature before submission. An interrupted/unknown outcome can be
+  // investigated without rerunning the fixture or blindly creating another charge.
+  await writeFile(
+    `${dir}/attempt-${signature}.json`,
+    writeJson(
+      {
+        signature,
+        program: SUBSCRIPTIONS,
+        accounts,
+        data: Buffer.from(data).toString("hex"),
+        blockhash: text(lifetime.blockhash),
+        lastValidBlockHeight: lastValidBlockHeight.toString(),
+        outcome: "not-yet-verified",
+      },
+      2,
+    ),
+    { flag: "wx", mode: 0o600 },
+  );
   const sent = text(
     await rpc("sendTransaction", [
       getBase64EncodedWireTransaction(transaction),
@@ -111,7 +132,12 @@ async function send(
     ]),
   );
   if (sent !== signature) throw new Error(`Unexpected signature ${sent}.`);
+  const deadline = Date.now() + 180_000;
   for (;;) {
+    if (Date.now() > deadline)
+      throw new Error(
+        `Submission outcome for ${signature} is unresolved. Inspect its retained attempt; do not rerun blindly.`,
+      );
     const status = array(object(await rpc("getSignatureStatuses", [[signature]])).value)[0];
     if (status !== null) {
       const { err, confirmationStatus } = object(status);
@@ -153,9 +179,13 @@ if (
   !catalog.some((entry) => object(object(entry).adapter).protocol === "subscriptions")
 )
   throw new Error("Devnet Subscriptions executable/runtime is not a verified supported deployment.");
+const fundingAddress = address(run([bin("solana-keygen"), "pubkey", funder]));
+requireDisposableFunding(
+  integer(object(await rpc("getBalance", [fundingAddress, { commitment: "finalized" }])).value),
+);
 // Failed or completed fixtures keep every key, journal and transaction for inspection.
 await mkdir(resolve(dir, ".."), { recursive: true });
-await mkdir(dir);
+await mkdir(dir, { mode: 0o700 });
 await Bun.write(`${dir}/catalog.json`, writeJson(catalog));
 
 for (const name of ["subscriber", "merchant", "mint"])
@@ -242,6 +272,9 @@ signatures.push([
 
 // PlanData: plan_id, mint, terms {amount, period_hours, created_at}, end_ts, destinations, pullers, metadata_uri.
 // created_at is set by the program; end_ts 0, empty destinations and pullers leave the plan unrestricted.
+const planName = "Disposable devnet test";
+const metadata = new Uint8Array(128);
+if (mode === "active-charge") metadata.set(new TextEncoder().encode(JSON.stringify({ n: planName })));
 const planData = concat(
   Uint8Array.of(CREATE_PLAN),
   u64(PLAN_ID),
@@ -250,7 +283,8 @@ const planData = concat(
   u64(PERIOD_HOURS),
   i64(0n),
   i64(0n),
-  new Uint8Array(4 * 32 + 4 * 32 + 128),
+  new Uint8Array(4 * 32 + 4 * 32),
+  metadata,
 );
 if (planData.length !== 457) throw new Error("Malformed CreatePlan data.");
 signatures.push([
@@ -316,6 +350,87 @@ signatures.push([
 const subscribed = (await finalizedAccount(subscription)).data;
 if (subscribed.length !== 155 || subscribed[0] !== 4)
   throw new Error("Unexpected SubscriptionDelegation account.");
+if (mode === "active-charge") {
+  token(["create-account", mint, "--owner", merchant]);
+  const [receiver] = await getProgramDerivedAddress({
+    programAddress: ASSOCIATED_TOKEN_PROGRAM,
+    seeds: [encoder.encode(merchant), encoder.encode(TOKEN_PROGRAM), encoder.encode(mint)],
+  });
+  const amount = 40n;
+  const charge = subscriptionCharge({
+    subscription,
+    plan,
+    authority,
+    source: ata,
+    receiver,
+    puller: merchant,
+    mint,
+    owner: subscriber,
+    tokenProgram: TOKEN_PROGRAM,
+    eventAuthority,
+    program: SUBSCRIPTIONS,
+    amount,
+  });
+  signatures.push([
+    "TransferSubscription",
+    await send(merchant, [merchantKeys], charge.accounts, charge.data),
+  ]);
+  const after = await finalizedAccount(subscription);
+  const paid = await finalizedAccount(receiver);
+  const source = await finalizedAccount(ata);
+  if (
+    after.owner !== SUBSCRIPTIONS ||
+    after.data.length !== 155 ||
+    after.data.readBigInt64LE(147) !== 0n ||
+    after.data.readBigUInt64LE(131) !== amount ||
+    paid.owner !== TOKEN_PROGRAM ||
+    paid.data.length !== 165 ||
+    paid.data.readBigUInt64LE(64) !== amount ||
+    source.owner !== TOKEN_PROGRAM ||
+    source.data.length !== 165 ||
+    source.data.readBigUInt64LE(64) !== 1000n - amount
+  )
+    throw new Error("Finalized active subscription and exact charge balances were not verified.");
+  const chargeSignature = signatures.at(-1)![1];
+  const transactionEvidence = await rpc("getTransaction", [
+    chargeSignature,
+    {
+      commitment: "finalized",
+      encoding: "json",
+      maxSupportedTransactionVersion: 0,
+    },
+  ]);
+  if (transactionEvidence === null || object(object(transactionEvidence).meta).err !== null)
+    throw new Error("The charge has no independently retrievable successful finalized transaction.");
+  const evidence = {
+    mode,
+    cluster: DEVNET_GENESIS,
+    revision,
+    subscriber,
+    merchant,
+    mint,
+    source: ata,
+    authority,
+    plan,
+    planName,
+    subscription,
+    receiver,
+    amount: amount.toString(),
+    signatures: Object.fromEntries(signatures),
+    finalizedSlot: integer(await rpc("getSlot", [{ commitment: "finalized" }])).toString(),
+    subscriptionData: after.data.toString("base64"),
+    receiverData: paid.data.toString("base64"),
+    sourceData: source.data.toString("base64"),
+    transactionEvidence,
+    merchantIdentity: "unverified",
+    historicalAttribution: "unresolved",
+  };
+  await writeFile(`${dir}/journey.json`, writeJson(evidence, 2), { flag: "wx", mode: 0o600 });
+  console.log(
+    `Active charged devnet fixture retained at ${dir}/journey.json. Cancellation is left to the console.`,
+  );
+  process.exit(0);
+}
 signatures.push([
   "CancelSubscriptionNow",
   await send(
