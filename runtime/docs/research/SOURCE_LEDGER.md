@@ -1,5 +1,65 @@
 # Observation sources
 
+## Reuse investigation — 2026-11-18
+
+Prefer existing provider interfaces over importing another indexing architecture.
+The following are source inspections unless an executed probe is stated explicitly.
+None was deployed or added as a production dependency.
+
+- **Superbank**, `solana-rpc/superbank@b78084f982494a044c90529a1acb947615765877`,
+  AGPL-3.0-only: standard archival RPC is the smallest integration boundary for the
+  existing collectors. `ddl/local/transactions.sql` retains native `slot_idx`;
+  `crates/superbank-rpc/src/handlers/blocks.rs` checks block transaction counts.
+  Reuse an externally operated RPC, subject to source/order/range conformance;
+  do not copy its ClickHouse ingestion architecture into Velon. No upstream tests
+  or provider requests executed. Source: https://github.com/solana-rpc/superbank
+- **Old Faithful**, `rpcpool/yellowstone-faithful@fe631879f3830447ff481cba07e54b3cea4891c6`,
+  AGPL-3.0-only with documented exceptions: existing RPC methods can supply archive
+  evidence. GSFA indexes are optional; signatures-only responses omit required
+  slot/status fields. `nodetools/parsed-and-cid.go::SortedTransactions` does not
+  reject missing optional CAR position indexes. Require ordering conformance before
+  trusting block ordinals. https://github.com/rpcpool/yellowstone-faithful
+- **Microscope**, `solana-foundation/solana-microscope@549af0da3789e8a19bed0267aec6426f4a965819`,
+  MIT: inspect `crates/microscope-indexer/src/rpc_polling/{checkpoint,runtime}.rs`
+  for durable-before-progress recovery and provider retention-floor checks. Reuse
+  its adversarial cases when reviewing our SQLite journal; a second checkpoint
+  store would duplicate existing responsibilities. No upstream tests executed.
+- **Alchemy Account Archive**, provider API rather than copied source: documented
+  `getAccountInfo` historical `slot`, `lastUpdateBeforeSlot` and
+  `firstUpdateAfterSlot` parameters offer historical account bytes and deletion
+  records. Paid access is required; no authenticated probe was possible. Coverage,
+  transaction-level ordering and same-slot recreation require qualification.
+  Per-slot sysvars are excluded, so this does not independently supply a complete
+  historical native observation or Clock evidence.
+  https://www.alchemy.com/docs/solana/account-archive
+- **Surfpool**, inspected source `7832d6e42de8e78a74a8ff6ef02400e3ee1e43a8`,
+  Apache-2.0; **executed** the published `@solana/surfpool@1.7.0` in an isolated
+  Node 22 scratch project. Its offline RPC starts without io_uring and reports
+  Agave 4.3.2. After loading the retained mainnet Subscriptions ELF, a finalized
+  account reply had context slot 5 but Clock slot 36; Velon's actual `capture`
+  rejected it as an invalid bank clock. Do not weaken that check. Upstream issue
+  https://github.com/solana-foundation/surfpool/issues/900 and unmerged PR
+  https://github.com/solana-foundation/surfpool/pull/908 describe this mismatch.
+  PR head `1a962ef411925be592793d741db869d3a2b88436` was not built or validated.
+  Simulation state/context agreement is separately tracked by upstream PR #945.
+- **Litestream 0.5.18**, Apache-2.0: downloaded the official Linux x86_64 release
+  and verified archive SHA256
+  `d3687b9fd0f2e9426bbd3da828429ff3f1dfc5c9b74d54fdf028e4ee510e7dea`.
+  **Executed** upstream issue #1580's standard-library crash reproducer, preserving
+  its scratch directory instead of auto-removing it. After 100 writer SIGKILLs,
+  all 35,854 acknowledged IDs were restored, but integrity checking reported
+  `row 1905 missing from index t_writer`. This version is rejected for evidence
+  replication; a clean ordinary restore would not disprove this crash failure.
+  No production database was used. https://github.com/benbjohnson/litestream/issues/1580
+- **Revoken**, `2501babe/revoken@23d40a2fecfbfcd362e401ddb8b328560cca71cc`,
+  MIT: `src/components/Main.vue::revoke` marks approval removed after
+  `confirmTransaction`, without finalized post-state verification. It is an
+  ordinary token-revoke reference, not a replacement for Velon's control pipeline.
+
+The official Subscriptions client's existing `test/setup.ts` and lifecycle tests
+remain the native journey reference. Reuse canonical clients and qualified test
+infrastructure; archive providers supply evidence, not authorization interpretation.
+
 ## Agave RPC client
 
 - Repository: https://github.com/anza-xyz/agave
