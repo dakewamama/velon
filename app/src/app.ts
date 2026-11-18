@@ -862,6 +862,7 @@ function delegate(grant: ObjectValue, named: (found: Delegate) => void, brief = 
     return line;
   }
   const key = text(actor.value);
+  const merchant = planNames.get(revokeKey(grant) ?? "");
   // The Subscriptions authority is named by the verified grant, not by the RPC.
   const subscriptions = subscriptionsAuthority(grant);
   const name = node("strong", subscriptions ? "Solana Subscriptions" : short(key));
@@ -876,9 +877,12 @@ function delegate(grant: ObjectValue, named: (found: Delegate) => void, brief = 
       .then((found) => {
         holders.set(key, found);
         // An address with no account says nothing more than its key, so the key stays.
-        if (found.kind !== "none") name.textContent = found.title;
-        detail.textContent =
-          brief && found.kind !== "none" ? short(key) : brief ? "" : `${found.detail} · ${short(key)}`;
+        // A delayed account lookup must not overwrite the merchant's explicitly unverified label.
+        if (!merchant) {
+          if (found.kind !== "none") name.textContent = found.title;
+          detail.textContent =
+            brief && found.kind !== "none" ? short(key) : brief ? "" : `${found.detail} · ${short(key)}`;
+        }
         named(found);
       })
       .catch(() => {});

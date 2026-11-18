@@ -79,6 +79,8 @@ import { appendFileSync } from "node:fs";
 appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + "\\n");
 const identity = { sdk_revision: "${revision}", runtime_version: "fixture" };
 if (process.argv[2] === "identity") console.log(JSON.stringify(identity));
+else if (process.argv[2] === "history-recent") console.log(JSON.stringify({ cluster: "${cluster}" }));
+else if (process.argv[2] === "history") console.log('{"events":[{"amount":"18446744073709551615","period_end_ts":9223372036854775807}],"transactions":[],"complete":false}');
 else if (process.argv[2] === "serve") {
   if (process.env.FAIL_SERVE === "1") process.exit(23);
   const server = Bun.serve({ port: Number(process.argv[3].split(":").at(-1)), hostname: "127.0.0.1", fetch: () => Response.json(identity) });
@@ -143,6 +145,14 @@ else if (process.argv[2] === "serve") {
       .split("\n")
       .map((line) => JSON.parse(line));
     expect(commands.map((args) => args[0])).toEqual(["identity", "serve"]);
+    const history = await fetch(`http://127.0.0.1:${port}/api/live/history`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Velon-Action": "observe" },
+      body: JSON.stringify({ delegation: "11111111111111111111111111111111" }),
+    });
+    expect(history.status).toBe(200);
+    expect(history.headers.get("Cache-Control")).toBe("no-store");
+    expect(await history.text()).toContain('"period_end_ts":9223372036854775807');
     child.kill("SIGINT");
     expect(await child.exited).toBe(0);
     child = launch();

@@ -557,9 +557,9 @@ if (process.env.RPC_URL) {
     }
     try {
       const body = object(await cached.read);
-      return Response.json(body, {
+      return new Response(writeJson(body), {
         status: body.error ? 404 : 200,
-        headers: { "Cache-Control": "no-store" },
+        headers: { "Cache-Control": "no-store", "Content-Type": "application/json" },
       });
     } catch {
       return Response.json({ error: "The delegation's history could not be read." }, { status: 502 });
