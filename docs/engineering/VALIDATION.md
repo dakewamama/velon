@@ -12,8 +12,9 @@ Clippy, Rust tests including native executable conformance, SDK and app TypeScri
 checks, unit/API tests, native journal backup/restore, browser tests and hosted
 export identity checks. `VELON_VALIDATION_PASS` appears only after all stages pass.
 The JSON result identifies the tested commit and hashes the runtime, frontend and
-lockfiles. Its runtime artifact is a **debug validation build**, not a production
-container release or public-chain action certification.
+lockfiles. Recovery, browser controls and hosted export use the optimized
+`--release` runtime, matching the production Dockerfile's Cargo profile. This does
+not certify the production container, bit-reproducible builds or public-chain actions.
 
 Hosted console exports embed their backend commit. The client checks the backend's
 revision and API contract before enabling controls, before review and after wallet

@@ -28,8 +28,8 @@ validation_stage=sdk-typescript
 validation_stage=app
 (cd app && bun run typecheck && bun run format:check && bun run test && bun run build)
 validation_stage=runtime-artifact
-(cd runtime && cargo build --locked -p catalyst-indexer --bin authorization-api)
-export AUTHZ_BIN="$CARGO_TARGET_DIR/debug/authorization-api"
+(cd runtime && cargo build --release --locked -p catalyst-indexer --bin authorization-api)
+export AUTHZ_BIN="$CARGO_TARGET_DIR/release/authorization-api"
 export CATALOGER_DIR="$PWD/runtime" CATALOGER_REVISION="$VELON_REVISION"
 validation_stage=recovery
 python3 -m unittest discover -s scripts -p 'test_*.py' -v
@@ -48,7 +48,7 @@ files += [pathlib.Path(os.environ['AUTHZ_BIN']), root/'runtime/Cargo.lock', root
 artifacts = {(str(path.relative_to(root)) if path.is_relative_to(root) else 'runtime/'+path.name):
              hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
 result = {'commit': revision, 'result': 'passed', 'rust': subprocess.check_output(['rustc', '--version'], text=True).strip(),
-          'runtime_profile': 'debug',
+          'runtime_profile': 'release',
           'arm_schema': '0.1', 'control_api': '1', 'database_migration': max(path.name.split('_')[0] for path in (root/'runtime/services/catalyst-indexer/migrations').glob('*.sql')),
           'artifacts': artifacts, 'public_chain_actions_tested': False}
 (root/'.validation').mkdir(exist_ok=True)
