@@ -45,6 +45,12 @@ root = pathlib.Path.cwd()
 revision = os.environ['VELON_REVISION']
 html = (root / 'app/site/index.html').read_text()
 assert f'name="velon-backend-revision" content="{revision}"' in html
+manifest = json.loads((root/'app/site/release.json').read_text())
+assert manifest['revision'] == revision and manifest['apiVersion'] == '1'
+for asset in manifest['assets']:
+    payload = (root/'app/site'/asset['name']).read_bytes()
+    assert len(payload) == asset['bytes']
+    assert hashlib.sha256(payload).hexdigest() == asset['sha256']
 files = [path for path in (root / 'app/site').iterdir() if path.suffix in ('.js', '.css', '.html')]
 files += [pathlib.Path(os.environ['AUTHZ_BIN']), root/'runtime/Cargo.lock', root/'sdk/Cargo.lock', root/'arm/Cargo.lock', root/'app/package-lock.json', root/'sdk/bun.lock']
 artifacts = {(str(path.relative_to(root)) if path.is_relative_to(root) else 'runtime/'+path.name):

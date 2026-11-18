@@ -1,6 +1,7 @@
 import { copyFile, mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { consoleCsp } from "./csp.ts";
+import { frontendManifest } from "./release-manifest.ts";
 
 // Recorded evidence remains the default. Hosted control forwards to an independently running runtime.
 const root = resolve(import.meta.dir, "..");
@@ -53,6 +54,7 @@ try {
   };
   const media = /["(]\.\/([\w.-]+\.(?:png|svg|webp|jpg|woff2))[")]/g;
   const images = new Set<string>();
+  let hostedRevision: string | undefined;
   // CONSOLE_ROOT=1 publishes only the console, at the root of its own host.
   const pages =
     process.env.CONSOLE_ROOT === "1"
@@ -74,6 +76,7 @@ try {
           .stdout.toString()
           .trim();
       if (!/^[a-f0-9]{40}$/.test(revision)) throw new Error("Hosted export requires a commit revision.");
+      hostedRevision = revision;
       html = html.replace("<head>", `<head><meta name="velon-backend-revision" content="${revision}">`);
       if (!html.includes(`name="velon-backend-revision"`))
         throw new Error("Hosted release pin was not embedded.");
@@ -151,6 +154,19 @@ module.exports = (request, response) => {
     ];
   }
   await Bun.write(`${out}/vercel.json`, `${JSON.stringify(hosting, null, 2)}\n`);
+  if (hostedRevision)
+    await Bun.write(
+      `${out}/release.json`,
+      JSON.stringify(
+        await frontendManifest(
+          out,
+          hostedRevision,
+          process.env.CONSOLE_ROOT === "1" ? "index.html" : "app.html",
+        ),
+        null,
+        2,
+      ) + "\n",
+    );
   console.log(`Exported ${Object.keys(data).length} recorded responses to ${out}`);
 } finally {
   server.kill("SIGINT");
