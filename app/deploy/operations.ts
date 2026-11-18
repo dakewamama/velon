@@ -4,11 +4,11 @@ export class Operations {
   private started = new Date().toISOString();
   private requests = new Map<
     string,
-    { count: number; failed: number; milliseconds: number; buckets: number[] }
+    { count: number; failed: number; bodyFailures: number; milliseconds: number; buckets: number[] }
   >();
   private provider = { requests: 0, errors: 0, rateLimited: 0, transportFailures: 0 };
 
-  request(group: string, status: number, milliseconds: number) {
+  request(group: string, status: number, milliseconds: number, bodyFailed = false) {
     const key = ["health", "operations", "rpc", "observe", "review", "revalidate", "verify", "read"].includes(
       group,
     )
@@ -17,11 +17,13 @@ export class Operations {
     const row = this.requests.get(key) ?? {
       count: 0,
       failed: 0,
+      bodyFailures: 0,
       milliseconds: 0,
       buckets: [0, 0, 0, 0, 0, 0],
     };
     row.count++;
-    row.failed += Number(status >= 400);
+    row.failed += Number(status >= 400 || bodyFailed);
+    row.bodyFailures += Number(bodyFailed);
     row.milliseconds += milliseconds;
     const bucket = [500, 1000, 5000, 15000, 45000].findIndex((limit) => milliseconds <= limit);
     row.buckets[bucket === -1 ? 5 : bucket]!++;
@@ -35,13 +37,14 @@ export class Operations {
     this.provider.transportFailures += Number(status === 0);
   }
 
-  snapshot() {
+  snapshot(inFlight = 0) {
     return {
       format: 1,
       revision: this.revision && /^[a-f0-9]{40}$/.test(this.revision) ? this.revision : null,
       observedAt: new Date().toISOString(),
       startedAt: this.started,
       scope: "gateway process since startup; counters reset on restart",
+      inFlight,
       latencyBucketUpperBoundsMs: [500, 1000, 5000, 15000, 45000, null],
       latencyBuckets: "non-cumulative counts",
       requests: Object.fromEntries(this.requests),
@@ -51,4 +54,50 @@ export class Operations {
       backup: "not_assessed",
     };
   }
+}
+
+// Keep permits and latency measurements until the body completes, fails or is cancelled.
+export function trackResponse(
+  response: Response,
+  finish: (bodyFailed: boolean) => void,
+  head = false,
+): Response {
+  let finished = false;
+  const done = (failed: boolean) => {
+    if (!finished) {
+      finished = true;
+      finish(failed);
+    }
+  };
+  if (!response.body || head) {
+    void response.body?.cancel().catch(() => {});
+    done(false);
+    return head ? new Response(null, response) : response;
+  }
+  const reader = response.body.getReader();
+  return new Response(
+    new ReadableStream({
+      async pull(controller) {
+        try {
+          const value = await reader.read();
+          if (value.done) {
+            controller.close();
+            done(false);
+          } else controller.enqueue(value.value);
+        } catch {
+          controller.error(new Error("Upstream response interrupted"));
+          done(true);
+        }
+      },
+      async cancel(reason) {
+        done(true);
+        try {
+          await reader.cancel(reason);
+        } catch {
+          /* The body is already marked failed. */
+        }
+      },
+    }),
+    response,
+  );
 }

@@ -18,6 +18,7 @@ class OperationsEvidence(unittest.TestCase):
     def test_rpc_throttling_cluster_disagreement_and_secrets_are_not_hidden(self):
         status = 429
         methods = []
+        cluster = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
@@ -26,7 +27,7 @@ class OperationsEvidence(unittest.TestCase):
                 self.send_response(status)
                 self.end_headers()
                 self.wfile.write(json.dumps({"jsonrpc": "2.0", "id": 1,
-                    "result": "expected-cluster" if method == "getGenesisHash" else 2**64 - 1}).encode())
+                    "result": cluster if method == "getGenesisHash" else 2**64 - 1}).encode())
 
             def log_message(self, *args):
                 pass
@@ -41,9 +42,13 @@ class OperationsEvidence(unittest.TestCase):
             methods.clear()
             self.assertEqual(rpc_status(url, "wrong-cluster")["state"], "cluster_mismatch")
             self.assertEqual(methods, ["getGenesisHash"])
-            result = rpc_status(url, "expected-cluster")
+            result = rpc_status(url, cluster)
             self.assertEqual(result["finalized_slot"], str(2**64 - 1))
             self.assertNotIn("private-key", json.dumps(result))
+            cluster = "https://provider.example/private-key"
+            invalid = rpc_status(url)
+            self.assertEqual(invalid["state"], "unavailable")
+            self.assertNotIn("private-key", json.dumps(invalid))
             self.assertEqual(gateway_status("https://external.example")["state"], "invalid_configuration")
             with patch.dict(os.environ, {"GATEWAY_TOKEN": ""}):
                 self.assertEqual(gateway_status("http://127.0.0.1:9")["state"], "operator_authentication_unconfigured")

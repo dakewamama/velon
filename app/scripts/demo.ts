@@ -31,6 +31,7 @@ import { SUBSCRIPTIONS_PROGRAM, tokenCatalog, tokenCatalogAsync } from "./catalo
 import { DELEGATOR_OFFSET, delegation, discoverDelegations, plan, type Delegation } from "./subscriptions.ts";
 import { planName } from "../src/plain.ts";
 import { rpcReader } from "./rpc-read.ts";
+import { rpcResponse } from "./rpc-response.ts";
 import type { Live } from "../src/server.ts";
 
 const root = resolve(import.meta.dir, "..");
@@ -936,8 +937,9 @@ if (process.env.RPC_URL) {
           body: JSON.stringify(checked),
           signal: AbortSignal.timeout(45000),
         });
-        return new Response(await response.text(), {
-          status: response.status,
+        const reply = rpcResponse(await response.text(), response.status, checked.id);
+        return new Response(reply.raw, {
+          status: reply.status,
           headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
         });
       } catch {

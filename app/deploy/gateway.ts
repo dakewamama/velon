@@ -1,8 +1,12 @@
 import { timingSafeEqual } from "node:crypto";
 import { infrastructureHealth } from "./health.ts";
-import { Operations } from "./operations.ts";
+import { Operations, trackResponse } from "./operations.ts";
+import { rpcResponse } from "../scripts/rpc-response.ts";
 const operations = new Operations(process.env.VELON_REVISION);
-setInterval(() => console.log("VELON_OPERATIONS=" + JSON.stringify(operations.snapshot())), 60000).unref();
+setInterval(
+  () => console.log("VELON_OPERATIONS=" + JSON.stringify(operations.snapshot(active))),
+  60000,
+).unref();
 // Public edge of the hosted console. Only the Vercel proxy holds the token that reaches this
 // port (a Daytona preview token, or GATEWAY_TOKEN on a host that serves the port publicly), so
 // X-Velon-Client is the visitor address that proxy observed.
@@ -137,23 +141,37 @@ Bun.serve({
                       : "other";
     const started = performance.now();
     let response: Response;
+    const admitted = active < 8;
+    if (admitted) active++;
     try {
-      response = await handle(request);
+      response = admitted
+        ? await handle(request)
+        : new Response("Demo busy; retry shortly", {
+            status: 429,
+            headers: { "Cache-Control": "no-store" },
+          });
     } catch {
       response = new Response("Demo unavailable", { status: 502 });
     }
-    const milliseconds = Math.round(performance.now() - started);
-    operations.request(group, response.status, milliseconds);
-    console.log(
-      JSON.stringify({
-        event: "request",
-        at: new Date().toISOString(),
-        group,
-        status: response.status,
-        milliseconds,
-      }),
+    return trackResponse(
+      response,
+      (bodyFailed) => {
+        if (admitted) active--;
+        const milliseconds = Math.round(performance.now() - started);
+        operations.request(group, response.status, milliseconds, bodyFailed);
+        console.log(
+          JSON.stringify({
+            event: "request",
+            at: new Date().toISOString(),
+            group,
+            status: response.status,
+            milliseconds,
+            bodyFailed,
+          }),
+        );
+      },
+      request.method === "HEAD",
     );
-    return response;
   },
 });
 
@@ -163,29 +181,22 @@ async function handle(request: Request): Promise<Response> {
   const browserOrigin = request.headers.get("Origin");
   if (browserOrigin && browserOrigin !== origin) return new Response("Origin refused", { status: 403 });
   const headers = new Headers({ "Cache-Control": "no-store" });
-  if (active >= 8) return new Response("Demo busy; retry shortly", { status: 429, headers });
   const client = visitor(request.headers.get("X-Velon-Client") || "unknown");
   if (url.pathname === "/healthz") {
     if (request.method !== "GET") return new Response("GET required", { status: 405, headers });
     if (!allow("read", "health")) return new Response("Too many probes", { status: 429, headers });
-    active++;
-    try {
-      return await health(headers);
-    } finally {
-      active--;
-    }
+    return health(headers);
   }
   if (!authorized(request)) return new Response("Unauthorized", { status: 401, headers });
   if (url.pathname === "/operations") {
     if (!token) return new Response("Operator authentication required", { status: 401, headers });
     if (request.method !== "GET") return new Response("GET required", { status: 405, headers });
     if (!allow("read", "operations")) return new Response("Too many probes", { status: 429, headers });
-    return Response.json(operations.snapshot(), { headers });
+    return Response.json(operations.snapshot(active), { headers });
   }
   const limited = kind(request.method, url.pathname, rpc);
   if (limited && !allow(limited, client))
     return new Response("Too many requests; retry in a minute", { status: 429, headers });
-  active++;
   try {
     const forward = new Headers();
     for (const key of ["Content-Type", "X-Velon-Action"]) {
@@ -229,31 +240,21 @@ async function handle(request: Request): Promise<Response> {
       headers: forward,
       body: forwarded,
       redirect: "error",
-      signal: AbortSignal.timeout(45000),
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(45000)]),
     });
     for (const key of ["Content-Type", "Allow"]) {
       const value = response.headers.get(key);
       if (value) headers.set(key, value);
     }
     if (rpc) {
-      const raw = await response.text();
-      let failed = false;
-      let limited = false;
-      try {
-        const error = JSON.parse(raw)?.error;
-        failed = error !== undefined;
-        limited = error?.code === 429;
-      } catch {
-        failed = true;
-      }
-      operations.rpc(response.status, failed, limited);
-      return new Response(raw, { status: response.status, headers });
+      const reply = rpcResponse(await response.text(), response.status, JSON.parse(forwarded!).id);
+      operations.rpc(response.status, reply.failed, reply.rateLimited);
+      headers.set("Content-Type", "application/json");
+      return new Response(reply.raw, { status: reply.status, headers });
     }
     return new Response(response.body, { status: response.status, headers });
   } catch {
     if (rpc) operations.rpc(0);
     return new Response("Demo unavailable", { status: 502, headers });
-  } finally {
-    active--;
   }
 }

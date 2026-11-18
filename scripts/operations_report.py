@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 import time
@@ -101,7 +102,10 @@ def journal_status(database):
 
 
 def rpc_status(url, expected_cluster=None):
-    parsed = urllib.parse.urlsplit(url)
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return {"state": "invalid_configuration"}
     if parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in ("127.0.0.1", "localhost")):
         return {"state": "invalid_configuration"}
     started = time.monotonic()
@@ -112,12 +116,18 @@ def rpc_status(url, expected_cluster=None):
                                          {"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=10) as response:
                 reply = json.load(response)
-            if reply.get("jsonrpc") != "2.0" or reply.get("id") != 1 or "error" in reply:
+            if not isinstance(reply, dict) or reply.get("jsonrpc") != "2.0" or reply.get("id") != 1 or "error" in reply:
                 raise ValueError("Invalid RPC result")
             return reply["result"]
         cluster = call("getGenesisHash", [])
-        if not isinstance(cluster, str) or not cluster:
+        if not isinstance(cluster, str) or not re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{32,44}", cluster):
             raise ValueError("Missing cluster")
+        alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+        decoded = 0
+        for char in cluster:
+            decoded = decoded * 58 + alphabet.index(char)
+        if (decoded.bit_length() + 7) // 8 + len(cluster) - len(cluster.lstrip("1")) != 32:
+            raise ValueError("Invalid genesis hash")
         if expected_cluster and cluster != expected_cluster:
             return {"state": "cluster_mismatch"}
         slot = call("getSlot", [{"commitment": "finalized"}])
@@ -133,7 +143,10 @@ def rpc_status(url, expected_cluster=None):
 
 
 def gateway_status(url):
-    parsed = urllib.parse.urlsplit(url)
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return {"state": "invalid_configuration"}
     if (parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost")
             or parsed.username or parsed.password or parsed.path not in ("", "/")
             or parsed.query or parsed.fragment):

@@ -22,9 +22,10 @@ upstream is configured and is not Solana's shared public endpoint. This does not
 prove an API key's quota, provider capacity or future availability. No key, URL
 credential or environment value was exported.
 
-The retained gateway log contained 57 completed requests, all HTTP 200, from
+The retained gateway log contained 57 response-header records, all HTTP 200, from
 November 15 to November 18, with recorded durations from 0 to 6620 ms. The old
-logger omits early rejections and health probes. This small retained sample does
+logger omits early rejections and health probes and logs before body completion.
+This small retained sample does
 not establish availability, observation latency, RPC success or an achieved SLO.
 
 The earlier production backup remains checksum-verified. Its old manifest has
@@ -98,6 +99,14 @@ the report's nonzero alert exit status to an operator alert destination before
 claiming active monitoring. Neither alert transport nor log retention is configured
 or certified by this change. The report always says `production_readiness:
 not_certified`; a zero exit only means its assessed checks had no alerts.
+
+Admission permits remain held until the response body finishes, fails or is
+cancelled. Completion latency includes the body; `bodyFailures` distinguishes
+interrupted transfers from their already-sent HTTP status. Eight unfinished bodies
+therefore occupy all eight permits. Failed RPC responses are replaced with a
+generic error and safe numeric code in both relays; successful response bytes remain
+lossless. Provider error messages and data never reach the browser. RPC probes
+validate genesis as a 32-byte base58 hash before reporting it.
 
 ## RPC pressure and browser memory
 
