@@ -1,5 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { infrastructureHealth } from "./health.ts";
+import { Operations } from "./operations.ts";
+const operations = new Operations();
+setInterval(() => console.log("VELON_OPERATIONS=" + JSON.stringify(operations.snapshot())), 60000).unref();
 // Public edge of the hosted console. Only the Vercel proxy holds the token that reaches this
 // port (a Daytona preview token, or GATEWAY_TOKEN on a host that serves the port publicly), so
 // X-Velon-Client is the visitor address that proxy observed.
@@ -94,15 +97,12 @@ function visitor(address: string): string {
     .join(":");
 }
 
-// One line per request: enough to see abuse, errors and latency without logging bodies or keys.
-function log(method: string, path: string, status: number, started: number, client: string) {
-  const id = new Bun.CryptoHasher("sha256").update(client).digest("hex").slice(0, 12);
-  console.log(`${new Date().toISOString()} ${method} ${path} ${status} ${Date.now() - started}ms ${id}`);
-}
-
 // Infrastructure probe only. RPC HTTP 200 may contain an error or another cluster.
+let lastProbe: { at: number; result: Promise<boolean> } | undefined;
 async function health(headers: Headers): Promise<Response> {
-  const ready = await infrastructureHealth(appUrl, rpcUrl);
+  if (!lastProbe || Date.now() - lastProbe.at >= 10000)
+    lastProbe = { at: Date.now(), result: infrastructureHealth(appUrl, rpcUrl) };
+  const ready = await lastProbe.result;
   return Response.json(
     { infrastructure: ready ? "ready" : "unavailable", evidence: "not_assessed" },
     { status: ready ? 200 : 503, headers },
@@ -116,85 +116,144 @@ Bun.serve({
   maxRequestBodySize: 4096,
   idleTimeout: 60,
   async fetch(request) {
-    const url = new URL(request.url);
-    const rpc = url.pathname === "/rpc" && !url.search;
-    const browserOrigin = request.headers.get("Origin");
-    if (browserOrigin && browserOrigin !== origin) return new Response("Origin refused", { status: 403 });
-    const headers = new Headers({ "Cache-Control": "no-store" });
-    if (active >= 8) return new Response("Demo busy; retry shortly", { status: 429, headers });
-    const client = visitor(request.headers.get("X-Velon-Client") || "unknown");
-    if (url.pathname === "/healthz") {
-      if (request.method !== "GET") return new Response("GET required", { status: 405, headers });
-      if (!allow("read", "health")) return new Response("Too many probes", { status: 429, headers });
-      active++;
-      try {
-        return await health(headers);
-      } finally {
-        active--;
-      }
-    }
-    if (!authorized(request)) return new Response("Unauthorized", { status: 401, headers });
-    const limited = kind(request.method, url.pathname, rpc);
-    if (limited && !allow(limited, client))
-      return new Response("Too many requests; retry in a minute", { status: 429, headers });
-    active++;
-    const started = Date.now();
+    const path = new URL(request.url).pathname;
+    const group =
+      path === "/healthz"
+        ? "health"
+        : path === "/operations"
+          ? "operations"
+          : path === "/rpc"
+            ? "rpc"
+            : path.endsWith("/revalidate")
+              ? "revalidate"
+              : path.endsWith("/verify")
+                ? "verify"
+                : /\/actions\/(revoke|cancel)\//.test(path)
+                  ? "review"
+                  : path === "/api/live/spl/observe"
+                    ? "observe"
+                    : request.method === "GET"
+                      ? "read"
+                      : "other";
+    const started = performance.now();
+    let response: Response;
     try {
-      const forward = new Headers();
-      for (const key of ["Content-Type", "X-Velon-Action"]) {
-        const value = request.headers.get(key);
-        if (value) forward.set(key, value);
-      }
-      const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text();
-      let forwarded = body;
-      if (rpc) {
-        if (request.method !== "POST") return new Response("POST required", { status: 405, headers });
-        let input;
-        try {
-          input = JSON.parse(body!);
-        } catch {
-          return new Response("Invalid JSON", { status: 400, headers });
-        }
-        // A browser cannot send this header cross-origin without a preflight that is never answered.
-        // Scripts can, so the method allowlist and the rate limits are what bound the relay.
-        if (request.headers.get("X-Velon-Action") !== "rpc")
-          return new Response("Action header required", { status: 403, headers });
-        if (!input || Array.isArray(input) || input.jsonrpc !== "2.0" || !methods.has(input.method))
-          return new Response("RPC method refused", { status: 403, headers });
-        // The console only asks who owns an account, never for its data.
-        if (input.method === "getAccountInfo" && input.params?.[1]?.dataSlice?.length !== 0)
-          return new Response("Account data refused", { status: 403, headers });
-        if (input.method === "sendTransaction" && !allow("send", client))
-          return new Response("Too many transactions; retry in a minute", { status: 429, headers });
-        forward.set("Content-Type", "application/json");
-        // The provider receives exactly the request that was checked, never the raw bytes, so a
-        // duplicated key cannot pass one method or params past the checks and send another.
-        forwarded = JSON.stringify({
-          jsonrpc: "2.0",
-          id: input.id ?? null,
-          method: input.method,
-          params: input.params,
-        });
-      }
-      const target = rpc ? rpcUrl : new URL(url.pathname + url.search, appUrl);
-      const response = await fetch(target, {
-        method: request.method,
-        headers: forward,
-        body: forwarded,
-        redirect: "error",
-        signal: AbortSignal.timeout(45000),
-      });
-      for (const key of ["Content-Type", "Allow"]) {
-        const value = response.headers.get(key);
-        if (value) headers.set(key, value);
-      }
-      log(request.method, url.pathname, response.status, started, client);
-      return new Response(response.body, { status: response.status, headers });
+      response = await handle(request);
     } catch {
-      log(request.method, url.pathname, 502, started, client);
-      return new Response("Demo unavailable", { status: 502, headers });
+      response = new Response("Demo unavailable", { status: 502 });
+    }
+    const milliseconds = Math.round(performance.now() - started);
+    operations.request(group, response.status, milliseconds);
+    console.log(
+      JSON.stringify({
+        event: "request",
+        at: new Date().toISOString(),
+        group,
+        status: response.status,
+        milliseconds,
+      }),
+    );
+    return response;
+  },
+});
+
+async function handle(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  const rpc = url.pathname === "/rpc" && !url.search;
+  const browserOrigin = request.headers.get("Origin");
+  if (browserOrigin && browserOrigin !== origin) return new Response("Origin refused", { status: 403 });
+  const headers = new Headers({ "Cache-Control": "no-store" });
+  if (active >= 8) return new Response("Demo busy; retry shortly", { status: 429, headers });
+  const client = visitor(request.headers.get("X-Velon-Client") || "unknown");
+  if (url.pathname === "/healthz") {
+    if (request.method !== "GET") return new Response("GET required", { status: 405, headers });
+    if (!allow("read", "health")) return new Response("Too many probes", { status: 429, headers });
+    active++;
+    try {
+      return await health(headers);
     } finally {
       active--;
     }
-  },
-});
+  }
+  if (!authorized(request)) return new Response("Unauthorized", { status: 401, headers });
+  if (url.pathname === "/operations") {
+    if (!token) return new Response("Operator authentication required", { status: 401, headers });
+    if (request.method !== "GET") return new Response("GET required", { status: 405, headers });
+    if (!allow("read", "operations")) return new Response("Too many probes", { status: 429, headers });
+    return Response.json(operations.snapshot(), { headers });
+  }
+  const limited = kind(request.method, url.pathname, rpc);
+  if (limited && !allow(limited, client))
+    return new Response("Too many requests; retry in a minute", { status: 429, headers });
+  active++;
+  try {
+    const forward = new Headers();
+    for (const key of ["Content-Type", "X-Velon-Action"]) {
+      const value = request.headers.get(key);
+      if (value) forward.set(key, value);
+    }
+    const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text();
+    let forwarded = body;
+    if (rpc) {
+      if (request.method !== "POST") return new Response("POST required", { status: 405, headers });
+      let input;
+      try {
+        input = JSON.parse(body!);
+      } catch {
+        return new Response("Invalid JSON", { status: 400, headers });
+      }
+      // A browser cannot send this header cross-origin without a preflight that is never answered.
+      // Scripts can, so the method allowlist and the rate limits are what bound the relay.
+      if (request.headers.get("X-Velon-Action") !== "rpc")
+        return new Response("Action header required", { status: 403, headers });
+      if (!input || Array.isArray(input) || input.jsonrpc !== "2.0" || !methods.has(input.method))
+        return new Response("RPC method refused", { status: 403, headers });
+      // The console only asks who owns an account, never for its data.
+      if (input.method === "getAccountInfo" && input.params?.[1]?.dataSlice?.length !== 0)
+        return new Response("Account data refused", { status: 403, headers });
+      if (input.method === "sendTransaction" && !allow("send", client))
+        return new Response("Too many transactions; retry in a minute", { status: 429, headers });
+      forward.set("Content-Type", "application/json");
+      // The provider receives exactly the request that was checked, never the raw bytes, so a
+      // duplicated key cannot pass one method or params past the checks and send another.
+      forwarded = JSON.stringify({
+        jsonrpc: "2.0",
+        id: input.id ?? null,
+        method: input.method,
+        params: input.params,
+      });
+    }
+    const target = rpc ? rpcUrl : new URL(url.pathname + url.search, appUrl);
+    const response = await fetch(target, {
+      method: request.method,
+      headers: forward,
+      body: forwarded,
+      redirect: "error",
+      signal: AbortSignal.timeout(45000),
+    });
+    for (const key of ["Content-Type", "Allow"]) {
+      const value = response.headers.get(key);
+      if (value) headers.set(key, value);
+    }
+    if (rpc) {
+      const raw = await response.text();
+      let failed = false;
+      let limited = false;
+      try {
+        const error = JSON.parse(raw)?.error;
+        failed = error !== undefined;
+        limited = error?.code === 429;
+      } catch {
+        failed = true;
+      }
+      operations.rpc(response.status, failed, limited);
+      return new Response(raw, { status: response.status, headers });
+    }
+    return new Response(response.body, { status: response.status, headers });
+  } catch {
+    if (rpc) operations.rpc(0);
+    return new Response("Demo unavailable", { status: 502, headers });
+  } finally {
+    active--;
+  }
+}

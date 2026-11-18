@@ -1,6 +1,7 @@
 """Coherent SQLite backup and non-overwriting restore. No service credentials needed."""
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -49,6 +50,7 @@ def backup(source, destination):
     migrations = check(database)
     manifest = {
         "format": 1,
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "sha256": digest(database),
         "bytes": database.stat().st_size,
         "migrations": migrations,

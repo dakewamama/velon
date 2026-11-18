@@ -30,6 +30,7 @@ import {
 import { SUBSCRIPTIONS_PROGRAM, tokenCatalog, tokenCatalogAsync } from "./catalog.ts";
 import { DELEGATOR_OFFSET, delegation, discoverDelegations, plan, type Delegation } from "./subscriptions.ts";
 import { planName } from "../src/plain.ts";
+import { rpcReader } from "./rpc-read.ts";
 import type { Live } from "../src/server.ts";
 
 const root = resolve(import.meta.dir, "..");
@@ -120,17 +121,7 @@ const scenarios = definitions.map(({ name, files }) => {
   return { name, scope: text(latest.scope_id), live: false, snapshots, examples };
 });
 
-async function rpc(method: string, params: Json[] = []): Promise<Json> {
-  const response = await fetch(process.env.RPC_URL!, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-    signal: AbortSignal.timeout(15000),
-  });
-  const reply = object(readJson(await response.text()));
-  if (reply.result === undefined) throw new Error(`RPC ${method} failed.`);
-  return reply.result;
-}
+const rpc = rpcReader(process.env.RPC_URL ?? "");
 
 async function run(args: string[], timeoutMs?: number): Promise<string> {
   const child = Bun.spawn(args, { cwd: cataloger, env, stdout: "pipe", stderr: "inherit" });
