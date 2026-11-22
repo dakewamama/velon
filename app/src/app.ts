@@ -310,9 +310,69 @@ function glossary(): HTMLElement {
 // The specialist's view of one permission. Addresses are built with the card so full keys stay
 // searchable; the raw evidence is built when the panel first opens. In a wallet's list the plain
 // facts come first and this record folds beneath them.
-function technical(grant: ObjectValue, availability: string, rating: Status, list = false): HTMLElement {
+function technical(
+  grant: ObjectValue,
+  availability: string,
+  rating: Status,
+  list = false,
+  view?: ObjectValue,
+): HTMLElement {
   const panel = node("section", "", "detail technical");
   panel.hidden = true;
+  const subscription =
+    object(grant.native_context).protocol === "subscriptions" &&
+    object(grant.authority_kind).kind === "derived";
+  if (subscription) {
+    panel.classList.add("subscription-details");
+    const overview = node("section", "", "permission-overview");
+    const merchant = planNames.get(revokeKey(grant) ?? "");
+    overview.append(
+      node("h4", availability === HISTORICAL ? "Permission at this observation" : "Current permission"),
+      node("p", merchant ? `Plan name: ${merchant}` : "Merchant identity unknown", "plan-name"),
+      node(
+        "p",
+        "Merchant identity is not verified. A plan name or wallet address is not a verified business.",
+        "muted",
+      ),
+      plainFacts(grant),
+    );
+    if (object(grant.principal).kind !== "identity")
+      overview.append(
+        node(
+          "p",
+          "These principals share one permission and one allowance. The budget is not duplicated for each signer.",
+          "notice",
+        ),
+      );
+    const control = node("section", "", "subscription-control");
+    control.append(
+      node("h4", "Cancellation and access"),
+      node(
+        "p",
+        paymentApproval(grant)
+          ? "Removing this payment approval closes this delegation. The token approval held by Solana Subscriptions stays in place. Review the available action before signing."
+          : "For a subscription, cancellation stops charging after the paid period; it is not an immediate revocation. Review the end date before signing. The token approval held by Solana Subscriptions stays in place.",
+        "muted",
+      ),
+    );
+    const record = node("details", "", "record");
+    record.append(node("summary", "Verification evidence"), technicalFacts(grant, availability, rating));
+    if (view) {
+      const observation = object(view.observation);
+      const native = object(grant.native_context);
+      const context = node("dl", "", "facts");
+      context.append(
+        field("Observation source", text(observation.origin)),
+        field("Observed slot", String(integer(observation.slot))),
+        field("State reference", text(view.state_version)),
+        field("Program deployment", text(native.deployment)),
+        field("Executable version", text(native.program_version)),
+      );
+      record.append(context);
+    }
+    panel.append(overview, control, record);
+    return panel;
+  }
   if (list) {
     const record = node("details", "", "record");
     record.append(node("summary", "Technical record"), technicalFacts(grant, availability, rating));
@@ -367,6 +427,13 @@ function plainFacts(grant: ObjectValue): HTMLElement {
       : address("Applies to", source, "account"),
   );
   if (mint && mint !== source) facts.append(address("Token", mint));
+  if (object(grant.native_context).protocol === "subscriptions")
+    facts.append(
+      field(
+        "Underlying token approval",
+        "Held by Solana Subscriptions; shared by permissions drawing from this token account.",
+      ),
+    );
   return facts;
 }
 
@@ -418,7 +485,13 @@ function evidence(grant: ObjectValue): HTMLElement[] {
     field("Usage", text(object(grant.usage).kind)),
   );
   const parts: HTMLElement[] = [facts];
-  if (object(grant.principal).kind !== "identity")
+  if (
+    object(grant.principal).kind !== "identity" &&
+    !(
+      object(grant.native_context).protocol === "subscriptions" &&
+      object(grant.authority_kind).kind === "derived"
+    )
+  )
     parts.push(
       node(
         "p",
@@ -597,12 +670,12 @@ function card(
   if (merchant && object(grant.authority_kind).kind === "derived") {
     const line = row.querySelector(".delegate");
     line?.querySelector("strong")?.replaceChildren(merchant);
-    line?.querySelector(".muted")?.replaceChildren("Plan name set by the merchant");
+    line?.querySelector(".muted")?.replaceChildren("Plan name set by the merchant · identity unverified");
     line?.setAttribute("title", `${merchant}: plan name set by the merchant, not verified`);
   }
   if (list) row.append(node("span", allowanceCell(grant, known.token), "row-amount"));
   const actions = node("div", "", "permission-actions");
-  const panel = technical(grant, availability, rating, list);
+  const panel = technical(grant, availability, rating, list, view);
   panel.id = `${title.id}-details`;
   if (list) panel.prepend(said);
   // Address history is separate from the current permission's incarnation.
@@ -614,7 +687,15 @@ function card(
     delegation
   )
     charges(row, panel, delegation);
-  const button = node("button", list ? "Details" : "Technical details", "link-button");
+  const button = node(
+    "button",
+    list ||
+      (object(grant.native_context).protocol === "subscriptions" &&
+        object(grant.authority_kind).kind === "derived")
+      ? "Details"
+      : "Technical details",
+    "link-button",
+  );
   button.type = "button";
   button.setAttribute("aria-expanded", "false");
   button.setAttribute("aria-controls", panel.id);
@@ -769,59 +850,144 @@ const day = (seconds: Json | undefined) =>
 
 // The last charge goes on the row; every charge and change, with its transaction, goes under Details.
 function charges(row: HTMLElement, panel: HTMLElement, delegation: string) {
+  const preview = node("span", "", "payment-preview");
   const line = node("span", "Reading past charges…", "last-charge");
-  (row.querySelector(".row-amount") ?? row.querySelector(".delegate") ?? row).append(line);
+  const coverage = node("span", "History incomplete · permission link unresolved", "history-coverage");
+  const openHistory = node("button", "View payment history", "history-link link-button");
+  openHistory.type = "button";
+  preview.append(line, coverage, openHistory);
+  row.append(preview);
+  const section = node("section", "", "charges");
+  section.append(node("h4", "Payments and activity"), node("p", "Reading retained transactions…", "muted"));
+  const next = panel.querySelector(".subscription-control, .record");
+  if (next) next.before(section);
+  else panel.append(section);
+  openHistory.onclick = () => {
+    const toggle = row.querySelector<HTMLButtonElement>(".permission-actions [aria-expanded]");
+    if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
+    section.tabIndex = -1;
+    section.focus({ preventScroll: true });
+    section.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  };
   void oneOf(async () => {
     const response = await call("/api/live/history", {
       method: "POST",
       headers: { "X-Velon-Action": "observe", "Content-Type": "application/json" },
       body: JSON.stringify({ delegation }),
     });
-    if (response.status === 404) return undefined;
     if (!response.ok) throw new Error("History unavailable");
     return object(readJson(await response.text()));
   })
     .then((body) => {
-      if (!body) return line.remove();
       const events = array(body.events).map(object);
       const pulls = events.filter((entry) => entry.kind === "pull");
-      const last = pulls[0];
-      line.textContent = last
-        ? `Address activity on ${day(last.time)}`
+      const found = pulls[0];
+      line.textContent = found
+        ? `Address activity on ${day(found.time)}`
         : "No charges found in available history";
-      const section = node("section", "", "charges");
-      section.append(node("h4", "Address activity"));
+      if (body.collectionError)
+        coverage.textContent = "Refresh unavailable · showing incomplete retained history";
+      section.replaceChildren(
+        node("h4", "Payments and activity"),
+        node(
+          "p",
+          "These transactions involve this address. They have not been linked to the current permission.",
+          "history-notice",
+        ),
+      );
       const list = node("ol");
       for (const entry of events) {
-        const item = node("li");
-        const said =
-          entry.kind === "pull"
-            ? `Reported transfer of ${text(entry.amount)} base units of ${short(text(entry.mint))}, paid to ${short(text(entry.receiver))}${entry.puller ? `, by ${short(text(entry.puller))}` : "; initiator unknown"}`
-            : entry.kind === "created"
-              ? "Subscribed"
-              : entry.kind === "cancelled"
-                ? `Cancelled; it ends on ${day(entry.expiresAt)}`
-                : entry.kind === "resumed"
-                  ? "Resumed"
-                  : "Uninterpreted activity";
-        const open = node("a", "Transaction", "link-button");
+        const item = node("li", "", "activity-entry");
+        const head = node("div", "", "activity-heading");
+        const pull = entry.kind === "pull";
+        let title =
+          entry.kind === "created"
+            ? "Subscription created"
+            : entry.kind === "cancelled"
+              ? "Cancellation recorded"
+              : entry.kind === "resumed"
+                ? "Resumption recorded"
+                : "Uninterpreted activity";
+        if (pull) {
+          const mint = text(entry.mint);
+          const known = TOKENS[mint];
+          const value = amountOf(entry.amount);
+          title = known ? `${decimal(value, known.decimals)} ${known.symbol}` : `${value} base units`;
+        }
+        head.append(node("strong", title, "activity-amount"), node("span", day(entry.time), "charge-date"));
+        const facts = node("dl", "", "activity-facts");
+        if (pull) {
+          facts.append(
+            address("Token mint", text(entry.mint)),
+            entry.receiver
+              ? address("Received by", text(entry.receiver), "receiver")
+              : field("Received by", "Unknown"),
+            entry.puller
+              ? address("Initiated by (puller)", text(entry.puller), "puller")
+              : field("Initiated by (puller)", "initiator unknown"),
+            entry.receiverTokenAccount
+              ? address("Receiver token account", text(entry.receiverTokenAccount))
+              : field("Receiver token account", "Not present in the available event"),
+          );
+        } else if (entry.kind === "cancelled") facts.append(field("Recorded end date", day(entry.expiresAt)));
+        const proof = node("details", "", "activity-proof");
+        const proofFacts = node("dl");
+        proofFacts.append(
+          field("Transaction signature", text(entry.signature)),
+          field(
+            "Finality",
+            entry.finality === "finalized_rpc"
+              ? "Finalized transaction evidence retained"
+              : "Not established in the available event",
+          ),
+          field("Permission attribution", "Unresolved; not proof of a charge under the current permission"),
+        );
+        if (pull) proofFacts.append(field("Exact amount", `${text(entry.amount)} base units`));
+        if (entry.slot != null) proofFacts.append(field("Slot", String(amountOf(entry.slot))));
+        if (entry.transaction_index != null)
+          proofFacts.append(field("Transaction position", String(integer(entry.transaction_index))));
+        if (entry.outer != null)
+          proofFacts.append(
+            field(
+              "Instruction position",
+              `${integer(entry.outer)}${entry.inner == null ? "" : ` / inner ${integer(entry.inner)}`}`,
+            ),
+          );
+        proof.append(node("summary", "Transaction evidence"), proofFacts);
+        const open = node("a", "View transaction", "link-button");
         open.href = explorer("tx", text(entry.signature));
         open.target = "_blank";
         open.rel = "noreferrer";
-        item.append(node("span", day(entry.time), "charge-date"), node("span", said), open);
+        item.append(
+          head,
+          node(
+            "p",
+            pull ? "Reported payment · merchant identity unknown" : "Reported lifecycle event",
+            "muted",
+          ),
+          facts,
+          open,
+          proof,
+        );
         list.append(item);
       }
       section.append(
-        events.length ? list : node("p", "No activity found in the available transactions.", "muted"),
+        events.length
+          ? list
+          : node(
+              "p",
+              "No activity found in the available transactions. This does not establish that no payments occurred.",
+              "muted",
+            ),
         node(
           "p",
-          "Up to 25 retained finalized transactions. Older or unavailable activity may be missing. This address may have been reused; these events have not been linked to the current permission. Historical program versions are unverified.",
+          "Up to 25 retained finalized transactions. Older or unavailable activity may be missing. This address may have been reused; these events have not been linked to the current permission. Historical program versions are unverified. Events in the same slot may not be shown in execution order.",
           "muted",
         ),
       );
       if (body.collectionError)
         section.append(
-          node("p", "Recent activity could not be refreshed. Showing retained evidence.", "muted"),
+          node("p", "Recent activity could not be refreshed. Showing retained evidence.", "history-notice"),
         );
       const evidence = node("details");
       evidence.append(node("summary", "Historical transaction evidence"), node("pre", writeJson(body, 2)));
@@ -838,13 +1004,18 @@ function charges(row: HTMLElement, panel: HTMLElement, delegation: string) {
         evidence.append(link);
       }
       section.append(evidence);
-      // The history reads before the folded technical record, which stays last.
-      const record = panel.querySelector(".record");
-      if (record) record.before(section);
-      else panel.append(section);
     })
     .catch(() => {
-      line.textContent = "Velon couldn't read past charges.";
+      line.textContent = "Payment history unavailable";
+      coverage.textContent = "Past payments and their recipients could not be checked";
+      section.replaceChildren(
+        node("h4", "Payments and activity"),
+        node(
+          "p",
+          "Payment history is unavailable. This does not establish that no payments occurred. Try checking this wallet again.",
+          "history-notice",
+        ),
+      );
     });
 }
 
@@ -1525,12 +1696,9 @@ async function holdingsPanel(
     shown.map((entry) => text(entry.mint)),
     signal,
   ).catch(() => undefined);
-  // Native SOL cannot be delegated; only the wallet's own key moves it.
-  const own = node(
-    "span",
-    yours ? "Only you can move it" : "Only the owner can move it",
-    "holding-status ok",
-  );
+  // A balance read does not establish how an address is controlled. Program-owned
+  // accounts and other native authorities are outside this token permission view.
+  const own = node("span", "SOL spending permissions not checked", "holding-status");
   list.append(row(tokenLogo(WSOL), "SOL", "Native balance", units(BigInt(text(wallet.lamports)), 9), own));
   for (const entry of shown) {
     const mint = text(entry.mint);
@@ -2095,7 +2263,7 @@ async function scanWallet(
         : [
             node(
               "p",
-              "Token approvals and Solana Subscriptions were checked. Other kinds of permission aren't read yet.",
+              "No supported permissions were found in this check. Other kinds of permission aren't read yet, so this isn't an all-clear.",
               "muted",
             ),
           ]),
@@ -2336,6 +2504,10 @@ type Receipt = {
   at: string;
   kind?: ActionKind;
   tokenAccountRevoke?: boolean;
+  endsAt?: string;
+  planLabel?: string;
+  mint?: string;
+  permissionId?: string;
 };
 const receipts = document.querySelector<HTMLElement>("#receipts")!;
 const kept = (): Receipt[] => {
@@ -2360,7 +2532,14 @@ document.querySelector<HTMLButtonElement>("#receipts-tab")!.onclick = () => {
   for (const tab of document.querySelectorAll(".tabs button")) tab.classList.remove("selected");
   document.querySelector("#receipts-tab")!.classList.add("selected");
   const list = kept();
-  receipts.replaceChildren(node("h2", "Your receipts"));
+  receipts.replaceChildren(
+    node("h2", "Your receipts"),
+    node(
+      "p",
+      "Saved references from this browser. Replay a receipt to check its retained server evidence. Browser storage is not proof and may be cleared.",
+      "receipt-intro",
+    ),
+  );
   if (!list.length)
     receipts.append(
       node(
@@ -2378,7 +2557,15 @@ document.querySelector<HTMLButtonElement>("#receipts-tab")!.onclick = () => {
       field("Transaction", receipt.signature),
       field("Receipt ID", receipt.id),
     );
+    if (receipt.permissionId) facts.append(field("Permission reference", receipt.permissionId));
     if (receipt.tokenAccountRevoke) facts.append(field("What this proves", TOKEN_ACCOUNT_REVOKE_PROOF));
+    if (receipt.kind === "cancel")
+      facts.append(
+        field(
+          "Saved charging end date",
+          receipt.endsAt ?? "Not saved in this older receipt. Replay and inspect the retained evidence.",
+        ),
+      );
     const replay = node("button", "Replay proof", "action-button");
     const outcome = node("span", "", "muted");
     replay.onclick = async () => {
@@ -2412,6 +2599,17 @@ document.querySelector<HTMLButtonElement>("#receipts-tab")!.onclick = () => {
     const actions = node("div", "", "permission-actions");
     actions.append(replay, outcome);
     row.append(
+      node("span", "Saved verification reference", "receipt-status"),
+      ...(receipt.planLabel
+        ? [
+            node(
+              "p",
+              `Plan label when checked: ${receipt.planLabel} · merchant identity unverified`,
+              "plan-name",
+            ),
+          ]
+        : []),
+      ...(receipt.mint ? [tokenChip(receipt.mint, `receipt-token-${receipt.id}`)] : []),
       node(
         "h3",
         `${receipt.kind === "cancel" ? "Subscription cancelled" : receipt.tokenAccountRevoke ? "Token account approval cleared" : "Access removed"} on ${{ mainnet: "mainnet", devnet: "devnet" }[receipt.network] ?? "the test chain"}`,
@@ -2676,7 +2874,12 @@ async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "
     const stateVersion = text(view.state_version);
     const path = `snapshots/${stateVersion}/actions/${kind}/${key}/verify`;
     const prepared = reviewAction(simulated, view, grant, session.account.address, config, kind);
-    const endsAt = prepared.endsAt === undefined ? undefined : when(prepared.endsAt);
+    const endsAt =
+      prepared.endsAt === undefined
+        ? undefined
+        : (when(prepared.endsAt) ?? `Unix timestamp ${prepared.endsAt}`);
+    if (cancelling && endsAt === undefined)
+      throw new Error("The cancellation end date is unavailable. Nothing was signed.");
     setAction("SIMULATED", "Review what your wallet will sign.");
     const title = node("h2", cancelling ? "You are cancelling" : "You are removing");
     title.tabIndex = -1;
@@ -2716,7 +2919,7 @@ async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "
       field(
         "What changes",
         cancelling
-          ? `It can still charge until ${endsAt}, the end of the period already paid for. After that it can't charge again, and you can remove it here to get its SOL deposit back. Nothing else changes.`
+          ? `It can still charge until ${endsAt}, the end of the period already paid for. After that it can't charge again. The token approval held by Solana Subscriptions stays in place. Removing the ended delegation later returns its SOL deposit to whoever paid for it.`
           : subscription && paymentApproval(grant)
             ? `The payment approval is closed, so ${who(grant, known, true)} can't take any more, and its SOL deposit goes back to whoever paid for it. The approval Solana Subscriptions holds on this account stays.`
             : subscription
@@ -2835,7 +3038,7 @@ async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "
               landed = true;
               setAction(
                 "FINALIZING",
-                `${sent.status === "unknown" ? `Velon didn't get a clear answer after sending, but the network reports that the ${cancelling ? "cancellation" : "removal"} landed. ` : ""}${cancelling ? `Cancelled. It stops charging after ${endsAt}. The cancellation` : subscription ? "Access removed. The removal" : "The token account revoke"} is confirmed on ${network().label.toLowerCase()} at slot ${status.slot}. Velon is waiting for it to be final to verify it and issue the receipt.`,
+                `${sent.status === "unknown" ? "Velon didn't get a clear answer after sending. " : ""}${cancelling ? "The cancellation" : subscription ? "The removal transaction" : "The token account revoke"} is confirmed on ${network().label.toLowerCase()} at slot ${status.slot}. This is not finalized proof. Velon is waiting for it to be final to verify the result and issue the receipt.`,
               );
               actionResult.append(link("Transaction", sent.signature));
             }
@@ -2885,13 +3088,16 @@ async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "
             source: key,
             network: config.network,
             at: new Date().toISOString(),
-            ...(cancelling ? { kind } : {}),
+            permissionId: text(grant.id),
+            mint: assetMint(grant),
+            planLabel: planNames.get(key),
+            ...(cancelling ? { kind, endsAt } : {}),
             ...(!subscription ? { tokenAccountRevoke: true } : {}),
           });
           setAction(
             "VERIFIED",
             cancelling
-              ? `Velon read the chain again once it was final: the subscription stops charging after ${endsAt}. Remove it here after that to get its SOL deposit back.`
+              ? `Velon read the chain again once it was final: the subscription stops charging after ${endsAt}. The program-held token approval stays. After the paid period ends, removing the delegation returns its SOL deposit to whoever paid for it.`
               : subscription
                 ? `Velon read the chain again once it was final: the access is gone on ${network().label.toLowerCase()}.`
                 : TOKEN_ACCOUNT_REVOKE_PROOF,
@@ -2901,6 +3107,11 @@ async function prepare(scanned: ObjectValue, scope: string, kind: ActionKind = "
             field("Final at slot", String(checked.slot)),
             field("Receipt ID", checked.id),
           );
+          const proof = node("a", "View verification evidence", "link-button");
+          proof.href = `/api/verifications/revoke/${checked.id}`;
+          proof.target = "_blank";
+          proof.rel = "noreferrer";
+          actionResult.append(proof);
           if (!(await reload().catch(() => false)))
             actionResult.append(
               node(
@@ -3036,7 +3247,7 @@ function lesson() {
     panel.append(
       node(
         "p",
-        `Every token approval and subscription on a ${network().label.toLowerCase()} wallet: who holds it, how much it allows, what it has charged. Nothing to sign.`,
+        `Check supported token approvals and subscriptions on ${network().label}: who can use them, their limits, and available payment history. No signature needed to check.`,
         "start-lead",
       ),
     );
