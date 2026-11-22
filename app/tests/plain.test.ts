@@ -446,7 +446,7 @@ const quiet = {
 };
 
 test("next steps are actions, at most three", () => {
-  expect(nextSteps(quiet)).toEqual(["Nothing to remove."]);
+  expect(nextSteps(quiet)).toEqual(["No supported permissions to remove in this check."]);
   const exposed = { ...quiet, total: 5, removable: 4, unlimitedRemovable: 3, reported: 1 };
   // What can only be shown is counted in the summary; it isn't a step.
   expect(nextSteps(exposed)).toEqual([
