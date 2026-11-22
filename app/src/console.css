@@ -889,6 +889,10 @@ details.approval-group[open] > summary {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.delegate.merchant-label .muted {
+  overflow: visible;
+  white-space: normal;
+}
 .row-amount {
   grid-column: 3;
   grid-row: 1;
