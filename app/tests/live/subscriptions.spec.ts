@@ -125,14 +125,22 @@ test("an active devnet subscription has a charge and the console cancels it with
   await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
   const card = page.locator(`#results .permission[data-source="${fixture.source}"][data-cancellable]`);
   await expect(card).toHaveCount(1, { timeout: 60000 });
-  await expect(card.getByText("Plan name set by the merchant", { exact: true })).toBeVisible();
+  await expect(
+    card.getByText("Plan name set by the merchant · identity unverified", { exact: true }),
+  ).toBeVisible();
   await expect(card.locator(`[title*="${fixture.planName}"]`)).toHaveAttribute("title", /not verified/);
   await card.getByRole("button", { name: "Details", exact: true }).click();
-  await expect(card.locator(".charges")).toContainText("Reported transfer of 40 base units", {
+  await expect(card.locator(".charges")).toContainText("40 base units", {
     timeout: 60000,
   });
   await expect(card.locator(".charges")).toContainText(
     "these events have not been linked to the current permission",
+  );
+  await expect(card.locator(".charges .field").filter({ hasText: "Initiated by (puller)" })).toContainText(
+    fixture.merchant,
+  );
+  await expect(card.locator(".charges .field").filter({ hasText: "Received by" })).toContainText(
+    fixture.merchant,
   );
   const history = await request.post("/api/live/history", {
     headers: { "X-Velon-Action": "observe" },
@@ -154,7 +162,7 @@ test("an active devnet subscription has a charge and the console cancels it with
   });
   await expect(
     card.locator(`.charges a[href="https://explorer.solana.com/tx/${chargeSignature}?cluster=devnet"]`),
-  ).toHaveText("Transaction");
+  ).toHaveText("View transaction");
   await card.getByText("Historical transaction evidence", { exact: true }).click();
   await expect(
     card.locator(`.charges a[href="/api/activity/transactions/${DEVNET_GENESIS}/${chargeSignature}"]`),
