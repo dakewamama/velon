@@ -495,6 +495,6 @@ export function nextSteps(state: WalletState): string[] {
     steps.push(
       `Cancel any subscription you don't want. ${many(state.running, "It stops", "Each stops")} charging when the period already paid for ends.`,
     );
-  if (!state.total && !state.unread) steps.push("Nothing to remove.");
+  if (!state.total && !state.unread) steps.push("No supported permissions to remove in this check.");
   return steps.slice(0, 3);
 }
