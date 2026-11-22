@@ -430,6 +430,31 @@ async function connectAndReview(page: Page) {
   await page.getByRole("button", { name: "Remove access", exact: true }).click();
 }
 
+test("an empty wallet check keeps coverage limits visible and does not certify SOL authority", async ({
+  page,
+}) => {
+  await browserProvider(page);
+  await page.route("**/api/live/wallet", (route) =>
+    route.fulfill({ json: { kind: "wallet", lamports: "0", tokens: [], omitted: 0, skipped: 0 } }),
+  );
+  await page.route("**/api/live/spl/owned", (route) =>
+    route.fulfill({ json: { accounts: [], skipped: 0, subscriptionsUnread: false } }),
+  );
+  await page.goto("/app");
+  await expect(page.locator(".start-lead")).toContainText("Check supported token approvals");
+  await expect(page.locator(".start-lead")).not.toContainText("Every token approval");
+  await page.locator("#lookup-address").fill(fixture.signing.source);
+  await page.locator("#lookup button").click();
+  await expect(page.locator(".wallet-summary")).toContainText("this isn't an all-clear");
+  await expect(page.locator(".wallet-summary")).toContainText(
+    "No supported permissions to remove in this check.",
+  );
+  await expect(page.locator(".holdings")).toContainText("SOL spending permissions not checked");
+  await expect(page.locator(".holdings")).not.toContainText("Only the owner can move it");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(4, 17, 13)");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
 test("wallet signs exact revoke and success waits for finalized verification and scope reload", async ({
   page,
 }, info) => {
@@ -709,7 +734,9 @@ test("a delayed wallet lookup preserves the merchant's unverified plan label", a
     () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
   );
   await expect(permission.locator(".delegate strong")).toHaveText("Merchant's own name");
-  await expect(permission.getByText("Plan name set by the merchant", { exact: true })).toBeVisible();
+  await expect(
+    permission.getByText("Plan name set by the merchant · identity unverified", { exact: true }),
+  ).toBeVisible();
   await expect(permission.locator(".delegate")).toHaveAttribute("title", /not verified/);
 });
 
@@ -724,20 +751,24 @@ test("incomplete address history never claims the current subscription has no pa
   await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
   const permission = card(page, derived.id);
   await expect(permission.locator(".last-charge")).toHaveText("No charges found in available history");
-  await permission.getByRole("button", { name: /^(Technical details|Details)$/ }).click();
+  await expect(permission.locator(".history-coverage")).toBeVisible();
+  await expect(permission.locator(".history-coverage")).toContainText("permission link unresolved");
+  await permission.getByRole("button", { name: "View payment history" }).click();
   await expect(permission).toContainText("This address may have been reused");
+  await expect(permission.locator(".charges")).toContainText("does not establish that no payments occurred");
   await expect(permission).not.toContainText("No charges yet");
   await expect(permission).not.toContainText("No charges or changes yet");
 });
 
 test("historical transfers retain their own mint and unresolved attribution under evidence", async ({
   page,
-}) => {
+}, info) => {
   await browserProvider(page, "success", "active");
   await page.route("**/api/live/history", (route) =>
     route.fulfill({
       json: {
         complete: false,
+        collectionError: true,
         events: [
           {
             kind: "pull",
@@ -748,6 +779,22 @@ test("historical transfers retain their own mint and unresolved attribution unde
             time: "1800000000",
             attribution: { status: "unresolved", incarnation: null },
           },
+          {
+            kind: "pull",
+            amount: "2500000",
+            mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            puller: technical.principal.value,
+            receiver: EVENT_AUTHORITY,
+            receiverTokenAccount: fixture.signing.source,
+            merchant: "Verified Store",
+            signature: "another-history-signature",
+            time: "1800000000",
+            slot: "11",
+            outer: 2,
+            inner: 1,
+            transaction_index: 3,
+            finality: "finalized_rpc",
+          },
         ],
         gaps: [],
       },
@@ -757,17 +804,52 @@ test("historical transfers retain their own mint and unresolved attribution unde
   await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
   const permission = card(page, derived.id);
   await expect(permission.locator(".last-charge")).toContainText("Address activity on");
+  await expect(permission.locator(".history-coverage")).toContainText("Refresh unavailable");
   await permission.getByRole("button", { name: /^(Technical details|Details)$/ }).click();
   await expect(permission).toContainText("18446744073709551615 base units");
   await expect(permission).toContainText("initiator unknown");
+  const payment = permission.locator(".activity-entry").nth(1);
+  await expect(payment.locator(".activity-amount")).toHaveText("2.5 USDC");
+  await expect(payment.locator(".field").filter({ hasText: "Received by" })).toContainText(EVENT_AUTHORITY);
+  await expect(payment.locator(".field").filter({ hasText: "Initiated by (puller)" })).toContainText(
+    technical.principal.value,
+  );
+  await expect(payment.locator(".field").filter({ hasText: "Receiver token account" })).toContainText(
+    fixture.signing.source,
+  );
+  await expect(payment).toContainText("merchant identity unknown");
+  await expect(payment).not.toContainText("Verified Store");
+  await payment.getByText("Transaction evidence", { exact: true }).click();
+  await expect(payment).toContainText("Finalized transaction evidence retained");
+  await expect(payment).toContainText("2 / inner 1");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({
+    path: `test-results/${info.project.name}-subscription-activity.png`,
+    fullPage: true,
+  });
   await permission.getByText("Historical transaction evidence", { exact: true }).click();
   await expect(permission.locator(".charges pre")).toContainText('"incarnation": null');
   await expect(permission.locator(".charges pre")).toContainText(PLAN);
 });
 
+for (const status of [404, 502]) {
+  test(`unavailable payment history (${status}) stays visible instead of looking empty`, async ({ page }) => {
+    await browserProvider(page, "success", "active");
+    await page.route("**/api/live/history", (route) => route.fulfill({ status }));
+    await page.goto("/app");
+    await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+    const permission = card(page, derived.id);
+    await expect(permission.locator(".last-charge")).toHaveText("Payment history unavailable");
+    await permission.getByRole("button", { name: "View payment history" }).click();
+    await expect(permission.locator(".charges")).toContainText(
+      "does not establish that no payments occurred",
+    );
+  });
+}
+
 test("a running subscription is cancelled, proved, and keeps its grant only until the paid period ends", async ({
   page,
-}) => {
+}, info) => {
   const provider = await browserProvider(page, "cancel", "active");
   await page.goto("/app");
   await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
@@ -777,15 +859,48 @@ test("a running subscription is cancelled, proved, and keeps its grant only unti
   await expect(page.getByRole("dialog")).not.toContainText("changed approval may be cleared");
   await expect(page.getByRole("dialog")).toContainText("It can still charge until");
   await expect(page.getByRole("dialog")).toContainText("After that it can't charge again");
+  await expect(page.getByRole("dialog")).toContainText("token approval held by Solana Subscriptions stays");
+  const reviewedChange = await page.getByRole("dialog").innerText();
+  await page.screenshot({
+    path: `test-results/${info.project.name}-subscription-review.png`,
+    fullPage: true,
+  });
   await page.getByRole("button", { name: "Confirm in wallet" }).click();
+  await expect(page.locator("#action-result")).toContainText("This is not finalized proof");
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("velon:receipts") ?? "[]"))).toEqual([]);
   await expect(page.getByRole("heading", { name: "Cancelled and verified", exact: true })).toBeVisible();
   await expect(page.locator("#action-result")).toContainText("stops charging after");
   await expect(page.locator("#action-result")).toContainText("e".repeat(64));
+  await expect(page.getByRole("link", { name: "View verification evidence" })).toHaveAttribute(
+    "href",
+    `/api/verifications/revoke/${"e".repeat(64)}`,
+  );
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("velon:receipts")!)[0]);
+  expect(typeof saved.endsAt).toBe("string");
+  expect(reviewedChange).toContain(saved.endsAt);
+  await expect(page.locator("#action-result")).toContainText(saved.endsAt);
   // The subscription stays listed, now with its end; the receipt says what it proves.
   await expect(card(page, derived.id)).toHaveCount(1);
   expect(provider.counts()).toEqual({ sends: 1, polls: 2, observes: 1 });
   await page.getByRole("button", { name: "See receipts" }).click();
   await expect(page.getByRole("heading", { name: "Subscription cancelled on devnet" })).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "Receipts", exact: true }).click();
+  await expect(page.locator("#receipts")).toContainText(saved.endsAt);
+  await expect(page.locator("#receipts")).toContainText("Browser storage is not proof");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({
+    path: `test-results/${info.project.name}-subscription-receipt.png`,
+    fullPage: true,
+  });
+  await page.evaluate(() => {
+    const receipts = JSON.parse(localStorage.getItem("velon:receipts")!);
+    delete receipts[0].endsAt;
+    localStorage.setItem("velon:receipts", JSON.stringify(receipts));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Receipts", exact: true }).click();
+  await expect(page.locator("#receipts")).toContainText("Not saved in this older receipt");
 });
 
 test("a subscription simulation that changes the grant instead of removing it is refused", async ({
