@@ -669,6 +669,7 @@ function card(
   const merchant = planNames.get(revokeKey(grant) ?? "");
   if (merchant && object(grant.authority_kind).kind === "derived") {
     const line = row.querySelector(".delegate");
+    line?.classList.add("merchant-label");
     line?.querySelector("strong")?.replaceChildren(merchant);
     line?.querySelector(".muted")?.replaceChildren("Plan name set by the merchant · identity unverified");
     line?.setAttribute("title", `${merchant}: plan name set by the merchant, not verified`);
@@ -1891,6 +1892,7 @@ async function scanWallet(
   prefetched?: ObjectValue,
 ): Promise<boolean | undefined> {
   if (!owner) return false;
+  document.body.classList.remove("first-screen");
   const yours = owner === connected?.account.address;
   request?.abort();
   request = new AbortController();
