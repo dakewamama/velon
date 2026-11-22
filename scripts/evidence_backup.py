@@ -1,6 +1,7 @@
 """Coherent SQLite backup and non-overwriting restore. No service credentials needed."""
 
 import argparse
+from contextlib import closing
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -20,7 +21,10 @@ def digest(path):
 
 
 def check(database):
-    with sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True) as connection:
+    # sqlite3.Connection's context manager commits/rolls back; it does not close.
+    # In particular, a checked restore candidate must be closed before linking its
+    # inode under the destination name, whose WAL/SHM filenames are different.
+    with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
         if connection.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
             raise ValueError("SQLite integrity check failed")
         if connection.execute("PRAGMA foreign_key_check").fetchall():
@@ -42,10 +46,10 @@ def sync(path):
 def backup(source, destination):
     source, destination = Path(source), Path(destination)
     # mode=ro prevents a mistyped source path from creating an empty database.
-    with sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True) as original:
+    with closing(sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True)) as original:
         destination.mkdir(mode=0o700)  # Existing artifacts are never overwritten.
         database = destination / "evidence.sqlite"
-        with sqlite3.connect(database) as target:
+        with closing(sqlite3.connect(database)) as target:
             original.backup(target)
     migrations = check(database)
     manifest = {
