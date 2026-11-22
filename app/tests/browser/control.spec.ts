@@ -443,6 +443,10 @@ test("an empty wallet check keeps coverage limits visible and does not certify S
   await page.goto("/app");
   await expect(page.locator(".start-lead")).toContainText("Check supported token approvals");
   await expect(page.locator(".start-lead")).not.toContainText("Every token approval");
+  await page.getByRole("button", { name: "Connect wallet", exact: true }).click();
+  await expect(page.locator(".wallet-summary")).toBeVisible();
+  await expect(page.locator("body")).not.toHaveClass(/first-screen/);
+  await expect(page.locator(".lookup-title")).not.toBeVisible();
   await page.locator("#lookup-address").fill(fixture.signing.source);
   await page.locator("#lookup button").click();
   await expect(page.locator(".wallet-summary")).toContainText("this isn't an all-clear");
@@ -737,6 +741,7 @@ test("a delayed wallet lookup preserves the merchant's unverified plan label", a
   await expect(
     permission.getByText("Plan name set by the merchant · identity unverified", { exact: true }),
   ).toBeVisible();
+  await expect(permission.locator(".delegate .muted")).toHaveCSS("white-space", "normal");
   await expect(permission.locator(".delegate")).toHaveAttribute("title", /not verified/);
 });
 
