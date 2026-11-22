@@ -1037,6 +1037,62 @@ pre {
 .technical .record > dl {
   margin-top: 12px;
 }
+.permission-overview h4,
+.subscription-control h4 {
+  margin: 0 0 10px;
+  color: var(--t1);
+  font-size: 15px;
+}
+.permission-overview .plain-facts {
+  margin-top: 18px;
+}
+.subscription-control {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--hair);
+}
+.payment-preview {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hair);
+  white-space: normal;
+  font-family: var(--sans);
+}
+.permission.compact > .payment-preview {
+  grid-column: 1 / -1;
+}
+.history-coverage {
+  color: var(--amber);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.history-link {
+  margin-left: auto;
+  padding: 0;
+  font-size: 12px;
+}
+.history-notice {
+  padding: 12px 14px;
+  border-left: 2px solid var(--amber);
+  border-radius: 0 var(--r-s) var(--r-s) 0;
+  background: var(--amber-wash);
+  color: var(--t2);
+  font-size: 13px;
+}
+.receipt-intro {
+  max-width: 65ch;
+  margin-bottom: 20px;
+  color: var(--t2);
+}
+.receipt-status {
+  display: inline-block;
+  margin-bottom: 12px;
+  color: var(--t3);
+  font-size: 12px;
+}
 
 /* Charges: dated lines, newest first. */
 .charges {
@@ -1051,20 +1107,37 @@ pre {
 }
 .charges ol {
   display: grid;
-  gap: 0;
+  gap: 12px;
   margin: 0 0 10px;
   padding: 0;
   list-style: none;
 }
 .charges li {
-  display: grid;
-  grid-template-columns: 9.5em minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: 12px;
-  padding: 8px 0;
-  border-top: 1px solid var(--hair);
+  padding: 16px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-m);
+  background: var(--s1);
   color: var(--t2);
   font-size: 13.5px;
+}
+.activity-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.activity-amount {
+  color: var(--t1);
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.charges .activity-facts {
+  margin: 16px 0;
+}
+.activity-facts:empty {
+  display: none;
 }
 .charge-date {
   color: var(--t3);
@@ -1628,7 +1701,7 @@ dd {
   font-size: 16px;
 }
 .try .button:hover:not(:disabled) {
-  background: #fff;
+  background: #6ee9bb;
 }
 .try .text-link {
   color: #fff;
