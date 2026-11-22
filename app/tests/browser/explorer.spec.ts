@@ -29,7 +29,8 @@ test("native subscriptions scan, evidence and state comparison", async ({ page }
     .locator("article")
     .filter({ has: page.getByRole("heading", { name: /could charge up to 100/ }) });
   await expect(spending.locator(".availability")).toHaveText("Earlier state");
-  await spending.getByRole("button", { name: "Technical details" }).click();
+  await spending.getByRole("button", { name: "Details", exact: true }).click();
+  await spending.getByText("Verification evidence", { exact: true }).click();
   await expect(spending.locator(".field", { hasText: "Left when Velon read it" })).toContainText(
     "40 base units",
   );
@@ -41,7 +42,7 @@ test("native subscriptions scan, evidence and state comparison", async ({ page }
     page
       .locator(".technical details")
       .filter({ has: page.getByText("Exact ARM authorization", { exact: true }) })
-      .locator("pre"),
+      .locator(":scope > pre"),
   ).toContainText('"remaining": 40');
   await page.screenshot({ path: `test-results/${info.project.name}-detail.png`, fullPage: true });
   await page.getByRole("button", { name: "What changed", exact: true }).click();
